@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/.vs/
+/out/
+*.user
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.zip
+/local-save/

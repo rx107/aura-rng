@@ -1,0 +1,41 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Core tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: DirectX WARP smoke test
+        shell: pwsh
+        run: |
+          $testRoot = Join-Path $env:RUNNER_TEMP 'aura-smoke'
+          New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
+          $arguments = @('--smoke-test', '--warp', '--seed=42', "--save-dir=$testRoot/save", "--capture=$testRoot/preview.png", "--report=$testRoot/report.txt")
+          $process = Start-Process -FilePath build/Release/AuraRng.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'DirectX smoke test timed out' }
+          if (Test-Path "$testRoot/report.txt") { Get-Content "$testRoot/report.txt" }
+          if ($process.ExitCode -ne 0) { throw "DirectX smoke test failed: $($process.ExitCode)" }
+      - name: Package
+        run: cmake --install build --config Release --prefix package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AuraRng-windows-x64
+          path: package/
+  core-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
