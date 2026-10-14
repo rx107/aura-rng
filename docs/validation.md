@@ -19,7 +19,7 @@
 
 | 条件 | 結果 |
 | --- | --- |
-| ゲームEXE | 435,712バイト（約426KiB、静的VC++ランタイム） |
+| ゲームEXE | 436,224バイト（約426KiB、静的VC++ランタイム） |
 | NVIDIA GeForce RTX 3050 6GB Laptop GPU | フレーム送信時間平均 約1.90ms |
 | Microsoft Basic Render Driver / WARP | フレーム送信時間平均 約3.29ms |
 | 3D描画 | 1 draw call / Verdant装備時355インスタンス |
