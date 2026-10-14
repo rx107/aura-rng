@@ -170,7 +170,10 @@ private:
     int smoke() {
         const auto startingRolls=progress_.rolls;
         // Exercise the actual window input path, cooldown, auto toggle and resizing.
-        SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(670,780)); update(.01f);
+        RECT client{}; GetClientRect(window_,&client);
+        const int buttonX=client.right/2;
+        const int buttonY=static_cast<int>(client.bottom-115.f*renderer_->scale());
+        SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(buttonX,buttonY)); update(.01f);
         if(progress_.rolls!=startingRolls+1) throw std::runtime_error("Manual roll smoke check failed");
         SendMessageW(window_,WM_KEYDOWN,VK_SPACE,0); update(.01f);
         if(progress_.rolls!=startingRolls+1) throw std::runtime_error("Cooldown smoke check failed");
