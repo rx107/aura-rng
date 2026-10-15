@@ -27,6 +27,7 @@ struct Frame {
     std::string notice;
     std::string musicStatus;
     float cameraPitch{.52f};
+    float movement{};
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
@@ -40,7 +41,10 @@ public:
     Hit hit(float pixelX, float pixelY, const Frame& frame) const;
     int region(float pixelX, float pixelY) const; // 1=collection, 2=log, 0=world
     std::string adapterName() const { return adapterName_; }
-    std::size_t instanceCount() const { return instances_.size(); }
+    std::size_t instanceCount() const { return instances_.size()+starInstances_.size(); }
+    std::size_t starCount() const { return starInstances_.size(); }
+    bool blackHoleVisible() const { return holeVisible_; }
+    DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
     float scale() const { return scale_; }
     bool handleMessage(HWND window, UINT message, WPARAM wp, LPARAM lp) noexcept;
     bool wantsKeyboard() const;
@@ -59,6 +63,9 @@ private:
     struct Instance { DirectX::XMFLOAT4X4 world; DirectX::XMFLOAT4 color; };
     void createTargets();
     void createPipeline();
+    void createEffects();
+    void drawEffects(const Frame& frame);
+    void particleStar(float x,float y,float z,float size,Color color,float rotation,const Frame& frame);
     void box(float x, float y, float z, float sx, float sy, float sz, Color color, float rotation = 0, float glow = 0);
     void world(const Frame& frame);
     void updateVrm(const Frame& frame);
@@ -70,8 +77,8 @@ private:
     void cooldown(float x, float y, float width, float remaining);
     void rect(float x, float y, float w, float h, D2D1_COLOR_F c, float radius = 0);
     void stroke(float x, float y, float w, float h, D2D1_COLOR_F c, float radius = 0);
-    void text(const std::wstring& value, float x, float y, float w, float h, float size, D2D1_COLOR_F color, bool bold = false);
-    void label(const std::string& value, float x, float y, float w, float h, float size, D2D1_COLOR_F color, bool bold = false);
+    void text(const std::wstring& value, float x, float y, float w, float h, float size, D2D1_COLOR_F color, bool bold = false,bool center=false);
+    void label(const std::string& value, float x, float y, float w, float h, float size, D2D1_COLOR_F color, bool bold = false,bool center=false);
     HWND window_{};
     bool warp_{};
     unsigned width_{}, height_{};
@@ -84,6 +91,7 @@ private:
     ComPtr<ID3D11DepthStencilView> depth_;
     ComPtr<ID3D11VertexShader> vs_;
     ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11PixelShader> holePs_;
     ComPtr<ID3D11InputLayout> layout_;
     ComPtr<ID3D11Buffer> vertices_, indices_, instanceBuffer_, constants_;
     ComPtr<ID3D11RasterizerState> raster_;
@@ -97,6 +105,14 @@ private:
     struct Font { float size; bool bold; ComPtr<IDWriteTextFormat> format; };
     std::vector<Font> fonts_;
     std::vector<Instance> instances_;
+    std::vector<Instance> starInstances_;
+    ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
+    ComPtr<ID3D11BlendState> effectBlend_;
+    ComPtr<ID3D11DepthStencilState> effectDepth_;
+    UINT starIndexCount_{};
+    bool holeVisible_{},nameplateVisible_{};
+    Instance blackHole_;
+    DirectX::XMFLOAT2 nameplate_{};
     ImGuiContext* imguiContext_{};
     bool win32Backend_{}, dx11Backend_{}, debugOpen_{}, japaneseFont_{};
     DebugActions debugActions_;

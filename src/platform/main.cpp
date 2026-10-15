@@ -85,7 +85,7 @@ public:
             else if(notice_=="Settings could not be saved.") notice="言語と服の色の設定を保存できませんでした。";
         }
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
-            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,music_.status(),pitch_};
+            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,music_.status(),pitch_,movement_};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -151,7 +151,7 @@ private:
         }
         case aura::Action::Equip:
             if(hit.index<progress_.counts.size() && progress_.counts[hit.index]) {
-                progress_.equipped=hit.index; presentation_.preview.reset(); persist();
+                progress_.equipped=hit.index; presentation_.preview.reset(); presentation_.singularityLevel.reset(); persist();
             }
             break;
         case aura::Action::Debug:
@@ -162,7 +162,13 @@ private:
     }
     void applyDebugActions(const aura::DebugActions& commands) {
         if(commands.preview) presentation_.showPreview(*commands.preview,roller_.catalog().size(),auto_);
-        if(commands.restore) presentation_.preview.reset();
+        if(commands.restore) {presentation_.preview.reset(); presentation_.singularityLevel.reset();}
+        if(commands.auraLevel) {
+            presentation_.singularityLevel=std::min(3u,*commands.auraLevel);
+            const auto& catalog=roller_.catalog();
+            for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id=="singularity") presentation_.showPreview(i,catalog.size(),auto_);
+        }
+        if(commands.actualLevel) presentation_.singularityLevel.reset();
         if(commands.roll) roll();
         if(commands.toggleAuto) auto_=!auto_;
         if(commands.language) presentation_.settings.language=*commands.language;
@@ -183,7 +189,9 @@ private:
         if(pending_) { action(*pending_); pending_.reset(); }
         if(auto_ && cooldown_<=0) roll();
         const auto& s=presentation_.settings;
-        music_.update(std::filesystem::path(aura::widen(s.bgmPath)),roller_.catalog()[presentation_.shown(progress_)].id=="singularity",s.volume,dt);
+        const auto bgm=s.bgmPath.empty()?root_/L"data"/L"audio"/L"Tides_of_the_Outer_Reach.mp3":std::filesystem::path(aura::widen(s.bgmPath));
+        music_.update(bgm,roller_.catalog()[presentation_.shown(progress_)].id=="singularity",s.volume,dt);
+        bool moving=false;
         if((foreground_ || opts_.smoke) && !renderer_->wantsKeyboard()) {
             float mx=0,mz=0;
             if(keys_['W'] || keys_[VK_UP]) mz+=1;
@@ -194,10 +202,14 @@ private:
                 const float length=std::sqrt(mx*mx+mz*mz); mx/=length; mz/=length;
                 const float dx=mx*std::cos(yaw_)-mz*std::sin(yaw_);
                 const float dz=mx*std::sin(yaw_)+mz*std::cos(yaw_);
-                x_=std::clamp(x_+dx*dt*3.f,-6.8f,6.8f); z_=std::clamp(z_+dz*dt*3.f,-6.8f,6.8f);
+                const float beforeX=x_,beforeZ=z_;
+                x_=std::clamp(x_+dx*dt*3.f,-aura::StageWalkLimit,aura::StageWalkLimit); z_=std::clamp(z_+dz*dt*3.f,-aura::StageWalkLimit,aura::StageWalkLimit);
+                moving=std::abs(x_-beforeX)+std::abs(z_-beforeZ)>.0001f;
                 facing_=std::atan2(-dx,-dz); walk_+=dt*3;
-            } else walk_=0;
+            }
         }
+        const float target=moving?1.f:0.f;
+        movement_+=std::clamp(target-movement_,-dt*8,dt*8);
     }
     void render(bool present) {
         try {
@@ -234,6 +246,9 @@ private:
         SendMessageW(window_,WM_KEYUP,'F',0);
         SendMessageW(window_,WM_KEYDOWN,'W',0); update(.2f); SendMessageW(window_,WM_KEYUP,'W',0);
         if(std::abs(x_)+std::abs(z_)<.1f) throw std::runtime_error("Movement smoke check failed");
+        x_=12; z_=0; SendMessageW(window_,WM_KEYDOWN,'D',0); update(.2f); SendMessageW(window_,WM_KEYUP,'D',0);
+        if(x_<12) throw std::runtime_error("Expanded stage still uses the old movement boundary");
+        x_=z_=0;
         auto checkOrbit=[&] {
             const float yawBefore=yaw_,pitchBefore=pitch_;
             SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(540,340));
@@ -308,10 +323,17 @@ private:
         world.biome=aura::Biome::Normal; applyDebugActions(world); render(false);
         world.biome=aura::Biome::Desert; world.luck=1; applyDebugActions(world);
         previewCommand.preview=roller_.catalog().size()-1; applyDebugActions(previewCommand); update(.4f); render(false); captureExtra(L"-space");
+        for(unsigned level=0;level<=3;++level) {
+            aura::DebugActions effect; effect.auraLevel=level; auto_=true; applyDebugActions(effect); render(false);
+            if(auto_ || presentation_.level(progress_,roller_.catalog())!=level ||
+                (renderer_->starCount()>0)!=(level>0) || renderer_->blackHoleVisible()!=(level>=2)) throw std::runtime_error("Aura Level effect switch failed");
+            const auto suffix=L"-level"+std::to_wstring(level); captureExtra(suffix.c_str());
+        }
         if(!opts_.bgm.empty()) {
             if(!music_.playing() || !music_.decodedBytes()) throw std::runtime_error("BGM playback failed: "+music_.status());
             aura::DebugActions common; common.preview=0; applyDebugActions(common); update(.6f);
             if(music_.playing()) throw std::runtime_error("BGM did not stop after leaving Singularity");
+            aura::DebugActions bundled; bundled.bgmPath=std::string{}; applyDebugActions(bundled);
             applyDebugActions(previewCommand); update(.4f);
             if(!music_.playing()) throw std::runtime_error("BGM did not restart on Singularity");
         }
@@ -320,8 +342,23 @@ private:
             const auto deadline=Clock::now()+std::chrono::seconds(45);
             do {render(false); Sleep(10);} while(!renderer_->vrmReady() && Clock::now()<deadline && renderer_->vrmLoading());
             if(!renderer_->vrmReady() || renderer_->vrmVertices()==0) throw std::runtime_error("VRM import failed: "+renderer_->vrmStatus());
-            distance_=7; pitch_=.20f; yaw_=.15f;
+            aura::DebugActions common; common.preview=0; applyDebugActions(common);
+            movement_=0; walk_=0; distance_=7; pitch_=.20f; yaw_=.15f;
             render(false); captureExtra(L"-vrm");
+            movement_=1; walk_=.5f; render(false); const auto kneeA=renderer_->vrmBone(4); captureExtra(L"-vrm-walk-a");
+            walk_=1.5f; render(false); const auto kneeB=renderer_->vrmBone(4); captureExtra(L"-vrm-walk-b");
+            if(!opts_.capture.empty() && renderer_->vrmVertices()>4) {
+                for(int i=0;i<24;++i) {
+                    time_=5+i*.07f; walk_=i*.21f; render(false);
+                    const auto suffix=L"-walk-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+                }
+            }
+            if(renderer_->vrmVertices()>4 && std::abs(kneeA.z-kneeB.z)<.01f) throw std::runtime_error("VRM walking did not animate leg bones");
+            aura::DebugActions space; space.auraLevel=3; applyDebugActions(space); distance_=12; pitch_=.32f;
+            walk_=0; movement_=0; render(false); const auto fixedA=renderer_->vrmBone(4); captureExtra(L"-vrm-space");
+            movement_=1; walk_=2; render(false); const auto fixedB=renderer_->vrmBone(4);
+            if(std::abs(fixedA.x-fixedB.x)+std::abs(fixedA.y-fixedB.y)+std::abs(fixedA.z-fixedB.z)>.00001f)
+                throw std::runtime_error("Moving changed the fixed VRM pose");
             const auto vrmBegin=Clock::now();
             for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
             vrmFrameMs=std::chrono::duration<double,std::milli>(Clock::now()-vrmBegin).count()/60;
@@ -346,9 +383,10 @@ private:
                <<"Adapter: "<<renderer_->adapterName()<<"\nResolution: 1440x900\nBlock world draw calls: 1\nFinal instances: "
                <<renderer_->instanceCount()<<"\nMean frame submission time: "<<seconds/60*1000
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
+            out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: 64 x 64 world units / four times each original dimension\n";
             if(!opts_.vrm.empty()) out<<"VRM: PASS / "<<renderer_->vrmVertices()<<" vertices / "<<renderer_->vrmDraws()<<" additional draw calls / "<<vrmFrameMs
-                <<" ms/frame submission / textured rendering, block switch, reload and missing-file fallback\n";
-            if(!opts_.bgm.empty()) out<<"BGM: PASS / "<<music_.decodedBytes()<<" decoded PCM bytes / loop, stop and restart\n";
+                <<" ms/frame submission / standing, walking, fixed pose during movement, textures, reload and missing-file fallback\n";
+            if(!opts_.bgm.empty()) out<<"BGM: PASS / "<<music_.decodedBytes()<<" decoded PCM bytes / supplied and bundled tracks, loop, stop and restart\n";
             if(!out) throw std::runtime_error("Cannot write smoke report");
         }
         return 0;
@@ -421,7 +459,7 @@ private:
             const int region=app->renderer_?app->renderer_->region(static_cast<float>(p.x),static_cast<float>(p.y)):0;
             if(region==1) app->collectionScroll_=std::clamp(app->collectionScroll_-delta,0,static_cast<int>(app->roller_.catalog().size())-1);
             else if(region==2) app->logScroll_=std::clamp(app->logScroll_-delta,0,std::max(0,static_cast<int>(app->log_.size())-1));
-            else app->distance_=std::clamp(app->distance_-delta*.6f,6.f,17.f);
+            else app->distance_=std::clamp(app->distance_-delta*.6f,6.f,34.f);
             return 0;
         }
         default: return DefWindowProcW(window,message,wp,lp);
@@ -436,6 +474,7 @@ private:
     unsigned pendingWidth_{},pendingHeight_{},fpsFrames_{};
     int collectionScroll_{},logScroll_{},lastMouseX_{},lastMouseY_{};
     float pitch_{.52f};
+    float movement_{};
     float time_{},cooldown_{},x_{},z_{},facing_{},walk_{},yaw_{.45f},distance_{11},mouseX_{-1},mouseY_{-1},fps_{};
     std::string notice_;
     Clock::time_point last_{},fpsStart_{Clock::now()},lastBackground_{};

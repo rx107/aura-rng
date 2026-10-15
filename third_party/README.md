@@ -22,6 +22,8 @@ Vendored from https://github.com/nlohmann/json at **v3.12.0**.
 The MIT license is preserved in `nlohmann/LICENSE.MIT` and included in binary packages.
 Used to read VRM extension metadata. No dependency downloads occur during builds.
 
-VRM models and audio tracks are selected locally by the player. They are not
-bundled with the program or uploaded by it. `tests/make_vrm_fixture.py` generates
-an original four-vertex test card with a two-color texture for automated tests.
+VRM models are selected locally and are not redistributed. The bundled track
+`data/audio/Tides_of_the_Outer_Reach.mp3` is shared with its author's permission.
+The program does not upload local files. `tests/make_vrm_fixture.py` generates
+an original 24-vertex, 10-joint test figure with a two-color texture and humanoid
+bone mapping for GPU skinning and animation tests.

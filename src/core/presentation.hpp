@@ -24,11 +24,15 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings);
 struct Presentation {
     Settings settings;
     std::optional<std::size_t> preview;
+    std::optional<unsigned> singularityLevel;
     std::size_t shown(const Progress& progress) const { return preview.value_or(progress.equipped); }
+    unsigned level(const Progress& progress,const std::vector<Definition>& catalog) const;
     void showPreview(std::size_t index, std::size_t catalogSize, bool& autoRoll);
 };
 struct DebugActions {
     bool roll{}, toggleAuto{}, restore{};
+    bool actualLevel{};
+    std::optional<unsigned> auraLevel;
     std::optional<std::size_t> preview;
     std::optional<Language> language;
     std::optional<Color> shirt;
@@ -39,6 +43,8 @@ struct DebugActions {
     std::optional<float> volume;
 };
 inline constexpr float RollCooldown = 1.4f;
+inline constexpr float StageHalfExtent = 32.f;
+inline constexpr float StageWalkLimit = StageHalfExtent-1.2f;
 struct CooldownVisual { bool visible{}; float progress{}, opacity{}, waveY{}; };
 CooldownVisual cooldownVisual(float remaining);
 } // namespace aura

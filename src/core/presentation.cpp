@@ -15,7 +15,7 @@ namespace aura {
 std::string displayName(const Definition& d, Language language) {
     if (language == Language::English) return d.name;
     const std::pair<const char*, const char*> names[] = {
-        {"still", "コモン"}, {"glimmer", "アンコモン"}, {"ember", "残火"}, {"verdant", "翠緑"},
+        {"still", "コモン"}, {"glimmer", "アンコモン"}, {"ember", "残火"}, {"stardust", "星屑"}, {"verdant", "翠緑"},
         {"tidal", "潮流"}, {"amethyst", "アメジスト"}, {"solar", "太陽"}, {"aurora", "オーロラ"},
         {"astral", "星界"}, {"eventide", "宵闇"}, {"zenith", "天頂"}, {"singularity", "特異点"}};
     for (const auto& [id, name] : names) if (d.id == id) return name;
@@ -25,6 +25,11 @@ void Presentation::showPreview(std::size_t index, std::size_t catalogSize, bool&
     if (index >= catalogSize) throw std::out_of_range("Invalid preview aura");
     preview = index;
     autoRoll = false;
+}
+unsigned Presentation::level(const Progress& progress,const std::vector<Definition>& catalog) const {
+    const auto index=shown(progress);
+    if(catalog.at(index).id!="singularity") return 0;
+    return singularityLevel.value_or(progress.auraLevel(index,catalog));
 }
 namespace {
 void validate(const Settings& s) {

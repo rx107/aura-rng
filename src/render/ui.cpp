@@ -139,8 +139,8 @@ void Renderer::debugUi(const Frame& f) {
             }
             ImGui::TextWrapped("%s",f.presentation.settings.vrmPath.c_str());
             ImGui::TextWrapped("%s",vrmStatus_.c_str());
-            ImGui::TextWrapped("%s",t("VRM 0.x / 1.0, embedded textures, neutral pose. Block avatar is shown while loading or on import error.",
-                "VRM 0.x / 1.0の埋め込みテクスチャと標準ポーズを表示します。読み込み中やエラー時はブロックを表示します。"));
+            ImGui::TextWrapped("%s",t("VRM 0.x / 1.0: standing and walking animations. Fixed aura poses stay active while moving. Block avatar is shown on import error.",
+                "VRM 0.x / 1.0: 立ち姿と歩行に対応。固定ポーズがあるオーラは移動中も姿勢を保ちます。読み込み失敗時はブロックを表示します。"));
             ImGui::Separator();
             ImGui::TextUnformatted(t("BLOCK AVATAR / SHIRT","ブロックアバター / 服の色"));
             const auto shirt=f.presentation.settings.shirt;
@@ -148,7 +148,7 @@ void Renderer::debugUi(const Frame& f) {
             if (ImGui::ColorEdit3(t("Shirt color","服の色"),rgb,ImGuiColorEditFlags_Float|ImGuiColorEditFlags_PickerHueWheel))
                 debugActions_.shirt=Color{rgb[0],rgb[1],rgb[2]};
             if (ImGui::SmallButton(t("Reset shirt color","服の色をリセット"))) debugActions_.shirt=Settings{}.shirt;
-            ImGui::TextWrapped("%s",t("Singularity gives the block avatar a floating, zero-gravity pose.","Singularity表示時はブロックアバターが無重力のポーズになります。"));
+            ImGui::TextWrapped("%s",t("Singularity gives both avatars the same floating pose, including while moving.","Singularity表示時は両アバターが同じ無重力ポーズになり、移動中も維持します。"));
             ImGui::EndTabItem();
             }
             if(ImGui::BeginTabItem(t("Auras","オーラ"))) {
@@ -157,6 +157,15 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::TextWrapped("%s",t("Includes unowned auras. Preview stops AutoRoll and does not add inventory or history.",
                 "未所持のオーラも表示できます。選択時に自動ロールを停止し、所持数や履歴には追加しません。"));
             if (ImGui::Button(t("Restore Collection aura","コレクションの装備に戻す"),{-1,30})) debugActions_.restore=true;
+            ImGui::Separator();
+            unsigned actualLevel=0;
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="singularity") actualLevel=f.progress.auraLevel(i,f.roller.catalog());
+            int level=static_cast<int>(f.presentation.singularityLevel.value_or(actualLevel));
+            if(ImGui::SliderInt("Singularity / Aura Level",&level,0,3)) debugActions_.auraLevel=static_cast<unsigned>(level);
+            ImGui::Text(t("Collection level: %u / 3","所持分のレベル: %u / 3"),actualLevel);
+            if(ImGui::SmallButton(t("Use Collection level","所持数に応じたレベルへ戻す"))) debugActions_.actualLevel=true;
+            ImGui::TextWrapped("%s",t("0: original  /  1: stars  /  2: small black hole  /  3: large black hole absorbs stars. Debug level is temporary; no rolls are added.",
+                "0: 初期 / 1: 星 / 2: 小ブラックホール / 3: 大ブラックホールが星を吸収。デバッグ変更は一時的で、履歴には追加しません。"));
             if (ImGui::BeginChild("AuraPreviewList",{0,std::max(120.f,ImGui::GetContentRegionAvail().y-34)},ImGuiChildFlags_Borders)) {
                 const auto& catalog=f.roller.catalog();
                 for (std::size_t i=0;i<catalog.size();++i) {
@@ -174,11 +183,11 @@ void Renderer::debugUi(const Frame& f) {
             if(ImGui::BeginTabItem(t("Audio","音楽"))) {
                 ImGui::TextWrapped("%s",t("The selected track loops only while Singularity is displayed, including Debug Preview.","選択した曲はSingularity表示中のみループします。デバッグプレビューにも対応します。"));
                 if(ImGui::Button(t("Choose BGM...","BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.bgmPath=*path;
-                ImGui::TextWrapped("%s",f.presentation.settings.bgmPath.c_str());
+                ImGui::TextWrapped("%s",f.presentation.settings.bgmPath.empty()?t("Bundled: Tides of the Outer Reach","同梱BGM: Tides of the Outer Reach"):f.presentation.settings.bgmPath.c_str());
                 float volume=f.presentation.settings.volume;
                 if(ImGui::SliderFloat(t("Volume","音量"),&volume,0,1,"%.2f")) debugActions_.volume=volume;
                 ImGui::TextWrapped("%s",f.musicStatus.c_str());
-                if(ImGui::Button(t("Clear BGM selection","BGMの選択を解除"))) debugActions_.bgmPath=std::string{};
+                if(ImGui::Button(t("Use bundled BGM","同梱BGMを使用"))) debugActions_.bgmPath=std::string{};
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -278,7 +287,16 @@ void Renderer::ui(const Frame& f) {
     const float titleY=h-281;
     label(f.presentation.preview?t("DEBUG PREVIEW","デバッグプレビュー"):t("EQUIPPED AURA","装備中のオーラ"),276,titleY,300,20,10,Muted,true);
     label(name(shown),276,titleY+23,w-650,45,32,tint(equipped.color),true);
-    label(oddsLabel(defs,shown),276,titleY+67,w-650,25,12,Muted);
+    label(oddsLabel(defs,shown)+(equipped.id=="singularity"?"   /   Aura Level "+std::to_string(f.presentation.level(f.progress,defs))+" / 3":""),276,titleY+67,w-650,25,12,Muted);
+    if(nameplateVisible_) {
+        d2d_->PushAxisAlignedClip(D2D1::RectF(258,172,w-342,h-294),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        const float width=std::min(440.f,w-624),x=std::clamp(nameplate_.x-width*.5f,264.f,w-348-width),y=nameplate_.y;
+        label(name(shown),x+1,y+1,width,32,23,D2D1::ColorF(0,0,0,.8f),true,true);
+        label(name(shown),x,y,width,32,23,tint(equipped.color),true,true);
+        label(oddsInLabel(defs,shown),x,y+31,width,25,14,White,false,true);
+        if(equipped.id=="singularity") label("Aura Level "+std::to_string(f.presentation.level(f.progress,defs)),x,y+56,width,24,12,Mint,true,true);
+        d2d_->PopAxisAlignedClip();
+    }
     rect(right,96,290,h-280,Panel,14); stroke(right,96,290,h-280,Border,14);
     label(t("ROLL HISTORY","ロール履歴"),right+20,114,240,24,12,Muted,true);
     star(right+23,155,4,Mint); label(t("THIS SESSION / UTC","今回の起動中 / UTC"),right+35,147,220,20,10,Mint);

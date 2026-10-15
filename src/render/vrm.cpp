@@ -19,19 +19,24 @@
 #include <functional>
 #include <limits>
 #include <unordered_map>
+#include <cctype>
 
 namespace aura {
 using namespace DirectX;
 namespace {
 using Microsoft::WRL::ComPtr;
-struct Vertex { XMFLOAT3 p,n; XMFLOAT2 uv; };
-struct Constants { XMFLOAT4X4 vp,model; XMFLOAT4 color,options; };
+constexpr std::size_t MaxBones=512;
+struct Vertex { XMFLOAT3 p,n; XMFLOAT2 uv; std::array<UINT,4> joints{}; std::array<float,4> weights{1,0,0,0}; };
+struct Constants { XMFLOAT4X4 vp,model; XMFLOAT4 color,options; XMFLOAT4X4 bones[MaxBones]; };
 constexpr char Shader[]=R"(
-cbuffer Draw : register(b0) { row_major float4x4 vp; row_major float4x4 model; float4 color; float4 options; };
+cbuffer Draw : register(b0) { row_major float4x4 vp; row_major float4x4 model; float4 color; float4 options; row_major float4x4 bones[512]; };
 Texture2D image:register(t0); SamplerState sampleImage:register(s0);
-struct V { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; };
+struct V { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint4 joints:BLENDINDICES; float4 weights:BLENDWEIGHT; };
 struct O { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; };
-O vsMain(V v) { O o; o.p=mul(mul(float4(v.p,1),model),vp); o.n=mul(float4(v.n,0),model).xyz; o.uv=v.uv; return o; }
+O vsMain(V v) {
+ O o; row_major float4x4 skin=bones[v.joints.x]*v.weights.x+bones[v.joints.y]*v.weights.y+bones[v.joints.z]*v.weights.z+bones[v.joints.w]*v.weights.w;
+ o.p=mul(mul(mul(float4(v.p,1),skin),model),vp); o.n=mul(mul(float4(v.n,0),skin),model).xyz; o.uv=v.uv; return o;
+}
 float4 psMain(O i):SV_TARGET {
  float4 c=image.Sample(sampleImage,i.uv)*color;
  if(options.x>=0) clip(c.a-options.x);
@@ -49,6 +54,12 @@ std::vector<float> unpack(cgltf_accessor* a,std::size_t components) {
     if(cgltf_accessor_unpack_floats(a,values.data(),values.size())!=values.size()) throw std::runtime_error("Invalid VRM accessor");
     for(float v:values) if(!std::isfinite(v)) throw std::runtime_error("Nonfinite VRM geometry");
     return values;
+}
+std::string boneKey(const std::string& name) {
+    std::string key;
+    for(unsigned char c:name) if(std::isalnum(c)) key+=static_cast<char>(std::tolower(c));
+    while(!key.empty() && std::isdigit(static_cast<unsigned char>(key.back()))) key.pop_back();
+    return key;
 }
 ComPtr<ID3D11ShaderResourceView> texture(ID3D11Device* device,IWICImagingFactory* factory,cgltf_image* image) {
     std::vector<BYTE> pixels;
@@ -98,10 +109,11 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
         throw std::runtime_error("The selected GLB does not contain a VRM extension");
     auto result=std::make_unique<VrmAvatar>();
     const bool legacy=json["extensions"].contains("VRM");
+    result->legacy_=legacy;
     const auto& extension=json["extensions"][legacy?"VRM":"VRMC_vrm"];
     result->title=extension.value("meta",nlohmann::json::object()).value(legacy?"title":"name",std::string("VRM avatar"));
-    // Preserve the exported neutral pose, including garment skeletons and
-    // default expressions, and bake the skin into compact display geometry.
+    // Preserve all rest transforms; humanoid and cloned clothing bones receive
+    // the same procedural pose at render time.
     std::vector<XMFLOAT4X4> transforms(data->nodes_count);
     std::vector<unsigned char> state(data->nodes_count,0),active(data->nodes_count,0);
     std::function<void(cgltf_node*,int)> world=[&](cgltf_node* n,int depth) {
@@ -121,14 +133,52 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
     if(!data->scene) throw std::runtime_error("VRM has no default scene");
     for(std::size_t i=0;i<data->scene->nodes_count;++i) mark(data->scene->nodes[i],0);
     for(std::size_t i=0;i<data->nodes_count;++i) world(&data->nodes[i],0);
-    struct CpuMesh { std::vector<Vertex> vertices; std::vector<UINT> indices; cgltf_material* material; };
+    const char* roleNames[]={"leftUpperArm","rightUpperArm","leftUpperLeg","rightUpperLeg","leftLowerLeg","rightLowerLeg"};
+    std::unordered_map<std::string,int> roles; std::vector<int> directRoles(data->nodes_count,-1);
+    if(extension.contains("humanoid") && extension["humanoid"].contains("humanBones")) {
+        const auto& humanBones=extension["humanoid"]["humanBones"];
+        auto addRole=[&](const std::string& name,int index) {
+            if(index<0 || static_cast<std::size_t>(index)>=data->nodes_count) return;
+            for(int role=0;role<6;++role) if(name==roleNames[role]) {
+                directRoles[index]=role;
+                if(data->nodes[index].name) roles[boneKey(data->nodes[index].name)]=role;
+            }
+        };
+        if(legacy && humanBones.is_array()) for(const auto& b:humanBones) addRole(b.value("bone",std::string{}),b.value("node",-1));
+        if(!legacy && humanBones.is_object()) for(const auto& [name,b]:humanBones.items()) addRole(name,b.value("node",-1));
+    }
+    result->nodes_.resize(data->nodes_count); result->poseState_.resize(data->nodes_count);
+    for(std::size_t i=0;i<data->nodes_count;++i) {
+        const auto& source=data->nodes[i]; auto& node=result->nodes_[i];
+        cgltf_node_transform_local(&source,&node.local._11); node.rest=node.animated=transforms[i];
+        node.parent=source.parent?static_cast<int>(source.parent-data->nodes):-1;
+        const auto parent=node.parent<0?XMMatrixIdentity():XMLoadFloat4x4(&transforms[node.parent]);
+        XMStoreFloat4x4(&node.parentInverse,XMMatrixInverse(nullptr,parent));
+        node.role=directRoles[i];
+        if(node.role<0 && source.name) {auto it=roles.find(boneKey(source.name)); if(it!=roles.end()) node.role=it->second;}
+        node.side=node.rest._41<0?-1.f:1.f;
+    }
+    result->skins_.resize(data->skins_count);
+    for(std::size_t i=0;i<data->skins_count;++i) {
+        const auto& source=data->skins[i]; auto& skin=result->skins_[i];
+        if(source.joints_count>MaxBones) throw std::runtime_error("VRM skin exceeds 512 joints");
+        auto inverse=unpack(source.inverse_bind_matrices,16);
+        if(!inverse.empty() && inverse.size()!=source.joints_count*16) throw std::runtime_error("VRM inverse bind count mismatch");
+        skin.inverse.resize(source.joints_count);
+        for(std::size_t j=0;j<source.joints_count;++j) {
+            skin.joints.push_back(static_cast<std::size_t>(source.joints[j]-data->nodes));
+            if(inverse.empty()) XMStoreFloat4x4(&skin.inverse[j],XMMatrixIdentity());
+            else std::copy_n(inverse.data()+j*16,16,&skin.inverse[j]._11);
+        }
+    }
+    struct CpuMesh { std::vector<Vertex> vertices; std::vector<UINT> indices; cgltf_material* material; int skin; std::size_t node; };
     std::vector<CpuMesh> meshes;
     XMFLOAT3 lo{FLT_MAX,FLT_MAX,FLT_MAX},hi{-FLT_MAX,-FLT_MAX,-FLT_MAX};
     for(std::size_t ni=0;ni<data->nodes_count;++ni) {
         auto& node=data->nodes[ni]; if(!active[ni] || !node.mesh) continue;
         std::vector<XMFLOAT4X4> palette;
         if(node.skin) {
-            if(node.skin->joints_count>1024) throw std::runtime_error("VRM skin exceeds 1024 joints");
+            if(node.skin->joints_count>MaxBones) throw std::runtime_error("VRM skin exceeds 512 joints");
             auto inverse=unpack(node.skin->inverse_bind_matrices,16); palette.resize(node.skin->joints_count);
             if(!inverse.empty() && inverse.size()!=palette.size()*16) throw std::runtime_error("VRM inverse bind count mismatch");
             for(std::size_t j=0;j<palette.size();++j) {
@@ -163,6 +213,7 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
             }
             result->vertexCount_+=count; if(result->vertexCount_>2'000'000) throw std::runtime_error("VRM exceeds 2 million vertices");
             CpuMesh mesh; mesh.material=primitive.material; mesh.vertices.resize(count);
+            mesh.node=ni; mesh.skin=node.skin && !joints.empty()?static_cast<int>(node.skin-data->skins):-1;
             for(std::size_t v=0;v<count;++v) {
                 auto pos=XMVectorSet(p[v*3],p[v*3+1],p[v*3+2],1);
                 auto normal=normals.empty()?XMVectorSet(0,1,0,0):XMVectorSet(normals[v*3],normals[v*3+1],normals[v*3+2],0);
@@ -177,15 +228,16 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
                     if(total<=.00001f) throw std::runtime_error("Empty VRM skin weights");
                     matrix=matrix*(1.f/total);
                 }
-                auto& out=mesh.vertices[v]; XMStoreFloat3(&out.p,XMVector3TransformCoord(pos,matrix));
-                XMStoreFloat3(&out.n,XMVector3Normalize(XMVector3TransformNormal(normal,matrix)));
-                // glTF is right-handed; the game faces -Z in left-handed space.
-                out.p.z=-out.p.z; out.n.z=-out.n.z;
-                // VRM 0.x faces -Z; VRM 1.0 faces +Z in the source coordinate system.
-                if(legacy) {out.p.x=-out.p.x; out.p.z=-out.p.z; out.n.x=-out.n.x; out.n.z=-out.n.z;}
+                auto& out=mesh.vertices[v]; XMStoreFloat3(&out.p,pos); XMStoreFloat3(&out.n,normal);
+                if(mesh.skin>=0) {
+                    float total=0; for(int k=0;k<4;++k) total+=weights[v*4+k];
+                    for(int k=0;k<4;++k) {out.joints[k]=static_cast<UINT>(joints[v*4+k]); out.weights[k]=weights[v*4+k]/total;}
+                }
+                XMFLOAT3 bound; XMStoreFloat3(&bound,XMVector3TransformCoord(pos,matrix));
+                if(legacy) bound.x=-bound.x; else bound.z=-bound.z;
                 out.uv=uv.empty()?XMFLOAT2{}:XMFLOAT2{uv[v*2],uv[v*2+1]};
-                lo={std::min(lo.x,out.p.x),std::min(lo.y,out.p.y),std::min(lo.z,out.p.z)};
-                hi={std::max(hi.x,out.p.x),std::max(hi.y,out.p.y),std::max(hi.z,out.p.z)};
+                lo={std::min(lo.x,bound.x),std::min(lo.y,bound.y),std::min(lo.z,bound.z)};
+                hi={std::max(hi.x,bound.x),std::max(hi.y,bound.y),std::max(hi.z,bound.z)};
             }
             const auto indices=primitive.indices?primitive.indices->count:count;
             if(indices>6'000'000 || indices%3) throw std::runtime_error("Invalid VRM index count");
@@ -200,11 +252,13 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
     const float height=hi.y-lo.y;
     if(meshes.empty() || !std::isfinite(height) || height<.01f || height>10000) throw std::runtime_error("Invalid VRM bounds");
     const float scale=2.8f/height,centerX=(lo.x+hi.x)*.5f,centerZ=(lo.z+hi.z)*.5f;
+    XMStoreFloat4x4(&result->normalization_,XMMatrixScaling(legacy?-1.f:1.f,1,legacy?1.f:-1.f)*
+        XMMatrixTranslation(-centerX,-lo.y,-centerZ)*XMMatrixScaling(scale,scale,scale)*XMMatrixTranslation(0,.18f,0));
     ComPtr<IWICImagingFactory> factory; checked(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory)),"VRM WIC factory");
     std::unordered_map<cgltf_image*,ComPtr<ID3D11ShaderResourceView>> textures;
     for(auto& cpu:meshes) {
         Mesh gpu;
-        for(auto& v:cpu.vertices) { v.p.x=(v.p.x-centerX)*scale; v.p.y=(v.p.y-lo.y)*scale+.18f; v.p.z=(v.p.z-centerZ)*scale; }
+        gpu.skin=cpu.skin; gpu.node=cpu.node;
         auto buffer=[&](UINT length,UINT bind,const void* memory,ID3D11Buffer** out) {
             D3D11_BUFFER_DESC desc{}; desc.ByteWidth=length; desc.BindFlags=bind; desc.Usage=D3D11_USAGE_IMMUTABLE;
             D3D11_SUBRESOURCE_DATA initial{memory,0,0}; checked(device->CreateBuffer(&desc,&initial,out),"VRM mesh buffer");
@@ -232,8 +286,9 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
     checked(device->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&result->vs_),"VRM vertex shader");
     checked(device->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&result->ps_),"VRM pixel shader");
     const D3D11_INPUT_ELEMENT_DESC elements[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
-        {"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D11_INPUT_PER_VERTEX_DATA,0}};
-    checked(device->CreateInputLayout(elements,3,vs->GetBufferPointer(),vs->GetBufferSize(),&result->layout_),"VRM vertex layout");
+        {"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"BLENDINDICES",0,DXGI_FORMAT_R32G32B32A32_UINT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0},{"BLENDWEIGHT",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,48,D3D11_INPUT_PER_VERTEX_DATA,0}};
+    checked(device->CreateInputLayout(elements,5,vs->GetBufferPointer(),vs->GetBufferSize(),&result->layout_),"VRM vertex layout");
     D3D11_BUFFER_DESC cb{}; cb.ByteWidth=sizeof(Constants); cb.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     checked(device->CreateBuffer(&cb,nullptr,&result->constants_),"VRM draw constants");
     D3D11_SAMPLER_DESC sampler{}; sampler.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -251,14 +306,46 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
     checked(device->CreateDepthStencilState(&depth,&result->transparentDepth_),"VRM transparent depth state");
     return result;
 }
-void VrmAvatar::draw(ID3D11DeviceContext* c,FXMMATRIX vp,CXMMATRIX model) {
+void VrmAvatar::animate(const AvatarPose& pose) {
+    std::fill(poseState_.begin(),poseState_.end(),static_cast<unsigned char>(0));
+    const float pitchSign=legacy_?1.f:-1.f;
+    auto update=[&](auto&& self,std::size_t i)->void {
+        if(poseState_[i]) return;
+        auto& node=nodes_[i]; if(node.parent>=0) self(self,static_cast<std::size_t>(node.parent));
+        auto local=XMLoadFloat4x4(&node.local);
+        if(node.role>=0) {
+            float pitch=0,roll=0; const int side=(legacy_?-node.side:node.side)<0?0:1;
+            if(node.role<2) {pitch=pose.armPitch[side]*pitchSign; roll=-node.side*(XM_PIDIV2-pose.armOut[side]);}
+            else if(node.role<4) {pitch=pose.legPitch[side]*pitchSign; roll=node.side*pose.legOut[side];}
+            else pitch=pose.knee[side]*pitchSign;
+            const auto& rest=node.rest;
+            local=XMLoadFloat4x4(&rest)*XMMatrixTranslation(-rest._41,-rest._42,-rest._43)*
+                XMMatrixRotationZ(roll)*XMMatrixRotationX(pitch)*XMMatrixTranslation(rest._41,rest._42,rest._43)*XMLoadFloat4x4(&node.parentInverse);
+        }
+        XMStoreFloat4x4(&node.animated,local*(node.parent<0?XMMatrixIdentity():XMLoadFloat4x4(&nodes_[node.parent].animated)));
+        poseState_[i]=1;
+    };
+    for(std::size_t i=0;i<nodes_.size();++i) update(update,i);
+}
+XMFLOAT3 VrmAvatar::bonePosition(int role) const {
+    for(const auto& node:nodes_) if(node.role==role) return {node.animated._41,node.animated._42,node.animated._43};
+    return {};
+}
+void VrmAvatar::draw(ID3D11DeviceContext* c,FXMMATRIX vp,CXMMATRIX model,const AvatarPose& pose) {
+    animate(pose);
     c->IASetInputLayout(layout_.Get()); c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     c->VSSetShader(vs_.Get(),nullptr,0); c->PSSetShader(ps_.Get(),nullptr,0); c->RSSetState(raster_.Get());
     ID3D11Buffer* cb=constants_.Get(); c->VSSetConstantBuffers(0,1,&cb); c->PSSetConstantBuffers(0,1,&cb);
     ID3D11SamplerState* sampler=sampler_.Get(); c->PSSetSamplers(0,1,&sampler);
-    Constants constants; XMStoreFloat4x4(&constants.vp,vp); XMStoreFloat4x4(&constants.model,model);
+    Constants constants{}; XMStoreFloat4x4(&constants.vp,vp); XMStoreFloat4x4(&constants.model,XMLoadFloat4x4(&normalization_)*model);
     for(const auto& mesh:meshes_) {
         constants.color=mesh.color; constants.options={mesh.cutoff,mesh.blend?1.f:0.f,0,0};
+        if(mesh.skin<0) constants.bones[0]=nodes_[mesh.node].animated;
+        else {
+            const auto& skin=skins_[mesh.skin];
+            for(std::size_t j=0;j<skin.joints.size();++j) XMStoreFloat4x4(&constants.bones[j],
+                XMLoadFloat4x4(&skin.inverse[j])*XMLoadFloat4x4(&nodes_[skin.joints[j]].animated));
+        }
         c->UpdateSubresource(cb,0,nullptr,&constants,0,0);
         c->OMSetBlendState(mesh.blend?blend_.Get():nullptr,nullptr,0xffffffff);
         c->OMSetDepthStencilState(mesh.blend?transparentDepth_.Get():depth_.Get(),0);

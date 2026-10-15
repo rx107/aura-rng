@@ -167,6 +167,16 @@ void Progress::record(std::size_t index, const std::vector<Definition>& catalog)
     if (rolls == 1 || probabilityTickets(catalog, index) < probabilityTickets(catalog, best)) best = index;
     // Rolling changes inventory and statistics only. Collection owns equipment selection.
 }
+std::string oddsInLabel(const std::vector<Definition>& catalog,std::size_t index) {
+    auto label=oddsLabel(catalog,index);
+    const auto slash=label.find(" / ");
+    if(slash!=std::string::npos) label.replace(slash,3," in ");
+    return label;
+}
+unsigned Progress::auraLevel(std::size_t index,const std::vector<Definition>& catalog) const {
+    if(catalog.at(index).id!="singularity" || counts.at(index)==0) return 0;
+    return static_cast<unsigned>(std::min<std::uint64_t>(3,counts.at(index)-1));
+}
 std::size_t Progress::discovered() const {
     return static_cast<std::size_t>(std::count_if(counts.begin(), counts.end(), [](auto n) { return n != 0; }));
 }

@@ -21,6 +21,7 @@ std::string csvQuote(const std::string& value);
 std::string formatNumber(std::uint64_t value);
 std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index);
 std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index);
+std::string oddsInLabel(const std::vector<Definition>& catalog, std::size_t index);
 
 class Roller {
 public:
@@ -46,6 +47,7 @@ struct Progress {
     explicit Progress(std::size_t count) : counts(count, 0) {}
     void record(std::size_t index, const std::vector<Definition>& catalog);
     std::size_t discovered() const;
+    unsigned auraLevel(std::size_t index,const std::vector<Definition>& catalog) const;
 };
 void saveProgress(const std::filesystem::path& path, const Progress& progress,
                   const std::vector<Definition>& catalog);

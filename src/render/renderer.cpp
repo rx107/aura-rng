@@ -13,7 +13,7 @@
 namespace aura {
 using namespace DirectX;
 namespace {
-constexpr unsigned MaxInstances = 2048;
+constexpr unsigned MaxInstances = 4096;
 constexpr float Pi = 3.14159265359f;
 const D2D1_COLOR_F White = D2D1::ColorF(.91f, .95f, .98f);
 const D2D1_COLOR_F Muted = D2D1::ColorF(.48f, .57f, .65f);
@@ -25,18 +25,32 @@ bool inside(float x, float y, float rx, float ry, float w, float h) { return x >
 constexpr char Shader[] = R"(
 cbuffer Camera : register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; };
 struct Input { float3 p:POSITION; float3 n:NORMAL; float4 a:INSTANCE0; float4 b:INSTANCE1; float4 c:INSTANCE2; float4 d:INSTANCE3; float4 color:COLOR0; };
-struct Output { float4 p:SV_POSITION; float3 n:NORMAL; float4 color:COLOR0; float3 world:TEXCOORD0; };
+struct Output { float4 p:SV_POSITION; float3 n:NORMAL; float4 color:COLOR0; float3 world:TEXCOORD0; float3 local:TEXCOORD1; };
 Output vsMain(Input v) {
     Output o; row_major float4x4 model = float4x4(v.a,v.b,v.c,v.d);
     float4 world = mul(float4(v.p,1),model);
     o.p=mul(world,viewProjection); o.n=normalize(mul(float4(v.n,0),model).xyz);
-    o.color=v.color; o.world=world.xyz; return o;
+    o.color=v.color; o.world=world.xyz; o.local=v.p; return o;
 }
 float4 psMain(Output i):SV_TARGET {
     float diffuse=max(0,dot(normalize(i.n),normalize(float3(-.4,.85,-.5))));
     float3 color=i.color.rgb*(.43+.57*diffuse)+i.color.rgb*i.color.a*.55;
     float fog=saturate((distance(i.world,eyeAndTime.xyz)-17)/35);
     return float4(lerp(color,float3(.042,.069,.098),fog*.7),1);
+}
+float4 holeMain(Output i):SV_TARGET {
+    float2 q=i.local.xy*2; float r=length(q),angle=atan2(q.y,q.x);
+    float ellipse=length(q*float2(1,4.4));
+    float turbulence=.80+.20*sin(angle*17-eyeAndTime.w*2.8+r*24);
+    float disk=exp(-abs(ellipse-.82)*36)*turbulence;
+    float ring=exp(-abs(r-.43)*95);
+    float halo=exp(-abs(r-.46)*14)*.25;
+    float inside=1-smoothstep(.405,.425,r);
+    float3 hot=lerp(float3(1,.33,.09),float3(.96,.76,1),.5+.5*sin(angle*2+eyeAndTime.w*.4));
+    float3 color=hot*(disk*1.8+ring*1.9)+float3(.36,.10,.72)*halo;
+    color=lerp(color,float3(.002,.001,.008),inside);
+    float alpha=max(inside,saturate(disk+ring+halo));
+    clip(alpha-.012); return float4(color,alpha);
 })";
 }
 void checked(HRESULT hr, const char* operation) {
@@ -83,7 +97,7 @@ void Renderer::initialize(HWND window, bool warp) {
     checked(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER), "Window association");
     checked(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2dFactory_.GetAddressOf()), "Direct2D factory");
     checked(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(write_.GetAddressOf())), "DirectWrite factory");
-    createPipeline(); createStar(); createTargets(); initializeDebug();
+    createPipeline(); createEffects(); createStar(); createTargets(); initializeDebug();
     instances_.reserve(MaxInstances);
 }
 void Renderer::createPipeline() {
@@ -97,6 +111,8 @@ void Renderer::createPipeline() {
     compile("vsMain", "vs_4_0", &vs); compile("psMain", "ps_4_0", &ps);
     checked(device_->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &vs_), "Vertex shader");
     checked(device_->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &ps_), "Pixel shader");
+    ps.Reset(); compile("holeMain","ps_4_0",&ps);
+    checked(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&holePs_),"Black hole shader");
     const D3D11_INPUT_ELEMENT_DESC elements[] = {
         {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
         {"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},
@@ -180,24 +196,26 @@ void Renderer::updateVrm(const Frame& f) {
     });
 }
 void Renderer::world(const Frame& f) {
-    instances_.clear();
+    instances_.clear(); starInstances_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
+    const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const bool desert=f.presentation.settings.biome==Biome::Desert;
-    box(0,-.6f,0,16,1.0f,16,desert?Color{.38f,.23f,.13f}:Color{.095f,.15f,.18f});
-    box(0,-.12f,0,15.7f,.10f,15.7f,desert?Color{.68f,.46f,.24f}:Color{.17f,.28f,.29f});
-    for (int x=-7;x<=7;++x) for (int z=-7;z<=7;++z) {
+    box(0,-.6f,0,StageHalfExtent*2,1.0f,StageHalfExtent*2,desert?Color{.38f,.23f,.13f}:Color{.095f,.15f,.18f});
+    box(0,-.12f,0,63.7f,.10f,63.7f,desert?Color{.68f,.46f,.24f}:Color{.17f,.28f,.29f});
+    for (int x=-15;x<=15;++x) for (int z=-15;z<=15;++z) {
         const bool path=std::abs(x)<=1 || std::abs(z)<=1;
         const float checker=((x+z)%2==0)?.035f:0;
         const Color c=desert?(path?Color{.72f+checker,.52f+checker,.31f+checker}:Color{.83f+checker,.64f+checker,.39f+checker}):
             (path?Color{.27f+checker,.34f+checker,.37f+checker}:Color{.14f+checker,.30f+checker,.26f+checker});
-        box(static_cast<float>(x),-.03f,static_cast<float>(z),.98f,.12f,.98f,c);
+        box(static_cast<float>(x)*2,-.03f,static_cast<float>(z)*2,1.98f,.12f,1.98f,c);
     }
     // A low central plinth and its emissive frame are built from the same cube mesh.
     box(0,.07f,0,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:Color{.20f,.29f,.32f});
     for (int i=0;i<4;++i) {
         const float a=i*Pi/2; box(std::sin(a)*2.25f,.16f,std::cos(a)*2.25f,4.5f,.025f,.035f,d.color,a,1);
     }
-    const float trees[][2]={{-5,-4},{5,4},{-5,5},{5,-5},{-6,1},{6,0}};
+    const float trees[][2]={{-6,-5},{6,5},{-6,6},{6,-6},{-8,1},{8,0},
+        {-18,-18},{18,18},{-18,18},{18,-18},{-26,-8},{26,8},{-8,26},{8,-26},{-26,25},{26,-25},{-12,-24},{12,24}};
     for (const auto& p:trees) {
         if(desert) {
             const float tall=2.2f+.35f*std::sin(p[0]);
@@ -220,43 +238,66 @@ void Renderer::world(const Frame& f) {
     // The lightweight primitive avatar remains available while a VRM is loading.
     const bool useVrm=f.presentation.settings.avatar==Avatar::Vrm && vrmReady();
     const bool floating=d.id=="singularity";
-    const float bob=.025f*std::sin(f.time*2), swing=.14f*std::sin(f.walk*9);
-    auto base=XMMatrixRotationX(floating?-.22f:0)*XMMatrixRotationZ(floating?.08f*std::sin(f.time*.6f):0)*
-        XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,bob+(floating?.55f+.12f*std::sin(f.time*.8f):0),f.avatarZ);
-    auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,float pitch=0.f,float roll=0.f) {
+    const auto pose=avatarPose(f.time,f.walk,f.movement,floating);
+    auto base=XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
+        XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift,f.avatarZ);
+    auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,FXMMATRIX transform) {
         if(useVrm) return;
         Instance instance{};
-        XMStoreFloat4x4(&instance.world,XMMatrixScaling(sx,sy,sz)*XMMatrixRotationRollPitchYaw(pitch,0,roll)*XMMatrixTranslation(x,y,z)*base);
+        XMStoreFloat4x4(&instance.world,XMMatrixScaling(sx,sy,sz)*XMMatrixTranslation(x,y,z)*transform*base);
         instance.color={c.r,c.g,c.b,0}; instances_.push_back(instance);
     };
     const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
-    part(-.30f,.64f,floating?-.14f:swing,.46f,.95f,.52f,pants,floating?-.35f:0,floating?-.13f:0);
-    part(.33f,.70f,floating?.2f:-swing,.46f,.95f,.52f,pants,floating?.50f:0,floating?.18f:0);
-    part(0,1.56f,0,1.03f,.96f,.60f,shirt);
-    part(floating?-.94f:-.77f,floating?1.88f:1.56f,-swing,.43f,.96f,.54f,skin,floating?-.3f:0,floating?-.9f:0);
-    part(floating?.94f:.77f,floating?1.91f:1.56f,swing,.43f,.96f,.54f,skin,floating?-.3f:0,floating?.95f:0);
-    part(0,2.42f,0,.73f,.73f,.73f,skin);
-    part(-.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f});
-    part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f});
-    part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f});
+    for(int side=0;side<2;++side) {
+        const float sign=side?1.f:-1.f;
+        const auto arm=XMMatrixRotationZ(sign*pose.armOut[side])*XMMatrixRotationX(pose.armPitch[side])*XMMatrixTranslation(sign*.76f,2.02f,0);
+        part(0,-.46f,0,.43f,.96f,.54f,skin,arm);
+        const auto hip=XMMatrixRotationZ(sign*pose.legOut[side])*XMMatrixRotationX(pose.legPitch[side])*XMMatrixTranslation(sign*.27f,1.10f,0);
+        part(0,-.24f,0,.46f,.48f,.52f,pants,hip);
+        const auto knee=XMMatrixRotationX(pose.knee[side])*XMMatrixTranslation(0,-.48f,0)*hip;
+        part(0,-.24f,0,.46f,.48f,.52f,pants,knee);
+    }
+    const auto identity=XMMatrixIdentity();
+    part(0,1.56f,0,1.03f,.96f,.60f,shirt,identity);
+    part(0,2.42f,0,.73f,.73f,.73f,skin,identity);
+    part(-.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
+    part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
+    part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},identity);
     const float t=f.time*d.speed;
     for (unsigned i=0;i<48;++i) {
         const float a=i*2*Pi/48+t*.5f;
-        box(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
+        if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
+        else box(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
     for (unsigned i=0;i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
         const float y=.4f+std::fmod(u*3.3f+f.time*.38f,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
         const float s=.045f+.045f*(.5f+.5f*std::sin(i*1.7f));
-        box(f.avatarX+std::cos(a)*r,y,f.avatarZ+std::sin(a)*r,s,s*1.8f,s,d.color,a,1);
+        if(floating && level>0) {
+            Color color=i%3?Color{.83f,.72f,1}:Color{1,.86f,.50f};
+            if(level==3) {
+                const auto star=singularityStar(f.time,i,d.particles);
+                particleStar(f.avatarX+star.x,star.y,f.avatarZ+star.z,star.size,color,a+f.time,f);
+            } else particleStar(f.avatarX+std::cos(a)*r,y,f.avatarZ+std::sin(a)*r,.08f+s*.7f,color,a+f.time*.3f,f);
+        } else box(f.avatarX+std::cos(a)*r,y,f.avatarZ+std::sin(a)*r,s,s*1.8f,s,d.color,a,1);
+    }
+    if(floating && level>=2) {
+        const float radius=level==3?1.65f:.72f;
+        XMStoreFloat4x4(&blackHole_.world,XMMatrixScaling(radius*2,radius*2,1)*XMMatrixRotationZ(.10f)*
+            XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw)*XMMatrixTranslation(f.avatarX,5.7f,f.avatarZ));
+        blackHole_.color={1,1,1,1}; holeVisible_=true;
     }
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
+    const float focus=holeVisible_?2.5f:(floating?2.f:1.4f);
     const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,
-        1.1f+std::sin(f.cameraPitch)*f.cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,1);
-    const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,1.1f,f.avatarZ,1),XMVectorSet(0,1,0,0));
-    const auto projection=XMMatrixPerspectiveFovLH(.80f,worldW/worldH,.1f,80);
+        focus+std::sin(f.cameraPitch)*f.cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,1);
+    const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,focus,f.avatarZ,1),XMVectorSet(0,1,0,0));
+    const auto projection=XMMatrixPerspectiveFovLH(.80f,worldW/worldH,.1f,160);
+    XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,3.7f+pose.lift,f.avatarZ,1),
+        viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));
+    nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=tag.z>0 && tag.z<1;
     struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye; } camera{};
     XMStoreFloat4x4(&camera.vp,view*projection); XMStoreFloat4(&camera.eye,eye); camera.eye.w=f.time;
     context_->UpdateSubresource(constants_.Get(),0,nullptr,&camera,0,0);
@@ -271,7 +312,8 @@ void Renderer::world(const Frame& f) {
     context_->RSSetState(raster_.Get()); context_->OMSetDepthStencilState(depthState_.Get(),0);
     context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
     context_->DrawIndexedInstanced(36,static_cast<UINT>(instances_.size()),0,0,0);
-    if(useVrm) vrm_->draw(context_.Get(),view*projection,XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,bob,f.avatarZ));
+    if(useVrm) vrm_->draw(context_.Get(),view*projection,base,pose);
+    drawEffects(f);
 }
 void Renderer::rect(float x,float y,float w,float h,D2D1_COLOR_F c,float r) {
     brush_->SetColor(c); const auto area=D2D1::RectF(x,y,x+w,y+h);
@@ -281,7 +323,7 @@ void Renderer::stroke(float x,float y,float w,float h,D2D1_COLOR_F c,float r) {
     brush_->SetColor(c); const auto area=D2D1::RectF(x,y,x+w,y+h);
     if(r) d2d_->DrawRoundedRectangle(D2D1::RoundedRect(area,r,r),brush_.Get(),1); else d2d_->DrawRectangle(area,brush_.Get(),1);
 }
-void Renderer::text(const std::wstring& value,float x,float y,float w,float h,float size,D2D1_COLOR_F color,bool bold) {
+void Renderer::text(const std::wstring& value,float x,float y,float w,float h,float size,D2D1_COLOR_F color,bool bold,bool center) {
     auto font=std::find_if(fonts_.begin(),fonts_.end(),[&](const auto& f){return f.size==size && f.bold==bold;});
     if(font==fonts_.end()) {
         Font f{size,bold,{}};
@@ -290,10 +332,11 @@ void Renderer::text(const std::wstring& value,float x,float y,float w,float h,fl
         f.format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP); fonts_.push_back(std::move(f)); font=fonts_.end()-1;
     }
     brush_->SetColor(color);
+    font->format->SetTextAlignment(center?DWRITE_TEXT_ALIGNMENT_CENTER:DWRITE_TEXT_ALIGNMENT_LEADING);
     d2d_->DrawText(value.data(),static_cast<UINT32>(value.size()),font->format.Get(),D2D1::RectF(x,y,x+w,y+h),brush_.Get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
-void Renderer::label(const std::string& value,float x,float y,float w,float h,float size,D2D1_COLOR_F color,bool bold) {
-    text(widen(value),x,y,w,h,size,color,bold);
+void Renderer::label(const std::string& value,float x,float y,float w,float h,float size,D2D1_COLOR_F color,bool bold,bool center) {
+    text(widen(value),x,y,w,h,size,color,bold,center);
 }
 void Renderer::draw(const Frame& frame,bool present) {
     updateVrm(frame);

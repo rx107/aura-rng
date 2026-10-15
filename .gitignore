@@ -12,3 +12,4 @@
 /assets/
 *.vrm
 *.mp3
+!data/audio/Tides_of_the_Outer_Reach.mp3
