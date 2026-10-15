@@ -23,7 +23,7 @@ const D2D1_COLOR_F Border = D2D1::ColorF(.13f, .19f, .23f);
 D2D1_COLOR_F tint(Color c, float alpha = 1) { return D2D1::ColorF(c.r, c.g, c.b, alpha); }
 bool inside(float x, float y, float rx, float ry, float w, float h) { return x >= rx && x < rx+w && y >= ry && y < ry+h; }
 constexpr char Shader[] = R"(
-cbuffer Camera : register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; };
+cbuffer Camera : register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; float4 auraLight; };
 struct Input { float3 p:POSITION; float3 n:NORMAL; float4 a:INSTANCE0; float4 b:INSTANCE1; float4 c:INSTANCE2; float4 d:INSTANCE3; float4 color:COLOR0; };
 struct Output { float4 p:SV_POSITION; float3 n:NORMAL; float4 color:COLOR0; float3 world:TEXCOORD0; float3 local:TEXCOORD1; };
 Output vsMain(Input v) {
@@ -34,7 +34,7 @@ Output vsMain(Input v) {
 }
 float4 psMain(Output i):SV_TARGET {
     float diffuse=max(0,dot(normalize(i.n),normalize(float3(-.4,.85,-.5))));
-    float3 color=i.color.rgb*(.43+.57*diffuse)+i.color.rgb*i.color.a*.55;
+    float3 color=i.color.rgb*(.43+.57*diffuse)*auraLight.x+i.color.rgb*i.color.a*.55;
     float fog=saturate((distance(i.world,eyeAndTime.xyz)-17)/35);
     return float4(lerp(color,float3(.042,.069,.098),fog*.7),1);
 }
@@ -143,7 +143,7 @@ void Renderer::createPipeline() {
     buffer(sizeof(cube),D3D11_BIND_VERTEX_BUFFER,D3D11_USAGE_IMMUTABLE,cube,&vertices_);
     buffer(sizeof(index),D3D11_BIND_INDEX_BUFFER,D3D11_USAGE_IMMUTABLE,index.data(),&indices_);
     buffer(sizeof(Instance)*MaxInstances,D3D11_BIND_VERTEX_BUFFER,D3D11_USAGE_DYNAMIC,nullptr,&instanceBuffer_);
-    buffer(80,D3D11_BIND_CONSTANT_BUFFER,D3D11_USAGE_DEFAULT,nullptr,&constants_);
+    buffer(96,D3D11_BIND_CONSTANT_BUFFER,D3D11_USAGE_DEFAULT,nullptr,&constants_);
     D3D11_RASTERIZER_DESC rd{}; rd.FillMode=D3D11_FILL_SOLID; rd.CullMode=D3D11_CULL_BACK; rd.DepthClipEnable=TRUE;
     checked(device_->CreateRasterizerState(&rd,&raster_), "Rasterizer state");
     D3D11_DEPTH_STENCIL_DESC dd{}; dd.DepthEnable=TRUE; dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL; dd.DepthFunc=D3D11_COMPARISON_LESS;
@@ -196,7 +196,7 @@ void Renderer::updateVrm(const Frame& f) {
     });
 }
 void Renderer::world(const Frame& f) {
-    instances_.clear(); starInstances_.clear(); holeVisible_=false;
+    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const bool desert=f.presentation.settings.biome==Biome::Desert;
@@ -238,14 +238,17 @@ void Renderer::world(const Frame& f) {
     // The lightweight primitive avatar remains available while a VRM is loading.
     const bool useVrm=f.presentation.settings.avatar==Avatar::Vrm && vrmReady();
     const bool floating=d.id=="singularity";
-    const auto pose=avatarPose(f.time,f.walk,f.movement,floating);
+    const bool pixelated=d.id=="pixelation";
+    const auto pose=pixelated?pixelationPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
     auto base=XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift,f.avatarZ);
     auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,FXMMATRIX transform) {
         if(useVrm) return;
         Instance instance{};
         XMStoreFloat4x4(&instance.world,XMMatrixScaling(sx,sy,sz)*XMMatrixTranslation(x,y,z)*transform*base);
-        instance.color={c.r,c.g,c.b,0}; instances_.push_back(instance);
+        auto lit=c;
+        if(pixelated) {const auto hue=pixelationColor(f.time); lit={.45f+hue.r*.55f,.45f+hue.g*.55f,.45f+hue.b*.55f};}
+        instance.color={lit.r,lit.g,lit.b,pixelated?1.8f:0.f}; instances_.push_back(instance);
     };
     const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
     for(int side=0;side<2;++side) {
@@ -264,12 +267,12 @@ void Renderer::world(const Frame& f) {
     part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
     part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},identity);
     const float t=f.time*d.speed;
-    for (unsigned i=0;i<48;++i) {
+    for (unsigned i=0;!pixelated && i<48;++i) {
         const float a=i*2*Pi/48+t*.5f;
         if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
         else box(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
-    for (unsigned i=0;i<d.particles;++i) {
+    for (unsigned i=0;!pixelated && i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
         const float y=.4f+std::fmod(u*3.3f+f.time*.38f,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
@@ -288,9 +291,10 @@ void Renderer::world(const Frame& f) {
             XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw)*XMMatrixTranslation(f.avatarX,5.7f,f.avatarZ));
         blackHole_.color={1,1,1,1}; holeVisible_=true;
     }
+    if(pixelated) buildPixelation(f);
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
-    const float focus=holeVisible_?2.5f:(floating?2.f:1.4f);
+    const float focus=holeVisible_?2.5f:(floating || pixelated?2.f:1.4f);
     const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,
         focus+std::sin(f.cameraPitch)*f.cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,1);
     const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,focus,f.avatarZ,1),XMVectorSet(0,1,0,0));
@@ -298,8 +302,9 @@ void Renderer::world(const Frame& f) {
     XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,3.7f+pose.lift,f.avatarZ,1),
         viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));
     nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=tag.z>0 && tag.z<1;
-    struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye; } camera{};
+    struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye,light; } camera{};
     XMStoreFloat4x4(&camera.vp,view*projection); XMStoreFloat4(&camera.eye,eye); camera.eye.w=f.time;
+    camera.light={pixelated?.30f:1.f,0,0,0};
     context_->UpdateSubresource(constants_.Get(),0,nullptr,&camera,0,0);
     D3D11_MAPPED_SUBRESOURCE mapped{}; checked(context_->Map(instanceBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped), "Map instances");
     std::memcpy(mapped.pData,instances_.data(),instances_.size()*sizeof(Instance)); context_->Unmap(instanceBuffer_.Get(),0);

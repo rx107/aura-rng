@@ -124,6 +124,7 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::Separator();
             ImGui::TextUnformatted(t("CURRENT ODDS / WITH LUCK","現在の排出確率 / Luck反映後"));
             for(std::size_t i=0;i<f.roller.catalog().size();++i) {
+                if(f.roller.catalog()[i].previewOnly) continue;
                 const auto tickets=f.roller.tickets(i);
                 const double percent=100.*static_cast<double>(tickets)/TicketPool;
                 ImGui::Text("%s: %.9g%%",displayName(f.roller.catalog()[i],language).c_str(),percent);
@@ -156,6 +157,13 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::TextUnformatted(t("AURA PREVIEW / ALL AURAS","オーラプレビュー / 全種類"));
             ImGui::TextWrapped("%s",t("Includes unowned auras. Preview stops AutoRoll and does not add inventory or history.",
                 "未所持のオーラも表示できます。選択時に自動ロールを停止し、所持数や履歴には追加しません。"));
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="pixelation") {
+                ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.04f,.35f,.27f,1));
+                if(ImGui::Button(t("Preview Pixelation / prototype","Pixelation を表示 / 試作"),{-1,36})) debugActions_.preview=i;
+                ImGui::PopStyleColor();
+                ImGui::TextWrapped("%s",t("Animated pixel fragments, hologram panels and a rotating wireframe cube. Visual prototype: excluded from rolls.",
+                    "色が移り変わるピクセル片、ホログラムパネル、回転するワイヤー立方体。見た目の試作のため、ロールの抽選対象外です。"));
+            }
             if (ImGui::Button(t("Restore Collection aura","コレクションの装備に戻す"),{-1,30})) debugActions_.restore=true;
             ImGui::Separator();
             unsigned actualLevel=0;
@@ -259,19 +267,23 @@ void Renderer::ui(const Frame& f) {
     label((f.fps>0?std::to_string(static_cast<int>(f.fps)):"--")+" FPS",w-86,31,70,24,12,Muted);
     rect(24,96,216,h-280,Panel,14); stroke(24,96,216,h-280,Border,14);
     label(t("COLLECTION","コレクション"),42,114,180,24,12,Muted,true);
-    label(std::to_string(f.progress.discovered())+" / "+std::to_string(defs.size()),42,146,170,42,30,White,true);
+    std::size_t collectionTotal=0,collectionDiscovered=0;
+    for(std::size_t i=0;i<defs.size();++i) if(!defs[i].previewOnly) {
+        ++collectionTotal; if(f.progress.counts[i]) ++collectionDiscovered;
+    }
+    label(std::to_string(collectionDiscovered)+" / "+std::to_string(collectionTotal),42,146,170,42,30,White,true);
     label(t("Auras discovered","発見したオーラ"),42,187,170,22,12,Muted);
     rect(42,220,180,3,Border,1);
-    rect(42,220,180*static_cast<float>(f.progress.discovered())/static_cast<float>(defs.size()),3,Mint,1);
+    rect(42,220,collectionTotal?180*static_cast<float>(collectionDiscovered)/static_cast<float>(collectionTotal):0,3,Mint,1);
     const int visible=std::max(1,static_cast<int>((h-430)/48));
     const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(defs.size())-visible));
     for (int row=0;row<visible && start+row<static_cast<int>(defs.size());++row) {
         const auto i=static_cast<std::size_t>(start+row); const float y=242+row*48.f;
-        const bool owned=f.progress.counts[i]!=0,selected=i==f.progress.equipped;
+        const bool owned=!defs[i].previewOnly && f.progress.counts[i]!=0,selected=!defs[i].previewOnly && i==f.progress.equipped;
         if (selected) rect(34,y-5,196,43,D2D1::ColorF(.09f,.15f,.17f),6);
         star(47,y+11,7.5f,tint(defs[i].color,owned?1.f:.42f),owned);
         label(name(i),64,y,155,21,14,owned?White:Muted,selected);
-        label(oddsLabel(defs,i)+(owned?"   x"+formatNumber(f.progress.counts[i]):"   "+t("LOCKED","未所持")),64,y+22,157,18,9,Muted);
+        label(oddsLabel(defs,i)+(defs[i].previewOnly?"":owned?"   x"+formatNumber(f.progress.counts[i]):"   "+t("LOCKED","未所持")),64,y+22,157,18,9,Muted);
     }
     if (static_cast<int>(defs.size())>visible) {
         rect(234,244,2,h-448,Border,1);

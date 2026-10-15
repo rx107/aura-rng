@@ -11,10 +11,11 @@ inline constexpr std::uint64_t TicketPool = 1'000'000'000'000ULL;
 struct Color { float r{}, g{}, b{}; };
 struct Definition {
     std::string id, name;
-    std::uint64_t denominator{}; // Zero denotes the single fallback aura.
+    std::uint64_t denominator{}; // Zero denotes the fallback, or an unpriced preview.
     Color color;
     unsigned particles{};
     float radius{}, speed{};
+    bool previewOnly{};
 };
 std::vector<Definition> loadCatalog(const std::filesystem::path& path);
 std::string csvQuote(const std::string& value);

@@ -43,6 +43,7 @@ public:
     std::string adapterName() const { return adapterName_; }
     std::size_t instanceCount() const { return instances_.size()+starInstances_.size(); }
     std::size_t starCount() const { return starInstances_.size(); }
+    std::size_t pixelationCount() const { return pixelationInstances_.size(); }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
     float scale() const { return scale_; }
@@ -64,6 +65,14 @@ private:
     void createTargets();
     void createPipeline();
     void createEffects();
+    void createPixelation();
+    void buildPixelation(const Frame& frame);
+    void createPixelationTargets();
+    void compositePixelation();
+    void pixelQuad(DirectX::FXMMATRIX transform,Color color,unsigned style,float opacity);
+    void pixelBillboard(float x,float y,float z,float width,float height,Color color,unsigned style,float opacity,const Frame& frame,float rotation=0);
+    void pixelLine(DirectX::FXMVECTOR from,DirectX::FXMVECTOR to,float width,Color color,float opacity,const Frame& frame);
+    void pixelText(const char* value,float x,float y,float z,float size,Color color,const Frame& frame);
     void drawEffects(const Frame& frame);
     void particleStar(float x,float y,float z,float size,Color color,float rotation,const Frame& frame);
     void box(float x, float y, float z, float sx, float sy, float sz, Color color, float rotation = 0, float glow = 0);
@@ -92,6 +101,14 @@ private:
     ComPtr<ID3D11VertexShader> vs_;
     ComPtr<ID3D11PixelShader> ps_;
     ComPtr<ID3D11PixelShader> holePs_;
+    ComPtr<ID3D11PixelShader> pixelationPs_;
+    ComPtr<ID3D11VertexShader> bloomVs_;
+    ComPtr<ID3D11PixelShader> blurPs_,compositePs_;
+    ComPtr<ID3D11Buffer> blurConstants_;
+    ComPtr<ID3D11SamplerState> bloomSampler_;
+    std::array<ComPtr<ID3D11RenderTargetView>,3> bloomTargets_;
+    std::array<ComPtr<ID3D11ShaderResourceView>,3> bloomSources_;
+    unsigned bloomWidth_{},bloomHeight_{};
     ComPtr<ID3D11InputLayout> layout_;
     ComPtr<ID3D11Buffer> vertices_, indices_, instanceBuffer_, constants_;
     ComPtr<ID3D11RasterizerState> raster_;
@@ -106,8 +123,10 @@ private:
     std::vector<Font> fonts_;
     std::vector<Instance> instances_;
     std::vector<Instance> starInstances_;
+    std::vector<Instance> pixelationInstances_;
     ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
     ComPtr<ID3D11BlendState> effectBlend_;
+    ComPtr<ID3D11BlendState> additiveBlend_;
     ComPtr<ID3D11DepthStencilState> effectDepth_;
     UINT starIndexCount_{};
     bool holeVisible_{},nameplateVisible_{};
@@ -122,5 +141,6 @@ private:
     DirectX::XMFLOAT4 debugBounds_{};
 };
 std::wstring widen(const std::string& utf8);
+Color pixelationColor(float time);
 void checked(HRESULT result, const char* operation);
 } // namespace aura

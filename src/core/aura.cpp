@@ -65,7 +65,10 @@ void validate(const std::vector<Definition>& definitions) {
             if (!std::isfinite(c) || c < 0 || c > 1) throw std::runtime_error("Colors must be in 0..1");
         if (d.particles > 160 || !std::isfinite(d.radius) || d.radius < .5f || d.radius > 3 ||
             !std::isfinite(d.speed) || d.speed < 0 || d.speed > 4) throw std::runtime_error("Effect parameters out of range");
-        if (d.denominator == 0) ++fallback;
+        if (d.previewOnly) {
+            if (d.denominator != 0) throw std::runtime_error("Preview-only auras must have denominator=0");
+        }
+        else if (d.denominator == 0) ++fallback;
         else {
             if (d.denominator < 2 || d.denominator > TicketPool) throw std::runtime_error("Denominator must be 2..10^12");
             total += TicketPool / d.denominator;
@@ -83,7 +86,9 @@ std::vector<Definition> loadCatalog(const std::filesystem::path& path) {
     std::getline(in, line);
     if (line.starts_with("\xef\xbb\xbf")) line.erase(0, 3);
     if (!line.empty() && line.back() == '\r') line.pop_back();
-    if (line != "id,name,denominator,red,green,blue,particles,radius,speed") throw std::runtime_error("Unexpected catalog header");
+    constexpr auto header = "id,name,denominator,red,green,blue,particles,radius,speed";
+    const bool hasPreview = line == std::string(header) + ",preview_only";
+    if (line != header && !hasPreview) throw std::runtime_error("Unexpected catalog header");
     std::vector<Definition> result;
     unsigned number = 1;
     while (std::getline(in, line)) {
@@ -93,11 +98,13 @@ std::vector<Definition> loadCatalog(const std::filesystem::path& path) {
         if (line.size() > 2048) throw std::runtime_error("Catalog row too long");
         try {
             auto f = parseCsv(line);
-            if (f.size() != 9) throw std::runtime_error("Expected 9 columns");
+            if (f.size() != (hasPreview ? 10u : 9u)) throw std::runtime_error("Catalog column count does not match header");
+            const auto preview = hasPreview ? integer(f[9]) : 0;
+            if (preview > 1) throw std::runtime_error("preview_only must be 0 or 1");
             const auto particles = integer(f[6]);
             if (particles > 160) throw std::runtime_error("Maximum particle count is 160");
             result.push_back({f[0], f[1], integer(f[2]), {real(f[3]), real(f[4]), real(f[5])},
-                static_cast<unsigned>(particles), real(f[7]), real(f[8])});
+                static_cast<unsigned>(particles), real(f[7]), real(f[8]), preview != 0});
         } catch (const std::exception& e) { throw std::runtime_error("Catalog row " + std::to_string(number) + ": " + e.what()); }
     }
     validate(result);
@@ -111,6 +118,7 @@ Roller::Roller(std::vector<Definition> definitions, std::uint64_t seed)
     std::uint64_t remaining = TicketPool;
     std::size_t fallback = 0;
     for (std::size_t i = 0; i < definitions_.size(); ++i) {
+        if (definitions_[i].previewOnly) continue;
         if (definitions_[i].denominator == 0) fallback = i;
         else { weights_[i] = TicketPool / definitions_[i].denominator; remaining -= weights_[i]; }
     }
@@ -132,8 +140,8 @@ void Roller::setLuck(double value) {
     if (!std::isfinite(value) || value < 1 || value > 1'000'000) throw std::out_of_range("Luck must be 1..1000000");
     // The rarest result of L independent baseline rolls, evaluated from the CDF.
     // This also supports fractional L without a loop or a probability overflow.
-    std::vector<std::size_t> order(definitions_.size());
-    for (std::size_t i=0;i<order.size();++i) order[i]=i;
+    std::vector<std::size_t> order;
+    for (std::size_t i=0;i<definitions_.size();++i) if (!definitions_[i].previewOnly) order.push_back(i);
     std::stable_sort(order.begin(),order.end(),[&](auto a,auto b){return probabilityTickets(definitions_,a)>probabilityTickets(definitions_,b);});
     std::uint64_t tail=TicketPool, previous=0;
     for (auto i:order) {
@@ -145,14 +153,16 @@ void Roller::setLuck(double value) {
     luck_=value;
 }
 std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index) {
+    if (catalog.at(index).previewOnly) return 0;
     const auto denominator = catalog.at(index).denominator;
     if (denominator) return TicketPool / denominator;
     std::uint64_t remaining = TicketPool;
-    for (const auto& d : catalog) if (d.denominator) remaining -= TicketPool / d.denominator;
+    for (const auto& d : catalog) if (!d.previewOnly && d.denominator) remaining -= TicketPool / d.denominator;
     return remaining;
 }
 std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index) {
     const auto& d = catalog.at(index);
+    if (d.previewOnly) return "Preview only";
     if (d.denominator) return "1 / " + formatNumber(d.denominator);
     std::ostringstream out;
     out << "~1 / " << std::fixed << std::setprecision(2)
@@ -161,6 +171,7 @@ std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index)
 }
 void Progress::record(std::size_t index, const std::vector<Definition>& catalog) {
     if (counts.size() != catalog.size() || index >= catalog.size()) throw std::out_of_range("Progress catalog mismatch");
+    if (catalog[index].previewOnly) throw std::invalid_argument("Cannot record a preview-only aura as a roll");
     if (rolls == std::numeric_limits<std::uint64_t>::max() || counts[index] == std::numeric_limits<std::uint64_t>::max())
         throw std::overflow_error("Roll counter overflow");
     ++rolls; ++counts[index];
@@ -183,6 +194,10 @@ std::size_t Progress::discovered() const {
 void saveProgress(const std::filesystem::path& path, const Progress& p, const std::vector<Definition>& catalog) {
     if (p.counts.size() != catalog.size() || p.equipped >= catalog.size() || p.best >= catalog.size())
         throw std::runtime_error("Invalid progress for save");
+    if (catalog[p.equipped].previewOnly || catalog[p.best].previewOnly)
+        throw std::runtime_error("Preview-only auras cannot be equipment or discoveries");
+    for (std::size_t i=0;i<catalog.size();++i) if (catalog[i].previewOnly && p.counts[i]!=0)
+        throw std::runtime_error("Preview-only auras cannot have inventory counts");
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     auto temporary = path; temporary += ".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
@@ -201,7 +216,11 @@ void saveProgress(const std::filesystem::path& path, const Progress& p, const st
 }
 Progress loadProgress(const std::filesystem::path& path, const std::vector<Definition>& catalog) {
     Progress p(catalog.size());
-    for (std::size_t i = 0; i < catalog.size(); ++i) if (catalog[i].id == "still") p.equipped = p.best = i;
+    const auto initial=std::find_if(catalog.begin(),catalog.end(),[](const auto& d){return !d.previewOnly;});
+    if (initial==catalog.end()) throw std::runtime_error("Catalog has no rollable auras");
+    p.equipped=p.best=static_cast<std::size_t>(initial-catalog.begin());
+    for (std::size_t i = 0; i < catalog.size(); ++i)
+        if (catalog[i].id == "still" && !catalog[i].previewOnly) p.equipped = p.best = i;
     if (!std::filesystem::exists(path)) return p;
     if (std::filesystem::file_size(path) > 1024 * 1024) throw std::runtime_error("Save file too large");
     std::ifstream in(path);
@@ -225,7 +244,10 @@ Progress loadProgress(const std::filesystem::path& path, const std::vector<Defin
             if (count > std::numeric_limits<std::uint64_t>::max() - total) throw std::runtime_error("Save count overflow");
             total += count;
             bool found = false;
-            for (std::size_t i = 0; i < catalog.size(); ++i) if (catalog[i].id == id) { p.counts[i] = count; found = true; }
+            for (std::size_t i = 0; i < catalog.size(); ++i) if (catalog[i].id == id) {
+                if (catalog[i].previewOnly && count!=0) throw std::runtime_error("Preview-only aura in progress inventory");
+                p.counts[i] = count; found = true;
+            }
             if (!found) p.retiredCounts.emplace_back(id, count);
         } else throw std::runtime_error("Invalid progress save row");
         if (row >> extra) throw std::runtime_error("Unexpected save columns");
@@ -233,6 +255,7 @@ Progress loadProgress(const std::filesystem::path& path, const std::vector<Defin
     if (!gotRolls || !gotEquipped || total != p.rolls) throw std::runtime_error("Inconsistent progress save");
     bool foundAny = false;
     for (std::size_t i = 0; i < catalog.size(); ++i) {
+        if (catalog[i].previewOnly) continue;
         if (p.counts[i] && (!foundAny || probabilityTickets(catalog, i) < probabilityTickets(catalog, p.best))) p.best = i;
         if (p.counts[i]) foundAny = true;
         if (catalog[i].id == equipped && p.counts[i]) p.equipped = i;
@@ -245,6 +268,7 @@ std::string csvQuote(const std::string& value) {
     return result + '"';
 }
 void appendLog(const std::filesystem::path& path, const LogEntry& entry, const Definition& d) {
+    if (d.previewOnly) throw std::invalid_argument("Cannot log a preview-only aura as a roll");
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     const bool header = !std::filesystem::exists(path) || std::filesystem::file_size(path) == 0;
     std::ofstream out(path, std::ios::binary | std::ios::app);

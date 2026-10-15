@@ -2,11 +2,17 @@
 
 C++20 / DirectX 11で動く、Windows向けの軽量なオーラ抽選ゲームです。
 
-![Star's RNG — Singularity / Desert](docs/world-preview.webp)
+## Pixelationの試作
+
+![Star's RNG — Pixelationの発光と浮遊パネル](docs/pixelation-preview.webp)
+
+**F1 → Auras / オーラ → Pixelationをプレビュー**で確認できます。添付されたSol's RNGの参考画像をもとに、強い発光、3つの回転するワイヤーキューブ、床のリング、180個のピクセル片と20個の光点、Player 1 / 2の浮遊HUD、ビットマップ文字の`PIXELATION`を実装しています。色は約2秒でシアン → ライム → オレンジ → マゼンタ → シアンと巡ります。ブロック・ローカルVRMとも腕を少し広げて浮遊し、移動中も同じ姿勢を維持します。
+
+今回は見た目を確認するための試作です。**抽選確率は未設定**で、通常ロール・AutoRollからは出現しません。既存13種類の確率は維持しています。表示は`Preview only`となり、選択時はAutoRollを止めます。所持数・ロール履歴には登録せず、装備の復元で通常表示へ戻せます。Pixelation用BGMは未指定のため追加していません。参考画像自体とVRMモデルはリポジトリや配布ZIPへ含めていません。
 
 ## 起動と操作
 
-[Windows用ZIP](https://github.com/rx107/aura-rng/releases/tag/v0.1.3-alpha.1)を展開し、**StarRng.exe**を起動してください。`data`をEXEと同じ場所に置きます。Windows 10 / 11 x64向けです。ゲームエンジン、追加DLLのインストール、実行時のネット接続は不要です。
+[Windows用ZIP](https://github.com/rx107/aura-rng/releases/tag/v0.1.4-alpha.1)を展開し、**StarRng.exe**を起動してください。`data`をEXEと同じ場所に置きます。Windows 10 / 11 x64向けです。ゲームエンジン、追加DLLのインストール、実行時のネット接続は不要です。
 
 | 操作 | キー / マウス |
 | --- | --- |
@@ -60,6 +66,8 @@ VRM 0.x / 1.0の自己完結したGLB、メッシュ、スキン、初期モー�
 
 ## Singularity / Aura Level
 
+![Star's RNG — Singularity / Desert](docs/world-preview.webp)
+
 初取得でレベル0、その後1個重複するたびに上がり、レベル3で最大になります。過去の所持数も反映し、4個以上持っていればレベル3です。レベルは演出だけを変え、抽選確率は変わりません。
 
 | Level | 演出 |
@@ -73,7 +81,7 @@ F1 → オーラの**Aura Level**スライダーで未所持でも全段階を�
 
 ## オーラと確率
 
-13種類のオーラを収録。旧Stillは**Common**、旧Glimmerは**Uncommon**に名称変更し、保存互換性のため内部IDを維持しています。
+13種類の抽選オーラと、表示試作の**Pixelation / ピクセレーション**を収録。旧Stillは**Common**、旧Glimmerは**Uncommon**に名称変更し、保存互換性のため内部IDを維持しています。
 
 Luck 1倍ではCommonは**正確に1/2（50%）**、Uncommonは**正確に1/4（25%）**。既存の他の確率を維持し、残りの6.9888989%を新しい**Stardust / 星屑**へ割り当てます（表示は`~1 / 14.31`）。Emberは1/8、Singularityは1/1,000,000,000です。基礎確率は全13種類で重複せず、合計100%、1ロールの結果は常に1種類です。
 
@@ -110,6 +118,6 @@ ctest --test-dir build -C Release --output-on-failure
 
 コアテストはLinuxでも実行できます。DirectXアプリはWindowsで生成します。`--warp`でソフトウェア描画、`--debug`でパネルを開いて起動できます。
 
-ブロック利用時の基本3D部分は共有キューブのインスタンス描画で1 draw call、浮遊粒子は最大160個です。星とブラックホールはそれぞれ1 draw callを追加。VRMはGPUスキニングし、モデルのプリミティブ数だけ描画が増えます。通常はVSync、非アクティブ時は最大15FPS、最小化時は描画を停止して自動ロールを続けます。ImGuiパネルはUIの描画バッチを追加します。
+ブロック利用時の基本3D部分は共有キューブのインスタンス描画で1 draw call、標準オーラの浮遊粒子は最大160個です。星とブラックホールはそれぞれ1 draw callを追加します。Pixelationは専用の180ピクセル・20光点を使用し、演出1バッチとHDRブルームを含めてブロックの3D部分は計5 draw callsです。ブルーム用テクスチャは初めて必要になったときに確保し、1440×900で約7.4MiBをキャッシュします。他のオーラ表示中はこの後処理を実行しません。VRMはGPUスキニングし、モデルのプリミティブ数だけ描画が増えます。通常はVSync、非アクティブ時は最大15FPS、最小化時は描画を停止して自動ロールを続けます。ImGuiパネルはUIの描画バッチを追加します。
 
 ポーション、クラフト、バイオーム別抽選、オンライン機能は今後の拡張です。[検証記録](docs/validation.md)、[設計](docs/architecture.md)、[依存ライブラリの出典](third_party/README.md)も参照してください。

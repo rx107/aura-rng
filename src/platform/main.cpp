@@ -150,7 +150,8 @@ private:
             break;
         }
         case aura::Action::Equip:
-            if(hit.index<progress_.counts.size() && progress_.counts[hit.index]) {
+            if(hit.index<progress_.counts.size() && hit.index<roller_.catalog().size() &&
+                !roller_.catalog()[hit.index].previewOnly && progress_.counts[hit.index]) {
                 progress_.equipped=hit.index; presentation_.preview.reset(); presentation_.singularityLevel.reset(); persist();
             }
             break;
@@ -229,6 +230,12 @@ private:
         if(seconds>=.5f) { fps_=fpsFrames_/seconds; fpsFrames_=0; fpsStart_=now; }
     }
     int smoke() {
+        const auto findAura=[&](const char* id) {
+            const auto& catalog=roller_.catalog();
+            for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id==id) return i;
+            throw std::runtime_error(std::string("Smoke aura is missing: ")+id);
+        };
+        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation");
         const auto startingRolls=progress_.rolls;
         const auto initialEquipped=progress_.equipped;
         // Exercise the actual window input path, cooldown, auto toggle and resizing.
@@ -282,12 +289,12 @@ private:
         const auto beforePreview=progress_.counts;
         const auto logSize=log_.size();
         const auto logBytes=std::filesystem::file_size(saves_/L"rolls.csv");
-        auto_=true; aura::DebugActions previewCommand; previewCommand.preview=roller_.catalog().size()-1; applyDebugActions(previewCommand);
+        auto_=true; aura::DebugActions previewCommand; previewCommand.preview=singularity; applyDebugActions(previewCommand);
         if(auto_ || progress_.counts!=beforePreview || log_.size()!=logSize ||
             std::filesystem::file_size(saves_/L"rolls.csv")!=logBytes || progress_.equipped!=chosen)
             throw std::runtime_error("Debug preview modified collection/history or did not stop AutoRoll");
         cooldown_=0; roll();
-        if(presentation_.shown(progress_)!=roller_.catalog().size()-1 || progress_.equipped!=chosen)
+        if(presentation_.shown(progress_)!=singularity || progress_.equipped!=chosen)
             throw std::runtime_error("Roll replaced the preview / Collection selection");
         action({aura::Action::Equip,chosen});
         if(presentation_.preview) throw std::runtime_error("Collection did not restore equipped display");
@@ -306,7 +313,7 @@ private:
             cooldown_=aura::RollCooldown*.55f; time_+=.2f; render(false); captureVariant(L"-cooldown");
             aura::DebugActions settings; settings.language=aura::Language::Japanese; settings.shirt=aura::Color{.95f,.38f,.32f}; applyDebugActions(settings);
             render(false); captureVariant(L"-japanese");
-            previewCommand.preview=roller_.catalog().size()-1; applyDebugActions(previewCommand);
+            previewCommand.preview=singularity; applyDebugActions(previewCommand);
             if(!renderer_->debugOpen()) { SendMessageW(window_,WM_KEYDOWN,VK_F1,0); update(0); }
             render(false); render(false); captureVariant(L"-debug");
             if(renderer_->debugOpen()) { SendMessageW(window_,WM_KEYDOWN,VK_F1,0); update(0); }
@@ -315,6 +322,40 @@ private:
         auto captureExtra=[&](const wchar_t* suffix) {
             if(!opts_.capture.empty()) renderer_->capture(opts_.capture.parent_path()/(opts_.capture.stem().wstring()+suffix+L".png"));
         };
+        const auto pixelationCounts=progress_.counts;
+        const auto pixelationRolls=progress_.rolls; const auto pixelationLogs=log_.size();
+        const auto pixelationLogBytes=std::filesystem::file_size(saves_/L"rolls.csv");
+        const auto previewDistance=distance_,previewPitch=pitch_,previewYaw=yaw_,previewTime=time_;
+        if(roller_.tickets(pixelation)) throw std::runtime_error("Pixelation prototype entered the roll pool");
+        aura::DebugActions pixels; pixels.preview=pixelation; auto_=true; applyDebugActions(pixels);
+        time_=0; movement_=0; walk_=0; distance_=11; pitch_=.25f; yaw_=.15f; render(false);
+        if(auto_ || presentation_.shown(progress_)!=pixelation || !renderer_->pixelationCount() ||
+            progress_.counts!=pixelationCounts || progress_.rolls!=pixelationRolls || log_.size()!=pixelationLogs ||
+            std::filesystem::file_size(saves_/L"rolls.csv")!=pixelationLogBytes || progress_.equipped!=chosen)
+            throw std::runtime_error("Pixelation preview modified progress/history or did not stop AutoRoll");
+        cooldown_=0; roll();
+        if(presentation_.shown(progress_)!=pixelation || progress_.equipped!=chosen ||
+            progress_.rolls!=pixelationRolls+1 || log_.size()!=std::min<std::size_t>(200,pixelationLogs+1) ||
+            progress_.counts[pixelation]!=pixelationCounts[pixelation])
+            throw std::runtime_error("Roll replaced Pixelation preview or rolled the preview-only aura");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false);
+        if(!renderer_->pixelationCount()) throw std::runtime_error("Pixelation resize to 1000x700 failed");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        if(!renderer_->pixelationCount()) throw std::runtime_error("Pixelation resize back to 1440x900 failed");
+        const auto pixelationBegin=Clock::now();
+        for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
+        const double meanPixelationMs=std::chrono::duration<double,std::milli>(Clock::now()-pixelationBegin).count()/60;
+        const auto pixelationInstances=renderer_->pixelationCount();
+        cooldown_=0; time_=.25f; render(false); captureExtra(L"-pixelation");
+        for(int i=0;i<24;++i) {
+            time_=i/12.f; render(false);
+            if(!renderer_->pixelationCount()) throw std::runtime_error("Pixelation animation lost its effect geometry");
+            const auto suffix=L"-pixelation-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+        }
+        applyDebugActions(previewCommand); render(false);
+        if(renderer_->pixelationCount()) throw std::runtime_error("Pixelation geometry remained after switching aura");
+        action({aura::Action::Equip,chosen});
+        distance_=previewDistance; pitch_=previewPitch; yaw_=previewYaw; time_=previewTime;
         const auto beforeSettingsRolls=progress_.rolls; const auto beforeSettingsLogs=log_.size();
         double vrmFrameMs=0;
         aura::DebugActions world; world.luck=25; world.biome=aura::Biome::Desert; applyDebugActions(world);
@@ -322,7 +363,7 @@ private:
         render(false); captureExtra(L"-desert");
         world.biome=aura::Biome::Normal; applyDebugActions(world); render(false);
         world.biome=aura::Biome::Desert; world.luck=1; applyDebugActions(world);
-        previewCommand.preview=roller_.catalog().size()-1; applyDebugActions(previewCommand); update(.4f); render(false); captureExtra(L"-space");
+        previewCommand.preview=singularity; applyDebugActions(previewCommand); update(.4f); render(false); captureExtra(L"-space");
         for(unsigned level=0;level<=3;++level) {
             aura::DebugActions effect; effect.auraLevel=level; auto_=true; applyDebugActions(effect); render(false);
             if(auto_ || presentation_.level(progress_,roller_.catalog())!=level ||
@@ -342,9 +383,17 @@ private:
             const auto deadline=Clock::now()+std::chrono::seconds(45);
             do {render(false); Sleep(10);} while(!renderer_->vrmReady() && Clock::now()<deadline && renderer_->vrmLoading());
             if(!renderer_->vrmReady() || renderer_->vrmVertices()==0) throw std::runtime_error("VRM import failed: "+renderer_->vrmStatus());
+            applyDebugActions(pixels); movement_=0; walk_=0; time_=.25f; distance_=11; pitch_=.25f; render(false); captureExtra(L"-vrm-pixelation");
+            if(!renderer_->pixelationCount() || !renderer_->vrmReady()) throw std::runtime_error("Pixelation VRM preview failed");
+            const auto pixelationFixedA=renderer_->vrmBone(4);
+            movement_=1; walk_=2; render(false); const auto pixelationFixedB=renderer_->vrmBone(4);
+            if(std::abs(pixelationFixedA.x-pixelationFixedB.x)+std::abs(pixelationFixedA.y-pixelationFixedB.y)+
+                std::abs(pixelationFixedA.z-pixelationFixedB.z)>.00001f)
+                throw std::runtime_error("Moving changed the fixed Pixelation VRM pose");
             aura::DebugActions common; common.preview=0; applyDebugActions(common);
             movement_=0; walk_=0; distance_=7; pitch_=.20f; yaw_=.15f;
             render(false); captureExtra(L"-vrm");
+            if(renderer_->pixelationCount()) throw std::runtime_error("Pixelation remained after VRM aura switch");
             movement_=1; walk_=.5f; render(false); const auto kneeA=renderer_->vrmBone(4); captureExtra(L"-vrm-walk-a");
             walk_=1.5f; render(false); const auto kneeB=renderer_->vrmBone(4); captureExtra(L"-vrm-walk-b");
             if(!opts_.capture.empty() && renderer_->vrmVertices()>4) {
@@ -384,8 +433,11 @@ private:
                <<renderer_->instanceCount()<<"\nMean frame submission time: "<<seconds/60*1000
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: 64 x 64 world units / four times each original dimension\n";
+            out<<"Pixelation: PASS / preview-only, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
+               <<"Pixelation instances: "<<pixelationInstances<<"\nMean Pixelation frame submission time: "<<meanPixelationMs
+               <<" ms/frame (60 offscreen frames, no vsync)\n";
             if(!opts_.vrm.empty()) out<<"VRM: PASS / "<<renderer_->vrmVertices()<<" vertices / "<<renderer_->vrmDraws()<<" additional draw calls / "<<vrmFrameMs
-                <<" ms/frame submission / standing, walking, fixed pose during movement, textures, reload and missing-file fallback\n";
+                <<" ms/frame submission / standing, walking, Singularity and Pixelation fixed poses during movement, textures, reload and missing-file fallback\n";
             if(!opts_.bgm.empty()) out<<"BGM: PASS / "<<music_.decodedBytes()<<" decoded PCM bytes / supplied and bundled tracks, loop, stop and restart\n";
             if(!out) throw std::runtime_error("Cannot write smoke report");
         }

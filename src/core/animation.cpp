@@ -22,6 +22,15 @@ AvatarPose avatarPose(float time,float walkPhase,float movement,bool singularity
     p.bodyRoll=.025f*swing;
     return p;
 }
+AvatarPose pixelationPose(float time) {
+    AvatarPose p;
+    p.fixed=true;
+    p.lift=.38f+.07f*std::sin(time*2.f);
+    p.bodyRoll=.025f*std::sin(time*1.5f);
+    p.armOut={.55f,.55f}; p.armPitch={-.35f,-.35f};
+    p.legPitch={-.07f,.10f}; p.legOut={.04f,.04f}; p.knee={-.04f,-.09f};
+    return p;
+}
 AbsorbedStar singularityStar(float time,unsigned index,unsigned count) {
     constexpr float Pi=3.14159265359f;
     const float u=static_cast<float>(index)/std::max(1u,count),phase=std::fmod(time*.20f+u,1.f);

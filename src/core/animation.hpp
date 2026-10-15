@@ -9,6 +9,7 @@ struct AvatarPose {
 };
 // Both renderers use this pose. Fixed auras ignore gait phase and movement blend.
 AvatarPose avatarPose(float time,float walkPhase,float movement,bool singularity);
+AvatarPose pixelationPose(float time);
 struct AbsorbedStar { float x{},y{},z{},size{}; };
 AbsorbedStar singularityStar(float time,unsigned index,unsigned count);
 }
