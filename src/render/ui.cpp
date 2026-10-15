@@ -6,6 +6,9 @@
 #include <cmath>
 #include <utility>
 #include <stdexcept>
+#include <shobjidl.h>
+#include <sstream>
+#include <iomanip>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -17,6 +20,18 @@ const D2D1_COLOR_F Mint = D2D1::ColorF(.55f,.96f,.82f), Panel = D2D1::ColorF(.04
 const D2D1_COLOR_F Border = D2D1::ColorF(.13f,.19f,.23f);
 D2D1_COLOR_F tint(Color c, float alpha=1) { return {c.r,c.g,c.b,alpha}; }
 bool inside(float x,float y,float rx,float ry,float w,float h) { return x>=rx && x<rx+w && y>=ry && y<ry+h; }
+std::optional<std::string> chooseAsset(HWND owner,bool vrm) {
+    ComPtr<IFileOpenDialog> dialog;
+    if(FAILED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))) return {};
+    const COMDLG_FILTERSPEC filter=vrm?COMDLG_FILTERSPEC{L"VRM avatar (*.vrm)",L"*.vrm"}:COMDLG_FILTERSPEC{L"Audio (*.mp3;*.wav;*.m4a)",L"*.mp3;*.wav;*.m4a"};
+    dialog->SetFileTypes(1,&filter); dialog->SetTitle(vrm?L"Select VRM avatar / VRMアバターを選択":L"Select Singularity BGM / BGMを選択");
+    dialog->SetOptions(FOS_FILEMUSTEXIST|FOS_PATHMUSTEXIST|FOS_FORCEFILESYSTEM|FOS_NOCHANGEDIR);
+    if(FAILED(dialog->Show(owner))) return {};
+    ComPtr<IShellItem> item; if(FAILED(dialog->GetResult(&item))) return {};
+    PWSTR value{}; if(FAILED(item->GetDisplayName(SIGDN_FILESYSPATH,&value))) return {};
+    const auto path=std::filesystem::path(value).u8string(); CoTaskMemFree(value);
+    return std::string(reinterpret_cast<const char*>(path.data()),path.size());
+}
 }
 Renderer::~Renderer() {
     if (!imguiContext_) return;
@@ -76,7 +91,9 @@ void Renderer::debugUi(const Frame& f) {
         const auto display=ImGui::GetIO().DisplaySize;
         ImGui::SetNextWindowPos({std::max(12.f,display.x-466),92},ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize({450,std::min(690.f,std::max(420.f,display.y-112))},ImGuiCond_FirstUseEver);
-        if (ImGui::Begin(t("Star's RNG | Debug###StarDebug","Star's RNG | デバッグ###StarDebug"),&debugOpen_)) {
+        const bool expanded=ImGui::Begin(t("Star's RNG | Debug###StarDebug","Star's RNG | デバッグ###StarDebug"),&debugOpen_);
+        const auto pos=ImGui::GetWindowPos(),size=ImGui::GetWindowSize(); debugBounds_={pos.x,pos.y,size.x,size.y};
+        if (expanded) {
             ImGui::TextColored({.55f,.96f,.82f,1},"STAR'S RNG  /  ALPHA 0.1");
             ImGui::TextDisabled("Dear ImGui %s  |  F1",IMGUI_VERSION);
             ImGui::Separator();
@@ -86,6 +103,8 @@ void Renderer::debugUi(const Frame& f) {
                 debugActions_.language=selectedLanguage?Language::Japanese:Language::English;
             if (!japaneseFont_) ImGui::TextWrapped("A Japanese Windows font is unavailable. Install Japanese supplemental fonts for this panel.");
             ImGui::Spacing();
+            if(ImGui::BeginTabBar("DebugTabs")) {
+            if(ImGui::BeginTabItem(t("World","ワールド"))) {
             ImGui::BeginDisabled(f.cooldown>0);
             if (ImGui::Button(t("Roll##debugRoll","ロール##debugRoll"),{120,32})) debugActions_.roll=true;
             ImGui::EndDisabled(); ImGui::SameLine();
@@ -93,12 +112,46 @@ void Renderer::debugUi(const Frame& f) {
                 t("Start AutoRoll##debugAuto","自動ロール開始##debugAuto"),{220,32})) debugActions_.toggleAuto=true;
             ImGui::Text(t("Cooldown: %.2f s","クールタイム: %.2f 秒"),f.cooldown);
             ImGui::Separator();
-            ImGui::TextUnformatted(t("AVATAR / SHIRT","アバター / 服の色"));
+            double luck=f.roller.luck(); const double minLuck=1,maxLuck=1'000'000;
+            if(ImGui::DragScalar(t("Luck multiplier","Luck倍率"),ImGuiDataType_Double,&luck,.25f,&minLuck,&maxLuck,"%.2fx",ImGuiSliderFlags_AlwaysClamp)) debugActions_.luck=luck;
+            if(ImGui::SmallButton(t("Reset Luck / 1x","Luckを1倍に戻す"))) debugActions_.luck=1;
+            ImGui::TextWrapped("%s",t("1x uses the base odds. Lx has the rarity distribution of the best of L rolls. One result is recorded per Roll.",
+                "1倍は基本確率です。L倍ではL回分の最もレアな結果と同じ確率になります。ロール1回につき結果は1個です。"));
+            int biome=static_cast<int>(f.presentation.settings.biome);
+            const char* biomes[]={t("Normal / Quiet Garden","通常 / 静かな庭園"),t("Desert / Sunlit Dunes","砂漠 / 陽光の砂丘")};
+            if(ImGui::Combo(t("Biome","バイオーム"),&biome,biomes,2)) debugActions_.biome=static_cast<Biome>(biome);
+            ImGui::TextDisabled("%s",t("Biome currently changes the scenery.","現在のバイオーム変更は景観に反映されます。"));
+            ImGui::Separator();
+            ImGui::TextUnformatted(t("CURRENT ODDS / WITH LUCK","現在の排出確率 / Luck反映後"));
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) {
+                const auto tickets=f.roller.tickets(i);
+                const double percent=100.*static_cast<double>(tickets)/TicketPool;
+                ImGui::Text("%s: %.9g%%",displayName(f.roller.catalog()[i],language).c_str(),percent);
+            }
+            ImGui::EndTabItem();
+            }
+            if(ImGui::BeginTabItem(t("Avatar","アバター"))) {
+            int avatar=static_cast<int>(f.presentation.settings.avatar);
+            const char* avatars[]={t("Block avatar","ブロックアバター"),t("VRM avatar","VRMアバター")};
+            if(ImGui::Combo(t("Avatar type","アバター形式"),&avatar,avatars,2)) debugActions_.avatar=static_cast<Avatar>(avatar);
+            if(ImGui::Button(t("Choose VRM...","VRMを選択..."),{-1,32})) {
+                if(auto path=chooseAsset(window_,true)) {debugActions_.vrmPath=*path; debugActions_.avatar=Avatar::Vrm;}
+            }
+            ImGui::TextWrapped("%s",f.presentation.settings.vrmPath.c_str());
+            ImGui::TextWrapped("%s",vrmStatus_.c_str());
+            ImGui::TextWrapped("%s",t("VRM 0.x / 1.0, embedded textures, neutral pose. Block avatar is shown while loading or on import error.",
+                "VRM 0.x / 1.0の埋め込みテクスチャと標準ポーズを表示します。読み込み中やエラー時はブロックを表示します。"));
+            ImGui::Separator();
+            ImGui::TextUnformatted(t("BLOCK AVATAR / SHIRT","ブロックアバター / 服の色"));
             const auto shirt=f.presentation.settings.shirt;
             float rgb[]={shirt.r,shirt.g,shirt.b};
             if (ImGui::ColorEdit3(t("Shirt color","服の色"),rgb,ImGuiColorEditFlags_Float|ImGuiColorEditFlags_PickerHueWheel))
                 debugActions_.shirt=Color{rgb[0],rgb[1],rgb[2]};
             if (ImGui::SmallButton(t("Reset shirt color","服の色をリセット"))) debugActions_.shirt=Settings{}.shirt;
+            ImGui::TextWrapped("%s",t("Singularity gives the block avatar a floating, zero-gravity pose.","Singularity表示時はブロックアバターが無重力のポーズになります。"));
+            ImGui::EndTabItem();
+            }
+            if(ImGui::BeginTabItem(t("Auras","オーラ"))) {
             ImGui::Separator();
             ImGui::TextUnformatted(t("AURA PREVIEW / ALL AURAS","オーラプレビュー / 全種類"));
             ImGui::TextWrapped("%s",t("Includes unowned auras. Preview stops AutoRoll and does not add inventory or history.",
@@ -116,7 +169,21 @@ void Renderer::debugUi(const Frame& f) {
                 }
             }
             ImGui::EndChild();
-            ImGui::TextDisabled("%s",t("Language and shirt color are saved automatically.","言語と服の色は自動保存されます。"));
+            ImGui::EndTabItem();
+            }
+            if(ImGui::BeginTabItem(t("Audio","音楽"))) {
+                ImGui::TextWrapped("%s",t("The selected track loops only while Singularity is displayed, including Debug Preview.","選択した曲はSingularity表示中のみループします。デバッグプレビューにも対応します。"));
+                if(ImGui::Button(t("Choose BGM...","BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.bgmPath=*path;
+                ImGui::TextWrapped("%s",f.presentation.settings.bgmPath.c_str());
+                float volume=f.presentation.settings.volume;
+                if(ImGui::SliderFloat(t("Volume","音量"),&volume,0,1,"%.2f")) debugActions_.volume=volume;
+                ImGui::TextWrapped("%s",f.musicStatus.c_str());
+                if(ImGui::Button(t("Clear BGM selection","BGMの選択を解除"))) debugActions_.bgmPath=std::string{};
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+            }
+            ImGui::TextDisabled("%s",t("Settings are saved automatically.","設定は自動保存されます。"));
         }
         ImGui::End();
     }
@@ -204,9 +271,10 @@ void Renderer::ui(const Frame& f) {
     }
     stroke(256,96,w-596,h-280,Border,14);
     label(t("SANCTUARY","サンクチュアリ"),276,116,190,25,12,White,true);
-    label(t("01 / THE QUIET GARDEN","01 / 静かな庭園"),276,140,240,20,10,Muted);
+    const bool desert=f.presentation.settings.biome==Biome::Desert;
+    label(desert?t("02 / SUNLIT DUNES","02 / 陽光の砂丘"):t("01 / THE QUIET GARDEN","01 / 静かな庭園"),276,140,240,20,10,Muted);
     rect(w-487,114,130,26,D2D1::ColorF(.05f,.10f,.12f,.90f),13);
-    label(t("BIOME / NORMAL","バイオーム / 通常"),w-475,121,125,18,10,Mint);
+    label(desert?t("BIOME / DESERT","バイオーム / 砂漠"):t("BIOME / NORMAL","バイオーム / 通常"),w-475,121,125,18,10,Mint);
     const float titleY=h-281;
     label(f.presentation.preview?t("DEBUG PREVIEW","デバッグプレビュー"):t("EQUIPPED AURA","装備中のオーラ"),276,titleY,300,20,10,Muted,true);
     label(name(shown),276,titleY+23,w-650,45,32,tint(equipped.color),true);
@@ -248,7 +316,8 @@ void Renderer::ui(const Frame& f) {
     text(L"CSV / UTC",w-147,by+36,100,18,10,Muted);
     label(t("SPACE / ROLL   WASD / MOVE   RIGHT DRAG / ORBIT   WHEEL / ZOOM   F1 / DEBUG",
         "SPACE / ロール   WASD / 移動   右ドラッグ / 回転   ホイール / ズーム   F1 / デバッグ"),24,h-39,w-200,23,11,Muted);
-    label(t("LUCK 1.00x","幸運 1.00倍"),w-136,h-39,112,22,11,Mint,true);
+    std::ostringstream luckText; luckText<<t("LUCK ","幸運 ")<<std::fixed<<std::setprecision(f.roller.luck()>=1000?0:2)<<f.roller.luck()<<"x";
+    label(luckText.str(),w-150,h-39,134,22,11,Mint,true);
     if (!f.notice.empty()) {
         rect(276,174,w-650,56,D2D1::ColorF(.23f,.13f,.10f,.94f),8);
         label(f.notice,288,188,w-680,28,12,D2D1::ColorF(1,.75f,.56f));

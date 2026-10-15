@@ -1,5 +1,6 @@
 #include "core/aura.hpp"
 #include "render/renderer.hpp"
+#include "platform/audio.hpp"
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -16,6 +17,7 @@ using Clock=std::chrono::steady_clock;
 struct Options {
     bool smoke{},warp{},debug{};
     std::filesystem::path capture, report, saveDir;
+    std::filesystem::path vrm,bgm;
     std::uint64_t seed{};
 };
 Options options() {
@@ -28,6 +30,8 @@ Options options() {
         if(a==L"--smoke-test") result.smoke=true;
         else if(a==L"--warp") result.warp=true;
         else if(a==L"--debug") result.debug=true;
+        else if(a.starts_with(L"--vrm=")) result.vrm=a.substr(6);
+        else if(a.starts_with(L"--bgm=")) result.bgm=a.substr(6);
         else if(a.starts_with(L"--capture=")) result.capture=a.substr(10);
         else if(a.starts_with(L"--report=")) result.report=a.substr(9);
         else if(a.starts_with(L"--save-dir=")) result.saveDir=a.substr(11);
@@ -65,6 +69,10 @@ public:
         log_.reserve(200);
         try { presentation_.settings=aura::loadSettings(saves_/L"settings.txt"); }
         catch(const std::exception&) { notice_="Settings could not be read. Defaults are in use."; }
+        auto utf8=[](const std::filesystem::path& p) {const auto u=p.u8string(); return std::string(reinterpret_cast<const char*>(u.data()),u.size());};
+        if(!opts_.vrm.empty()) presentation_.settings.vrmPath=utf8(opts_.vrm);
+        if(!opts_.bgm.empty()) presentation_.settings.bgmPath=utf8(opts_.bgm);
+        roller_.setLuck(presentation_.settings.luck);
     }
     aura::Frame frame() const {
         std::string notice=notice_;
@@ -77,7 +85,7 @@ public:
             else if(notice_=="Settings could not be saved.") notice="言語と服の色の設定を保存できませんでした。";
         }
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
-            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice};
+            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,music_.status(),pitch_};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -159,7 +167,13 @@ private:
         if(commands.toggleAuto) auto_=!auto_;
         if(commands.language) presentation_.settings.language=*commands.language;
         if(commands.shirt) presentation_.settings.shirt=*commands.shirt;
-        if(commands.language || commands.shirt) {
+        if(commands.luck) {roller_.setLuck(*commands.luck); presentation_.settings.luck=roller_.luck();}
+        if(commands.avatar) presentation_.settings.avatar=*commands.avatar;
+        if(commands.biome) presentation_.settings.biome=*commands.biome;
+        if(commands.vrmPath) {presentation_.settings.vrmPath=*commands.vrmPath; renderer_->reloadVrm();}
+        if(commands.bgmPath) {presentation_.settings.bgmPath=*commands.bgmPath; music_.reload();}
+        if(commands.volume) presentation_.settings.volume=*commands.volume;
+        if(commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath || commands.volume) {
             try { aura::saveSettings(saves_/L"settings.txt",presentation_.settings); }
             catch(const std::exception&) { notice_="Settings could not be saved."; }
         }
@@ -168,6 +182,8 @@ private:
         time_+=dt; cooldown_=std::max(0.f,cooldown_-dt);
         if(pending_) { action(*pending_); pending_.reset(); }
         if(auto_ && cooldown_<=0) roll();
+        const auto& s=presentation_.settings;
+        music_.update(std::filesystem::path(aura::widen(s.bgmPath)),roller_.catalog()[presentation_.shown(progress_)].id=="singularity",s.volume,dt);
         if((foreground_ || opts_.smoke) && !renderer_->wantsKeyboard()) {
             float mx=0,mz=0;
             if(keys_['W'] || keys_[VK_UP]) mz+=1;
@@ -218,6 +234,25 @@ private:
         SendMessageW(window_,WM_KEYUP,'F',0);
         SendMessageW(window_,WM_KEYDOWN,'W',0); update(.2f); SendMessageW(window_,WM_KEYUP,'W',0);
         if(std::abs(x_)+std::abs(z_)<.1f) throw std::runtime_error("Movement smoke check failed");
+        auto checkOrbit=[&] {
+            const float yawBefore=yaw_,pitchBefore=pitch_;
+            SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(540,340));
+            SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(580,360));
+            if(!dragging_ || yaw_<=yawBefore || pitch_<=pitchBefore) throw std::runtime_error("Right-drag orbit failed");
+            SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(1000,410)); // Continue over the debug window.
+            SendMessageW(window_,WM_RBUTTONUP,0,MAKELPARAM(1000,410));
+            const float released=yaw_;
+            SendMessageW(window_,WM_MOUSEMOVE,0,MAKELPARAM(1020,420));
+            if(dragging_ || yaw_!=released) throw std::runtime_error("Right-drag release failed");
+            yaw_=yawBefore; pitch_=pitchBefore;
+        };
+        checkOrbit();
+        if(!renderer_->debugOpen()) renderer_->toggleDebug();
+        render(false); render(false); checkOrbit();
+        SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(540,340));
+        SendMessageW(window_,WM_CAPTURECHANGED,0,0);
+        if(dragging_) throw std::runtime_error("Orbit capture loss did not cancel drag");
+        renderer_->toggleDebug();
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false);
         if(!opts_.capture.empty()) {
             auto captureSmall=opts_.capture.parent_path()/(opts_.capture.stem().wstring()+L"-small.png"); renderer_->capture(captureSmall);
@@ -262,16 +297,58 @@ private:
             if(renderer_->debugOpen()) { SendMessageW(window_,WM_KEYDOWN,VK_F1,0); update(0); }
             presentation_.preview.reset(); cooldown_=0; render(false); captureVariant(L"-complete");
         }
+        auto captureExtra=[&](const wchar_t* suffix) {
+            if(!opts_.capture.empty()) renderer_->capture(opts_.capture.parent_path()/(opts_.capture.stem().wstring()+suffix+L".png"));
+        };
+        const auto beforeSettingsRolls=progress_.rolls; const auto beforeSettingsLogs=log_.size();
+        double vrmFrameMs=0;
+        aura::DebugActions world; world.luck=25; world.biome=aura::Biome::Desert; applyDebugActions(world);
+        if(roller_.luck()!=25 || presentation_.settings.biome!=aura::Biome::Desert) throw std::runtime_error("World settings actions failed");
+        render(false); captureExtra(L"-desert");
+        world.biome=aura::Biome::Normal; applyDebugActions(world); render(false);
+        world.biome=aura::Biome::Desert; world.luck=1; applyDebugActions(world);
+        previewCommand.preview=roller_.catalog().size()-1; applyDebugActions(previewCommand); update(.4f); render(false); captureExtra(L"-space");
+        if(!opts_.bgm.empty()) {
+            if(!music_.playing() || !music_.decodedBytes()) throw std::runtime_error("BGM playback failed: "+music_.status());
+            aura::DebugActions common; common.preview=0; applyDebugActions(common); update(.6f);
+            if(music_.playing()) throw std::runtime_error("BGM did not stop after leaving Singularity");
+            applyDebugActions(previewCommand); update(.4f);
+            if(!music_.playing()) throw std::runtime_error("BGM did not restart on Singularity");
+        }
+        if(!opts_.vrm.empty()) {
+            aura::DebugActions avatar; avatar.avatar=aura::Avatar::Vrm; applyDebugActions(avatar);
+            const auto deadline=Clock::now()+std::chrono::seconds(45);
+            do {render(false); Sleep(10);} while(!renderer_->vrmReady() && Clock::now()<deadline && renderer_->vrmLoading());
+            if(!renderer_->vrmReady() || renderer_->vrmVertices()==0) throw std::runtime_error("VRM import failed: "+renderer_->vrmStatus());
+            distance_=7; pitch_=.20f; yaw_=.15f;
+            render(false); captureExtra(L"-vrm");
+            const auto vrmBegin=Clock::now();
+            for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
+            vrmFrameMs=std::chrono::duration<double,std::milli>(Clock::now()-vrmBegin).count()/60;
+            avatar.avatar=aura::Avatar::Block; applyDebugActions(avatar); render(false);
+            avatar.avatar=aura::Avatar::Vrm; applyDebugActions(avatar); render(false);
+            if(!renderer_->vrmReady()) throw std::runtime_error("VRM switch-back failed");
+            avatar.vrmPath=presentation_.settings.vrmPath+".missing"; applyDebugActions(avatar);
+            do {render(false); Sleep(10);} while(renderer_->vrmLoading() && Clock::now()<deadline);
+            if(renderer_->vrmReady() || renderer_->vrmLoading()) throw std::runtime_error("Missing VRM fallback failed");
+            const auto u=opts_.vrm.u8string(); avatar.vrmPath=std::string(reinterpret_cast<const char*>(u.data()),u.size()); applyDebugActions(avatar);
+            do {render(false); Sleep(10);} while(!renderer_->vrmReady() && Clock::now()<deadline && renderer_->vrmLoading());
+            if(!renderer_->vrmReady()) throw std::runtime_error("VRM reload failed");
+        }
+        if(progress_.rolls!=beforeSettingsRolls || log_.size()!=beforeSettingsLogs) throw std::runtime_error("World/avatar/audio settings modified roll history");
         persist();
         const auto restored=aura::loadProgress(saves_/L"progress.txt",roller_.catalog());
         if(restored.counts!=progress_.counts) throw std::runtime_error("Progress smoke check failed");
         if(restored.equipped!=chosen) throw std::runtime_error("Collection equipment was not saved");
         if(!opts_.report.empty()) {
             std::ofstream out(opts_.report);
-            out<<"PASS: D3D11 + D2D + Dear ImGui, resize, roll, cooldown, AutoRoll, movement, save restore, fixed equipment, preview isolation\n"
-               <<"Adapter: "<<renderer_->adapterName()<<"\nResolution: 1440x900\nWorld draw calls: 1\nInstances: "
+            out<<"PASS: D3D11 + D2D + Dear ImGui, resize, roll, cooldown, AutoRoll, movement, save restore, fixed equipment, preview isolation, Luck, biome switching, right-drag orbit (debug open/closed, release/capture loss)\n"
+               <<"Adapter: "<<renderer_->adapterName()<<"\nResolution: 1440x900\nBlock world draw calls: 1\nFinal instances: "
                <<renderer_->instanceCount()<<"\nMean frame submission time: "<<seconds/60*1000
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
+            if(!opts_.vrm.empty()) out<<"VRM: PASS / "<<renderer_->vrmVertices()<<" vertices / "<<renderer_->vrmDraws()<<" additional draw calls / "<<vrmFrameMs
+                <<" ms/frame submission / textured rendering, block switch, reload and missing-file fallback\n";
+            if(!opts_.bgm.empty()) out<<"BGM: PASS / "<<music_.decodedBytes()<<" decoded PCM bytes / loop, stop and restart\n";
             if(!out) throw std::runtime_error("Cannot write smoke report");
         }
         return 0;
@@ -285,6 +362,24 @@ private:
         if(!app) return DefWindowProcW(window,message,wp,lp);
         if(message==WM_KEYUP && wp<256) app->keys_[wp]=false;
         if(message==WM_KEYDOWN && wp==VK_F1 && !(lp & (1LL<<30))) { app->pending_=aura::Hit{aura::Action::Debug,0}; return 0; }
+        // Once a drag starts on the stage it owns the mouse until release or
+        // capture loss. ImGui's previous-frame capture flag must not interrupt it.
+        if(message==WM_RBUTTONDOWN && app->renderer_ && app->renderer_->canOrbit(
+            static_cast<float>(GET_X_LPARAM(lp)),static_cast<float>(GET_Y_LPARAM(lp)))) {
+            app->lastMouseX_=GET_X_LPARAM(lp); app->lastMouseY_=GET_Y_LPARAM(lp);
+            app->dragging_=true; SetFocus(window); SetCapture(window); return 0;
+        }
+        if(message==WM_MOUSEMOVE && app->dragging_) {
+            const int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
+            app->mouseX_=static_cast<float>(x); app->mouseY_=static_cast<float>(y);
+            app->yaw_+=(x-app->lastMouseX_)*.008f;
+            app->pitch_=std::clamp(app->pitch_+(y-app->lastMouseY_)*.006f,.12f,1.28f);
+            app->lastMouseX_=x; app->lastMouseY_=y; return 0;
+        }
+        if(message==WM_RBUTTONUP && app->dragging_) {
+            app->dragging_=false; ReleaseCapture(); return 0;
+        }
+        if(message==WM_CAPTURECHANGED) app->dragging_=false;
         if(app->renderer_ && app->renderer_->handleMessage(window,message,wp,lp)) return 0;
         // No disk I/O or throwing renderer calls are made inside the window procedure.
         switch(message) {
@@ -314,16 +409,11 @@ private:
         case WM_LBUTTONUP:
             if(app->renderer_) app->pending_=app->renderer_->hit(static_cast<float>(GET_X_LPARAM(lp)),static_cast<float>(GET_Y_LPARAM(lp)),app->frame());
             return 0;
-        case WM_RBUTTONDOWN:
-            if(app->renderer_ && app->renderer_->region(static_cast<float>(GET_X_LPARAM(lp)),static_cast<float>(GET_Y_LPARAM(lp)))==0) {
-                app->dragging_=true; app->lastMouseX_=GET_X_LPARAM(lp); SetCapture(window);
-            }
-            return 0;
+        case WM_RBUTTONDOWN: return 0;
         case WM_RBUTTONUP: app->dragging_=false; ReleaseCapture(); return 0;
         case WM_CAPTURECHANGED: app->dragging_=false; return 0;
         case WM_MOUSEMOVE:
             app->mouseX_=static_cast<float>(GET_X_LPARAM(lp)); app->mouseY_=static_cast<float>(GET_Y_LPARAM(lp));
-            if(app->dragging_) { app->yaw_+=(app->mouseX_-app->lastMouseX_)*.008f; app->lastMouseX_=GET_X_LPARAM(lp); }
             return 0;
         case WM_MOUSEWHEEL: {
             POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)}; ScreenToClient(window,&p);
@@ -339,11 +429,13 @@ private:
     }
     Options opts_; std::filesystem::path root_,saves_;
     aura::Roller roller_; aura::Progress progress_; aura::Presentation presentation_; std::vector<aura::LogEntry> log_;
+    aura::Music music_;
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;
     bool quitting_{},minimized_{},foreground_{true},auto_{},dragging_{};
     unsigned pendingWidth_{},pendingHeight_{},fpsFrames_{};
-    int collectionScroll_{},logScroll_{},lastMouseX_{};
+    int collectionScroll_{},logScroll_{},lastMouseX_{},lastMouseY_{};
+    float pitch_{.52f};
     float time_{},cooldown_{},x_{},z_{},facing_{},walk_{},yaw_{.45f},distance_{11},mouseX_{-1},mouseY_{-1},fps_{};
     std::string notice_;
     Clock::time_point last_{},fpsStart_{Clock::now()},lastBackground_{};

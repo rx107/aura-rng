@@ -161,24 +161,54 @@ void Renderer::box(float x,float y,float z,float sx,float sy,float sz,Color colo
     XMStoreFloat4x4(&instance.world,XMMatrixScaling(sx,sy,sz)*XMMatrixRotationY(rotation)*XMMatrixTranslation(x,y,z));
     instance.color={color.r,color.g,color.b,glow}; instances_.push_back(instance);
 }
+void Renderer::updateVrm(const Frame& f) {
+    const auto& s=f.presentation.settings;
+    if(vrmFuture_.valid() && vrmFuture_.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
+        try { vrm_=vrmFuture_.get(); loadedVrm_=loadingVrm_; vrmStatus_=vrm_->title+" / "+formatNumber(vrm_->vertexCount())+" vertices"; }
+        catch(const std::exception& e) { vrmStatus_=e.what(); }
+    }
+    if(s.avatar!=Avatar::Vrm || vrmFuture_.valid()) return;
+    if(requestedVrm_==s.vrmPath) return;
+    requestedVrm_=s.vrmPath;
+    if(s.vrmPath.empty()) { vrmStatus_="Choose a VRM file"; return; }
+    loadingVrm_=s.vrmPath; vrmStatus_="Loading VRM...";
+    const auto device=device_; const auto path=std::filesystem::path(widen(s.vrmPath));
+    vrmFuture_=std::async(std::launch::async,[device,path] {
+        const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+        struct Cleanup { HRESULT result; ~Cleanup(){if(SUCCEEDED(result)) CoUninitialize();} } cleanup{com};
+        checked(com,"VRM loader COM"); return VrmAvatar::load(device.Get(),path);
+    });
+}
 void Renderer::world(const Frame& f) {
     instances_.clear();
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
-    box(0,-.6f,0,16,1.0f,16,{.095f,.15f,.18f});
-    box(0,-.12f,0,15.7f,.10f,15.7f,{.17f,.28f,.29f});
+    const bool desert=f.presentation.settings.biome==Biome::Desert;
+    box(0,-.6f,0,16,1.0f,16,desert?Color{.38f,.23f,.13f}:Color{.095f,.15f,.18f});
+    box(0,-.12f,0,15.7f,.10f,15.7f,desert?Color{.68f,.46f,.24f}:Color{.17f,.28f,.29f});
     for (int x=-7;x<=7;++x) for (int z=-7;z<=7;++z) {
         const bool path=std::abs(x)<=1 || std::abs(z)<=1;
         const float checker=((x+z)%2==0)?.035f:0;
-        const Color c=path?Color{.27f+checker,.34f+checker,.37f+checker}:Color{.14f+checker,.30f+checker,.26f+checker};
+        const Color c=desert?(path?Color{.72f+checker,.52f+checker,.31f+checker}:Color{.83f+checker,.64f+checker,.39f+checker}):
+            (path?Color{.27f+checker,.34f+checker,.37f+checker}:Color{.14f+checker,.30f+checker,.26f+checker});
         box(static_cast<float>(x),-.03f,static_cast<float>(z),.98f,.12f,.98f,c);
     }
     // A low central plinth and its emissive frame are built from the same cube mesh.
-    box(0,.07f,0,4.6f,.14f,4.6f,{.20f,.29f,.32f});
+    box(0,.07f,0,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:Color{.20f,.29f,.32f});
     for (int i=0;i<4;++i) {
         const float a=i*Pi/2; box(std::sin(a)*2.25f,.16f,std::cos(a)*2.25f,4.5f,.025f,.035f,d.color,a,1);
     }
     const float trees[][2]={{-5,-4},{5,4},{-5,5},{5,-5},{-6,1},{6,0}};
     for (const auto& p:trees) {
+        if(desert) {
+            const float tall=2.2f+.35f*std::sin(p[0]);
+            box(p[0],tall*.5f,p[1],.52f,tall,.50f,{.22f,.40f,.25f});
+            box(p[0]-.52f,1.15f,p[1],.62f,.30f,.32f,{.27f,.46f,.29f});
+            box(p[0]-.75f,1.45f,p[1],.30f,.85f,.32f,{.27f,.46f,.29f});
+            box(p[0]+.50f,.85f,p[1],.62f,.28f,.32f,{.25f,.43f,.27f});
+            box(p[0]+.74f,1.03f,p[1],.30f,.62f,.32f,{.25f,.43f,.27f});
+            box(p[0]+.8f,.15f,p[1]+.6f,.65f,.3f,.55f,{.55f,.37f,.24f},.3f);
+            continue;
+        }
         box(p[0],.85f,p[1],.4f,1.7f,.4f,{.21f,.20f,.18f});
         box(p[0],2.2f,p[1],1.9f,1.4f,1.9f,{.13f,.35f,.29f});
         box(p[0]-.1f,3.05f,p[1],1.3f,.6f,1.3f,{.21f,.45f,.34f});
@@ -187,16 +217,24 @@ void Renderer::world(const Frame& f) {
         box(x,.55f,z,.5f,1.1f,.5f,{.31f,.37f,.39f});
         box(x,1.15f,z,.56f,.14f,.56f,{.50f,.94f,.80f},0,1);
     }
-    // The avatar uses original primitive geometry; no external models or textures.
+    // The lightweight primitive avatar remains available while a VRM is loading.
+    const bool useVrm=f.presentation.settings.avatar==Avatar::Vrm && vrmReady();
+    const bool floating=d.id=="singularity";
     const float bob=.025f*std::sin(f.time*2), swing=.14f*std::sin(f.walk*9);
-    const float ca=std::cos(f.facing),sa=std::sin(f.facing);
-    auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c) {
-        box(f.avatarX+x*ca+z*sa,y+bob,f.avatarZ-x*sa+z*ca,sx,sy,sz,c,f.facing);
+    auto base=XMMatrixRotationX(floating?-.22f:0)*XMMatrixRotationZ(floating?.08f*std::sin(f.time*.6f):0)*
+        XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,bob+(floating?.55f+.12f*std::sin(f.time*.8f):0),f.avatarZ);
+    auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,float pitch=0.f,float roll=0.f) {
+        if(useVrm) return;
+        Instance instance{};
+        XMStoreFloat4x4(&instance.world,XMMatrixScaling(sx,sy,sz)*XMMatrixRotationRollPitchYaw(pitch,0,roll)*XMMatrixTranslation(x,y,z)*base);
+        instance.color={c.r,c.g,c.b,0}; instances_.push_back(instance);
     };
     const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
-    part(-.27f,.62f,swing,.46f,.95f,.52f,pants); part(.27f,.62f,-swing,.46f,.95f,.52f,pants);
+    part(-.30f,.64f,floating?-.14f:swing,.46f,.95f,.52f,pants,floating?-.35f:0,floating?-.13f:0);
+    part(.33f,.70f,floating?.2f:-swing,.46f,.95f,.52f,pants,floating?.50f:0,floating?.18f:0);
     part(0,1.56f,0,1.03f,.96f,.60f,shirt);
-    part(-.77f,1.56f,-swing,.43f,.96f,.54f,skin); part(.77f,1.56f,swing,.43f,.96f,.54f,skin);
+    part(floating?-.94f:-.77f,floating?1.88f:1.56f,-swing,.43f,.96f,.54f,skin,floating?-.3f:0,floating?-.9f:0);
+    part(floating?.94f:.77f,floating?1.91f:1.56f,swing,.43f,.96f,.54f,skin,floating?-.3f:0,floating?.95f:0);
     part(0,2.42f,0,.73f,.73f,.73f,skin);
     part(-.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f});
     part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f});
@@ -215,8 +253,8 @@ void Renderer::world(const Frame& f) {
     }
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
-    const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*f.cameraDistance,
-        f.cameraDistance*.57f,f.avatarZ-std::cos(f.cameraYaw)*f.cameraDistance,1);
+    const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,
+        1.1f+std::sin(f.cameraPitch)*f.cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,1);
     const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,1.1f,f.avatarZ,1),XMVectorSet(0,1,0,0));
     const auto projection=XMMatrixPerspectiveFovLH(.80f,worldW/worldH,.1f,80);
     struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye; } camera{};
@@ -228,10 +266,12 @@ void Renderer::world(const Frame& f) {
     context_->IASetVertexBuffers(0,2,streams,strides,offsets); context_->IASetIndexBuffer(indices_.Get(),DXGI_FORMAT_R16_UINT,0);
     context_->IASetInputLayout(layout_.Get()); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context_->VSSetShader(vs_.Get(),nullptr,0); ID3D11Buffer* cb=constants_.Get(); context_->VSSetConstantBuffers(0,1,&cb);
+    context_->PSSetConstantBuffers(0,1,&cb);
     context_->PSSetShader(ps_.Get(),nullptr,0); context_->GSSetShader(nullptr,nullptr,0);
     context_->RSSetState(raster_.Get()); context_->OMSetDepthStencilState(depthState_.Get(),0);
     context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
     context_->DrawIndexedInstanced(36,static_cast<UINT>(instances_.size()),0,0,0);
+    if(useVrm) vrm_->draw(context_.Get(),view*projection,XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,bob,f.avatarZ));
 }
 void Renderer::rect(float x,float y,float w,float h,D2D1_COLOR_F c,float r) {
     brush_->SetColor(c); const auto area=D2D1::RectF(x,y,x+w,y+h);
@@ -256,6 +296,7 @@ void Renderer::label(const std::string& value,float x,float y,float w,float h,fl
     text(widen(value),x,y,w,h,size,color,bold);
 }
 void Renderer::draw(const Frame& frame,bool present) {
+    updateVrm(frame);
     debugUi(frame);
     const float clear[]={.028f,.046f,.066f,1}; context_->ClearRenderTargetView(target_.Get(),clear);
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
@@ -284,6 +325,10 @@ int Renderer::region(float px,float py) const {
     if(inside(x,y,24,96,216,logicalH_-280)) return 1;
     if(inside(x,y,logicalW_-314,96,290,logicalH_-280)) return 2;
     return 0;
+}
+bool Renderer::canOrbit(float px,float py) const {
+    if(debugOpen_ && inside(px,py,debugBounds_.x,debugBounds_.y,debugBounds_.z,debugBounds_.w)) return false;
+    return inside(px/scale_,py/scale_,256,96,logicalW_-596,logicalH_-280);
 }
 void Renderer::capture(const std::filesystem::path& path) {
     ComPtr<ID3D11Texture2D> back; checked(swap_->GetBuffer(0,IID_PPV_ARGS(&back)), "Capture back buffer");

@@ -9,3 +9,6 @@
 *.exe
 *.zip
 /local-save/
+/assets/
+*.vrm
+*.mp3

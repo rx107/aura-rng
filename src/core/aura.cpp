@@ -128,6 +128,22 @@ std::size_t Roller::roll() {
     return selectTicket(std::uniform_int_distribution<std::uint64_t>(0, TicketPool - 1)(random_));
 }
 std::uint64_t Roller::tickets(std::size_t index) const { return weights_.at(index); }
+void Roller::setLuck(double value) {
+    if (!std::isfinite(value) || value < 1 || value > 1'000'000) throw std::out_of_range("Luck must be 1..1000000");
+    // The rarest result of L independent baseline rolls, evaluated from the CDF.
+    // This also supports fractional L without a loop or a probability overflow.
+    std::vector<std::size_t> order(definitions_.size());
+    for (std::size_t i=0;i<order.size();++i) order[i]=i;
+    std::stable_sort(order.begin(),order.end(),[&](auto a,auto b){return probabilityTickets(definitions_,a)>probabilityTickets(definitions_,b);});
+    std::uint64_t tail=TicketPool, previous=0;
+    for (auto i:order) {
+        tail-=probabilityTickets(definitions_,i);
+        const auto cumulative=value==1?TicketPool-tail:static_cast<std::uint64_t>(std::clamp(
+            std::round(std::exp(value*std::log1p(-static_cast<double>(tail)/TicketPool))*TicketPool),0.,static_cast<double>(TicketPool)));
+        weights_[i]=cumulative-previous; previous=cumulative;
+    }
+    luck_=value;
+}
 std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index) {
     const auto denominator = catalog.at(index).denominator;
     if (denominator) return TicketPool / denominator;

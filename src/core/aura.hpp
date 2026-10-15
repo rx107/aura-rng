@@ -28,11 +28,14 @@ public:
     std::size_t roll();
     std::size_t selectTicket(std::uint64_t ticket) const;
     std::uint64_t tickets(std::size_t index) const;
+    void setLuck(double value);
+    double luck() const { return luck_; }
     const std::vector<Definition>& catalog() const { return definitions_; }
 private:
     std::vector<Definition> definitions_;
     std::vector<std::uint64_t> weights_;
     std::mt19937_64 random_;
+    double luck_{1};
 };
 
 struct Progress {

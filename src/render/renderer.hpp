@@ -8,6 +8,8 @@
 #include <wrl/client.h>
 #include <array>
 #include <span>
+#include <future>
+#include "render/vrm.hpp"
 
 struct ImGuiContext;
 
@@ -23,6 +25,8 @@ struct Frame {
     bool autoRoll{};
     int collectionScroll{}, logScroll{};
     std::string notice;
+    std::string musicStatus;
+    float cameraPitch{.52f};
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
@@ -43,6 +47,13 @@ public:
     void toggleDebug() { debugOpen_ = !debugOpen_; }
     bool debugOpen() const { return debugOpen_; }
     DebugActions takeDebugActions();
+    bool vrmReady() const { return vrm_!=nullptr && loadedVrm_==requestedVrm_; }
+    bool vrmLoading() const { return vrmFuture_.valid(); }
+    void reloadVrm() { requestedVrm_.clear(); }
+    std::string vrmStatus() const { return vrmStatus_; }
+    std::size_t vrmVertices() const { return vrm_?vrm_->vertexCount():0; }
+    std::size_t vrmDraws() const { return vrm_?vrm_->drawCount():0; }
+    bool canOrbit(float x,float y) const;
 private:
     struct Vertex { DirectX::XMFLOAT3 position, normal; };
     struct Instance { DirectX::XMFLOAT4X4 world; DirectX::XMFLOAT4 color; };
@@ -50,6 +61,7 @@ private:
     void createPipeline();
     void box(float x, float y, float z, float sx, float sy, float sz, Color color, float rotation = 0, float glow = 0);
     void world(const Frame& frame);
+    void updateVrm(const Frame& frame);
     void ui(const Frame& frame);
     void initializeDebug();
     void debugUi(const Frame& frame);
@@ -88,6 +100,10 @@ private:
     ImGuiContext* imguiContext_{};
     bool win32Backend_{}, dx11Backend_{}, debugOpen_{}, japaneseFont_{};
     DebugActions debugActions_;
+    std::unique_ptr<VrmAvatar> vrm_;
+    std::future<std::unique_ptr<VrmAvatar>> vrmFuture_;
+    std::string requestedVrm_,loadedVrm_,loadingVrm_,vrmStatus_{"Choose a VRM file"};
+    DirectX::XMFLOAT4 debugBounds_{};
 };
 std::wstring widen(const std::string& utf8);
 void checked(HRESULT result, const char* operation);

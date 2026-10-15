@@ -33,6 +33,18 @@ int main(int argc, char** argv) {
             check(aura::probabilityTickets(defs,i) == roller.tickets(i), "Displayed probability matches the actual ticket pool");
         }
         check(aura::oddsLabel(defs,0) == "1 / 2", "Common probability label");
+        for(double luck:{1.5,2.,10.,1000.,1'000'000.}) {
+            roller.setLuck(luck); std::uint64_t total=0;
+            for(std::size_t i=0;i<defs.size();++i) total+=roller.tickets(i);
+            check(total==aura::TicketPool,"Luck preserves total probability");
+            check(roller.tickets(0)<aura::TicketPool/2 && roller.tickets(11)>1000,"Luck raises rare tail and reduces Common");
+        }
+        roller.setLuck(2);
+        check(roller.tickets(0)==aura::TicketPool/4,"2x Luck gives Common a 25 percent probability");
+        check(std::abs(static_cast<double>(roller.tickets(11))-2000)<=1,"Rare aura approximates twice the base odds at 2x");
+        rejects([&]{roller.setLuck(NAN);}); rejects([&]{roller.setLuck(0);}); rejects([&]{roller.setLuck(1'000'001);});
+        roller.setLuck(1);
+        for(std::size_t i=0;i<defs.size();++i) check(roller.tickets(i)==aura::probabilityTickets(defs,i),"Reset Luck restores exact baseline");
         rejects([&] { roller.selectTicket(aura::TicketPool); });
         std::vector<std::uint64_t> observed(defs.size());
         for (int i = 0; i < 200000; ++i) { const auto n = roller.roll(); check(n == same.roll(), "Seed reproducibility"); ++observed[n]; }
@@ -94,9 +106,19 @@ int main(int argc, char** argv) {
         const auto settingsPath=dir/"settings.txt";
         check(aura::loadSettings(settingsPath).language==aura::Language::English,"Settings default");
         aura::Settings settings; settings.language=aura::Language::Japanese; settings.shirt={.95f,.2f,.3f};
+        settings.luck=12.5; settings.avatar=aura::Avatar::Vrm; settings.biome=aura::Biome::Desert;
+        settings.vrmPath="C:/モデル/Chocolat.vrm"; settings.bgmPath="C:/Music/Tides of the Outer Reach.mp3"; settings.volume=.35f;
         aura::saveSettings(settingsPath,settings); const auto loadedSettings=aura::loadSettings(settingsPath);
         check(loadedSettings.language==aura::Language::Japanese && std::abs(loadedSettings.shirt.r-.95f)<.0001f,
             "Language and shirt color round trip");
+        check(loadedSettings.luck==12.5 && loadedSettings.avatar==aura::Avatar::Vrm && loadedSettings.biome==aura::Biome::Desert &&
+            loadedSettings.vrmPath==settings.vrmPath && loadedSettings.bgmPath==settings.bgmPath && loadedSettings.volume==settings.volume,"Extended settings / UTF-8 paths round trip");
+        {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 1\nlanguage ja\nshirt 0.5 0.7 0.9\n";}
+        const auto migrated=aura::loadSettings(settingsPath);
+        check(migrated.language==aura::Language::Japanese && migrated.luck==1 && migrated.avatar==aura::Avatar::Block,"Previous settings migrate");
+        settings.luck=INFINITY; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.luck=1;
+        settings.avatar=static_cast<aura::Avatar>(3); rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.avatar=aura::Avatar::Block;
+        settings.vrmPath="bad\npath"; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.vrmPath.clear();
         settings.shirt.g=NAN; rejects([&] { aura::saveSettings(settingsPath,settings); });
         check(aura::displayName(defs[0],aura::Language::Japanese)=="コモン","Japanese aura names");
         check(!aura::cooldownVisual(0).visible && !aura::cooldownVisual(-1).visible,"Cooldown bar disappears at completion");

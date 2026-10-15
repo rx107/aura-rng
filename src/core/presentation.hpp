@@ -4,6 +4,8 @@
 
 namespace aura {
 enum class Language { English, Japanese };
+enum class Avatar { Block, Vrm };
+enum class Biome { Normal, Desert };
 inline const char* tr(Language language, const char* english, const char* japanese) {
     return language == Language::Japanese ? japanese : english;
 }
@@ -11,6 +13,11 @@ std::string displayName(const Definition& definition, Language language);
 struct Settings {
     Language language{Language::English};
     Color shirt{.54f, .83f, .89f};
+    double luck{1};
+    Avatar avatar{Avatar::Block};
+    Biome biome{Biome::Normal};
+    std::string vrmPath, bgmPath;
+    float volume{.55f};
 };
 Settings loadSettings(const std::filesystem::path& path);
 void saveSettings(const std::filesystem::path& path, const Settings& settings);
@@ -25,6 +32,11 @@ struct DebugActions {
     std::optional<std::size_t> preview;
     std::optional<Language> language;
     std::optional<Color> shirt;
+    std::optional<double> luck;
+    std::optional<Avatar> avatar;
+    std::optional<Biome> biome;
+    std::optional<std::string> vrmPath, bgmPath;
+    std::optional<float> volume;
 };
 inline constexpr float RollCooldown = 1.4f;
 struct CooldownVisual { bool visible{}; float progress{}, opacity{}, waveY{}; };
