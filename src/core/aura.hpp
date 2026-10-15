@@ -19,6 +19,8 @@ struct Definition {
 std::vector<Definition> loadCatalog(const std::filesystem::path& path);
 std::string csvQuote(const std::string& value);
 std::string formatNumber(std::uint64_t value);
+std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index);
+std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index);
 
 class Roller {
 public:

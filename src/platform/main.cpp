@@ -14,7 +14,7 @@
 namespace {
 using Clock=std::chrono::steady_clock;
 struct Options {
-    bool smoke{},warp{};
+    bool smoke{},warp{},debug{};
     std::filesystem::path capture, report, saveDir;
     std::uint64_t seed{};
 };
@@ -27,6 +27,7 @@ Options options() {
         std::wstring a=args[i];
         if(a==L"--smoke-test") result.smoke=true;
         else if(a==L"--warp") result.warp=true;
+        else if(a==L"--debug") result.debug=true;
         else if(a.starts_with(L"--capture=")) result.capture=a.substr(10);
         else if(a.starts_with(L"--report=")) result.report=a.substr(9);
         else if(a.starts_with(L"--save-dir=")) result.saveDir=a.substr(11);
@@ -62,10 +63,21 @@ public:
             notice_="Save could not be read. A backup was kept in the log folder.";
         }
         log_.reserve(200);
+        try { presentation_.settings=aura::loadSettings(saves_/L"settings.txt"); }
+        catch(const std::exception&) { notice_="Settings could not be read. Defaults are in use."; }
     }
     aura::Frame frame() const {
-        return {roller_,progress_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
-            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice_};
+        std::string notice=notice_;
+        if(presentation_.settings.language==aura::Language::Japanese) {
+            if(notice_=="Save could not be read. A backup was kept in the log folder.") notice="セーブを読めませんでした。ログフォルダーにバックアップを保持しています。";
+            else if(notice_=="Settings could not be read. Defaults are in use.") notice="設定を読めなかったため初期設定で起動しています。";
+            else if(notice_=="Progress could not be saved. Check the log folder / free disk space.") notice="保存できませんでした。保存先とディスクの空き容量を確認してください。";
+            else if(notice_=="Roll log could not be written. Check the log folder / free disk space.") notice="ロール履歴を保存できませんでした。保存先と空き容量を確認してください。";
+            else if(notice_=="Could not open the log folder.") notice="ログフォルダーを開けませんでした。";
+            else if(notice_=="Settings could not be saved.") notice="言語と服の色の設定を保存できませんでした。";
+        }
+        return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
+            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -73,10 +85,11 @@ public:
         wc.hIcon=LoadIconW(nullptr,IDI_APPLICATION); wc.lpszClassName=L"AuraRngWindow";
         if(!RegisterClassExW(&wc)) throw std::runtime_error("Cannot register window");
         RECT r{0,0,1440,900}; AdjustWindowRectEx(&r,WS_OVERLAPPEDWINDOW,FALSE,0);
-        window_=CreateWindowExW(0,wc.lpszClassName,L"Aura RNG",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,
+        window_=CreateWindowExW(0,wc.lpszClassName,L"Star's RNG | Alpha 0.1",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,
             r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,this);
         if(!window_) throw std::runtime_error("Cannot create window");
         renderer_=std::make_unique<aura::Renderer>(); renderer_->initialize(window_,opts_.warp);
+        if(opts_.debug) renderer_->toggleDebug();
         pendingWidth_=pendingHeight_=0;
         if(!opts_.smoke) ShowWindow(window_,SW_SHOW);
         last_=Clock::now();
@@ -114,7 +127,7 @@ private:
         const auto result=roller_.roll(); progress_.record(result,roller_.catalog());
         aura::LogEntry entry{progress_.rolls,aura::utcNow(),result};
         if(log_.size()==200) log_.erase(log_.begin());
-        log_.push_back(entry); logScroll_=0; cooldown_=1.4f;
+        log_.push_back(entry); logScroll_=0; cooldown_=aura::RollCooldown;
         try { aura::appendLog(saves_/L"rolls.csv",entry,roller_.catalog()[result]); }
         catch(const std::exception&) { notice_="Roll log could not be written. Check the log folder / free disk space."; }
         persist();
@@ -129,16 +142,33 @@ private:
             break;
         }
         case aura::Action::Equip:
-            if(hit.index<progress_.counts.size() && progress_.counts[hit.index]) { progress_.equipped=hit.index; persist(); }
+            if(hit.index<progress_.counts.size() && progress_.counts[hit.index]) {
+                progress_.equipped=hit.index; presentation_.preview.reset(); persist();
+            }
+            break;
+        case aura::Action::Debug:
+            renderer_->toggleDebug(); keys_.fill(false); dragging_=false; ReleaseCapture();
             break;
         default: break;
+        }
+    }
+    void applyDebugActions(const aura::DebugActions& commands) {
+        if(commands.preview) presentation_.showPreview(*commands.preview,roller_.catalog().size(),auto_);
+        if(commands.restore) presentation_.preview.reset();
+        if(commands.roll) roll();
+        if(commands.toggleAuto) auto_=!auto_;
+        if(commands.language) presentation_.settings.language=*commands.language;
+        if(commands.shirt) presentation_.settings.shirt=*commands.shirt;
+        if(commands.language || commands.shirt) {
+            try { aura::saveSettings(saves_/L"settings.txt",presentation_.settings); }
+            catch(const std::exception&) { notice_="Settings could not be saved."; }
         }
     }
     void update(float dt) {
         time_+=dt; cooldown_=std::max(0.f,cooldown_-dt);
         if(pending_) { action(*pending_); pending_.reset(); }
         if(auto_ && cooldown_<=0) roll();
-        if(foreground_ || opts_.smoke) {
+        if((foreground_ || opts_.smoke) && !renderer_->wantsKeyboard()) {
             float mx=0,mz=0;
             if(keys_['W'] || keys_[VK_UP]) mz+=1;
             if(keys_['S'] || keys_[VK_DOWN]) mz-=1;
@@ -162,13 +192,17 @@ private:
         }
         catch(const std::exception&) {
             // Rebuild both D3D and D2D resources after device loss; game state survives.
+            const bool debugWasOpen=renderer_->debugOpen(); renderer_.reset();
             renderer_=std::make_unique<aura::Renderer>(); renderer_->initialize(window_,opts_.warp); renderer_->draw(frame(),present);
+            if(debugWasOpen) renderer_->toggleDebug();
         }
+        applyDebugActions(renderer_->takeDebugActions());
         ++fpsFrames_; const auto now=Clock::now(); const float seconds=std::chrono::duration<float>(now-fpsStart_).count();
         if(seconds>=.5f) { fps_=fpsFrames_/seconds; fpsFrames_=0; fpsStart_=now; }
     }
     int smoke() {
         const auto startingRolls=progress_.rolls;
+        const auto initialEquipped=progress_.equipped;
         // Exercise the actual window input path, cooldown, auto toggle and resizing.
         RECT client{}; GetClientRect(window_,&client);
         const int buttonX=client.right/2;
@@ -179,6 +213,7 @@ private:
         if(progress_.rolls!=startingRolls+1) throw std::runtime_error("Cooldown smoke check failed");
         SendMessageW(window_,WM_KEYDOWN,'F',0); update(1.4f);
         if(!auto_ || progress_.rolls!=startingRolls+2) throw std::runtime_error("Auto roll smoke check failed");
+        if(progress_.equipped!=initialEquipped) throw std::runtime_error("Rolling changed the Collection aura");
         SendMessageW(window_,WM_KEYDOWN,'F',0); update(.01f);
         SendMessageW(window_,WM_KEYUP,'F',0);
         SendMessageW(window_,WM_KEYDOWN,'W',0); update(.2f); SendMessageW(window_,WM_KEYUP,'W',0);
@@ -189,8 +224,23 @@ private:
         }
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
         for(int i=0;i<18;++i) { cooldown_=0; roll(); }
-        for(std::size_t i=0;i<roller_.catalog().size();++i) { progress_.equipped=i; render(false); }
-        progress_.equipped=progress_.best;
+        action({aura::Action::Equip,progress_.best});
+        const auto chosen=progress_.equipped;
+        for(std::size_t i=0;i<roller_.catalog().size();++i) {
+            aura::DebugActions command; command.preview=i; applyDebugActions(command); render(false);
+        }
+        const auto beforePreview=progress_.counts;
+        const auto logSize=log_.size();
+        const auto logBytes=std::filesystem::file_size(saves_/L"rolls.csv");
+        auto_=true; aura::DebugActions previewCommand; previewCommand.preview=roller_.catalog().size()-1; applyDebugActions(previewCommand);
+        if(auto_ || progress_.counts!=beforePreview || log_.size()!=logSize ||
+            std::filesystem::file_size(saves_/L"rolls.csv")!=logBytes || progress_.equipped!=chosen)
+            throw std::runtime_error("Debug preview modified collection/history or did not stop AutoRoll");
+        cooldown_=0; roll();
+        if(presentation_.shown(progress_)!=roller_.catalog().size()-1 || progress_.equipped!=chosen)
+            throw std::runtime_error("Roll replaced the preview / Collection selection");
+        action({aura::Action::Equip,chosen});
+        if(presentation_.preview) throw std::runtime_error("Collection did not restore equipped display");
         time_=3.8f; x_=0; z_=0; facing_=0; cooldown_=0; walk_=0;
         fps_=0; fpsFrames_=0; fpsStart_=Clock::now();
         const auto begin=Clock::now();
@@ -199,12 +249,26 @@ private:
         fps_=0;
         render(false);
         if(!opts_.capture.empty()) renderer_->capture(opts_.capture);
+        if(!opts_.capture.empty()) {
+            auto captureVariant=[&](const wchar_t* suffix) {
+                renderer_->capture(opts_.capture.parent_path()/(opts_.capture.stem().wstring()+suffix+L".png"));
+            };
+            cooldown_=aura::RollCooldown*.55f; time_+=.2f; render(false); captureVariant(L"-cooldown");
+            aura::DebugActions settings; settings.language=aura::Language::Japanese; settings.shirt=aura::Color{.95f,.38f,.32f}; applyDebugActions(settings);
+            render(false); captureVariant(L"-japanese");
+            previewCommand.preview=roller_.catalog().size()-1; applyDebugActions(previewCommand);
+            if(!renderer_->debugOpen()) { SendMessageW(window_,WM_KEYDOWN,VK_F1,0); update(0); }
+            render(false); render(false); captureVariant(L"-debug");
+            if(renderer_->debugOpen()) { SendMessageW(window_,WM_KEYDOWN,VK_F1,0); update(0); }
+            presentation_.preview.reset(); cooldown_=0; render(false); captureVariant(L"-complete");
+        }
         persist();
         const auto restored=aura::loadProgress(saves_/L"progress.txt",roller_.catalog());
         if(restored.counts!=progress_.counts) throw std::runtime_error("Progress smoke check failed");
+        if(restored.equipped!=chosen) throw std::runtime_error("Collection equipment was not saved");
         if(!opts_.report.empty()) {
             std::ofstream out(opts_.report);
-            out<<"PASS: Direct3D + Direct2D render, resize, keyboard roll, cooldown, auto roll, movement, save restore\n"
+            out<<"PASS: D3D11 + D2D + Dear ImGui, resize, roll, cooldown, AutoRoll, movement, save restore, fixed equipment, preview isolation\n"
                <<"Adapter: "<<renderer_->adapterName()<<"\nResolution: 1440x900\nWorld draw calls: 1\nInstances: "
                <<renderer_->instanceCount()<<"\nMean frame submission time: "<<seconds/60*1000
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
@@ -219,6 +283,9 @@ private:
             SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(app));
         }
         if(!app) return DefWindowProcW(window,message,wp,lp);
+        if(message==WM_KEYUP && wp<256) app->keys_[wp]=false;
+        if(message==WM_KEYDOWN && wp==VK_F1 && !(lp & (1LL<<30))) { app->pending_=aura::Hit{aura::Action::Debug,0}; return 0; }
+        if(app->renderer_ && app->renderer_->handleMessage(window,message,wp,lp)) return 0;
         // No disk I/O or throwing renderer calls are made inside the window procedure.
         switch(message) {
         case WM_CLOSE: app->quitting_=true; return 0;
@@ -271,7 +338,7 @@ private:
         }
     }
     Options opts_; std::filesystem::path root_,saves_;
-    aura::Roller roller_; aura::Progress progress_; std::vector<aura::LogEntry> log_;
+    aura::Roller roller_; aura::Progress progress_; aura::Presentation presentation_; std::vector<aura::LogEntry> log_;
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;
     bool quitting_{},minimized_{},foreground_{true},auto_{},dragging_{};
@@ -291,7 +358,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int) {
         if(!opts.smoke) {
             mutex=CreateMutexW(nullptr,FALSE,L"Local\\AuraRng.v0.1");
             if(!mutex) throw std::runtime_error("Cannot create single instance guard");
-            if(GetLastError()==ERROR_ALREADY_EXISTS) throw std::runtime_error("Aura RNG is already running. Close it before opening another instance.");
+            if(GetLastError()==ERROR_ALREADY_EXISTS) throw std::runtime_error("Star's RNG is already running. Close it before opening another instance.");
         }
         App app(std::move(opts)); app.create(instance); result=app.run();
     } catch(const std::exception& error) {
@@ -299,7 +366,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int) {
         bool smoke=false; std::filesystem::path report;
         try { const auto opts=options(); smoke=opts.smoke; report=opts.report; } catch(...) {}
         if(smoke) { if(!report.empty()) { std::ofstream out(report); out<<"FAIL: "<<error.what()<<'\n'; } }
-        else MessageBoxW(nullptr,aura::widen(error.what()).c_str(),L"Aura RNG",MB_OK|MB_ICONERROR);
+        else MessageBoxW(nullptr,aura::widen(error.what()).c_str(),L"Star's RNG",MB_OK|MB_ICONERROR);
     }
     if(mutex) CloseHandle(mutex);
     if(SUCCEEDED(com)) CoUninitialize(); return result;

@@ -1,4 +1,6 @@
 #include "render/renderer.hpp"
+#include "imgui.h"
+#include "backends/imgui_impl_dx11.h"
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <algorithm>
@@ -20,7 +22,6 @@ const D2D1_COLOR_F Panel = D2D1::ColorF(.047f, .070f, .094f);
 const D2D1_COLOR_F Border = D2D1::ColorF(.13f, .19f, .23f);
 D2D1_COLOR_F tint(Color c, float alpha = 1) { return D2D1::ColorF(c.r, c.g, c.b, alpha); }
 bool inside(float x, float y, float rx, float ry, float w, float h) { return x >= rx && x < rx+w && y >= ry && y < ry+h; }
-std::string odds(const Definition& d) { return d.denominator ? "1 / " + formatNumber(d.denominator) : "COMMON"; }
 constexpr char Shader[] = R"(
 cbuffer Camera : register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; };
 struct Input { float3 p:POSITION; float3 n:NORMAL; float4 a:INSTANCE0; float4 b:INSTANCE1; float4 c:INSTANCE2; float4 d:INSTANCE3; float4 color:COLOR0; };
@@ -82,7 +83,7 @@ void Renderer::initialize(HWND window, bool warp) {
     checked(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER), "Window association");
     checked(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2dFactory_.GetAddressOf()), "Direct2D factory");
     checked(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(write_.GetAddressOf())), "DirectWrite factory");
-    createPipeline(); createTargets();
+    createPipeline(); createStar(); createTargets(); initializeDebug();
     instances_.reserve(MaxInstances);
 }
 void Renderer::createPipeline() {
@@ -162,7 +163,7 @@ void Renderer::box(float x,float y,float z,float sx,float sy,float sz,Color colo
 }
 void Renderer::world(const Frame& f) {
     instances_.clear();
-    const auto& d=f.roller.catalog()[f.progress.equipped];
+    const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     box(0,-.6f,0,16,1.0f,16,{.095f,.15f,.18f});
     box(0,-.12f,0,15.7f,.10f,15.7f,{.17f,.28f,.29f});
     for (int x=-7;x<=7;++x) for (int z=-7;z<=7;++z) {
@@ -192,7 +193,7 @@ void Renderer::world(const Frame& f) {
     auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c) {
         box(f.avatarX+x*ca+z*sa,y+bob,f.avatarZ-x*sa+z*ca,sx,sy,sz,c,f.facing);
     };
-    const Color skin{.95f,.76f,.47f}, shirt{.54f,.83f,.89f}, pants{.20f,.29f,.42f};
+    const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
     part(-.27f,.62f,swing,.46f,.95f,.52f,pants); part(.27f,.62f,-swing,.46f,.95f,.52f,pants);
     part(0,1.56f,0,1.03f,.96f,.60f,shirt);
     part(-.77f,1.56f,-swing,.43f,.96f,.54f,skin); part(.77f,1.56f,swing,.43f,.96f,.54f,skin);
@@ -254,106 +255,21 @@ void Renderer::text(const std::wstring& value,float x,float y,float w,float h,fl
 void Renderer::label(const std::string& value,float x,float y,float w,float h,float size,D2D1_COLOR_F color,bool bold) {
     text(widen(value),x,y,w,h,size,color,bold);
 }
-void Renderer::ui(const Frame& f) {
-    const float w=logicalW_,h=logicalH_,right=w-314;
-    const auto& defs=f.roller.catalog(); const auto& equipped=defs[f.progress.equipped];
-    rect(0,0,w,80,D2D1::ColorF(.035f,.053f,.075f)); rect(24,24,32,32,Mint,8);
-    text(L"A",31,25,25,30,22,Panel,true); text(L"AURA",68,20,160,34,26,White,true);
-    text(L"RNG / EARLY ACCESS",69,53,240,20,10,Muted);
-    rect(w-316,26,110,27,Panel,13); text(L"DX11  /  NATIVE",w-303,32,105,20,10,Mint,true);
-    const auto fps=f.fps>0?std::to_string(static_cast<int>(f.fps)):"--"; label(fps+" FPS",w-187,30,75,25,13,Muted);
-    text(L"v0.1.0",w-94,30,70,25,13,Muted);
-    // Collection panel.
-    rect(24,96,216,h-280,Panel,14); stroke(24,96,216,h-280,Border,14);
-    text(L"COLLECTION",42,114,180,24,12,Muted,true);
-    label(std::to_string(f.progress.discovered())+" / "+std::to_string(defs.size()),42,146,170,42,30,White,true);
-    text(L"Auras discovered",42,187,170,22,12,Muted);
-    rect(42,220,180,3,Border,1);
-    rect(42,220,180*static_cast<float>(f.progress.discovered())/static_cast<float>(defs.size()),3,Mint,1);
-    const int visible=std::max(1,static_cast<int>((h-280-150)/48));
-    const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(defs.size())-visible));
-    for (int row=0;row<visible && start+row<static_cast<int>(defs.size());++row) {
-        const auto i=static_cast<std::size_t>(start+row); const float y=242+row*48.f;
-        const bool owned=f.progress.counts[i]!=0;
-        if(i==f.progress.equipped) rect(34,y-5,196,43,D2D1::ColorF(.09f,.15f,.17f),6);
-        rect(43,y+5,6,6,owned?tint(defs[i].color):Border,2);
-        label(defs[i].name,59,y,132,21,14,owned?White:Muted,i==f.progress.equipped);
-        label(owned?"x"+formatNumber(f.progress.counts[i]):"UNDISCOVERED",59,y+22,150,18,10,Muted);
-    }
-    if(static_cast<int>(defs.size())>visible) {
-        rect(234,244,2,h-448,Border,1);
-        rect(234,244+(h-448)*static_cast<float>(start)/static_cast<float>(defs.size()),2,
-            (h-448)*static_cast<float>(visible)/static_cast<float>(defs.size()),Mint,1);
-    }
-    // World labels sit over the Direct3D viewport.
-    stroke(256,96,w-596,h-280,Border,14);
-    text(L"SANCTUARY",276,116,180,25,12,White,true);
-    text(L"01 / THE QUIET GARDEN",276,140,240,20,10,Muted);
-    rect(w-487,114,130,26,D2D1::ColorF(.05f,.10f,.12f,.90f),13);
-    text(L"BIOME  /  NORMAL",w-475,121,125,18,10,Mint);
-    const float titleX=276,titleY=h-281;
-    text(L"EQUIPPED AURA",titleX,titleY,300,20,10,Muted,true);
-    label(equipped.name,titleX,titleY+23,w-650,45,32,tint(equipped.color),true);
-    label(odds(equipped),titleX,titleY+67,w-650,25,12,Muted);
-    // Session feed; file log keeps every result, the on-screen feed is bounded.
-    rect(right,96,290,h-280,Panel,14); stroke(right,96,290,h-280,Border,14);
-    text(L"ROLL HISTORY",right+20,114,240,24,12,Muted,true);
-    rect(right+20,153,5,5,Mint,2); text(L"THIS SESSION",right+33,147,160,20,10,Mint);
-    const int logVisible=std::max(1,static_cast<int>((h-280-122)/56));
-    const int logStart=std::clamp(f.logScroll,0,std::max(0,static_cast<int>(f.logs.size())-logVisible));
-    if(f.logs.empty()) {
-        text(L"Your first aura is waiting.",right+20,207,250,25,16,White);
-        text(L"Press ROLL to begin.",right+20,237,250,24,12,Muted);
-    }
-    for (int row=0;row<logVisible && row+logStart<static_cast<int>(f.logs.size());++row) {
-        const auto& e=f.logs[f.logs.size()-1-static_cast<std::size_t>(row+logStart)]; const auto& d=defs[e.aura];
-        const float y=182+row*56.f;
-        rect(right+20,y+7,6,6,tint(d.color),2);
-        label(d.name,right+36,y,172,22,15,tint(d.color),true);
-        label("#"+formatNumber(e.roll),right+214,y+3,58,19,10,Muted);
-        label(odds(d),right+36,y+24,170,18,10,Muted);
-        label(e.time.size()>=19?e.time.substr(11,8):"",right+210,y+24,65,18,10,Muted);
-        rect(right+20,y+49,250,1,D2D1::ColorF(.08f,.12f,.15f));
-    }
-    // A single stable action area provides both manual and unattended rolling.
-    rect(24,h-166,w-48,100,Panel,14); stroke(24,h-166,w-48,100,Border,14);
-    text(L"TOTAL ROLLS",44,h-148,140,20,10,Muted,true);
-    label(formatNumber(f.progress.rolls),44,h-125,170,40,30,White,true);
-    text(L"BEST DISCOVERY",230,h-148,180,20,10,Muted,true);
-    label(f.progress.rolls?defs[f.progress.best].name:"Waiting for a roll",230,h-121,205,26,17,White,true);
-    const float bx=w*.5f-105,by=h-146;
-    const bool ready=f.cooldown<=0;
-    const bool hover=inside(f.mouseX/scale_,f.mouseY/scale_,bx,by,210,62);
-    rect(bx,by,210,62,ready?(hover?D2D1::ColorF(.68f,1,.88f):Mint):D2D1::ColorF(.18f,.31f,.32f),10);
-    text(ready?L"ROLL":L"ROLLING...",bx+54,by+13,150,32,24,ready?Panel:White,true);
-    if(!ready) rect(bx+10,by+56,190*(1-f.cooldown/1.4f),3,Mint,1);
-    text(L"SPACE",bx+82,by+67,80,16,9,Muted);
-    const float ax=bx+228;
-    rect(ax,by,134,62,f.autoRoll?D2D1::ColorF(.10f,.22f,.20f):D2D1::ColorF(.08f,.12f,.15f),10);
-    stroke(ax,by,134,62,f.autoRoll?Mint:Border,10);
-    text(L"AUTO ROLL",ax+21,by+12,110,22,12,f.autoRoll?Mint:White,true);
-    text(f.autoRoll?L"ON  /  F":L"OFF  /  F",ax+35,by+34,100,20,10,Muted);
-    rect(w-179,by,130,62,D2D1::ColorF(.08f,.12f,.15f),10);
-    text(L"OPEN LOGS",w-158,by+14,110,24,12,White,true);
-    text(L"CSV / UTC",w-147,by+36,100,18,10,Muted);
-    text(L"WASD / MOVE     RIGHT DRAG / ORBIT     WHEEL / ZOOM     CLICK OWNED AURA / EQUIP",24,h-39,w-320,23,11,Muted);
-    text(L"LUCK  1.00x",w-136,h-39,112,22,11,Mint,true);
-    if(!f.notice.empty()) {
-        rect(276,174,w-650,56,D2D1::ColorF(.23f,.13f,.10f,.94f),8);
-        label(f.notice,288,188,w-680,28,12,D2D1::ColorF(1,.75f,.56f));
-    }
-}
 void Renderer::draw(const Frame& frame,bool present) {
+    debugUi(frame);
     const float clear[]={.028f,.046f,.066f,1}; context_->ClearRenderTargetView(target_.Get(),clear);
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     world(frame); context_->OMSetRenderTargets(0,nullptr,nullptr);
     d2d_->BeginDraw(); d2d_->SetTransform(D2D1::Matrix3x2F::Scale(scale_,scale_)); ui(frame);
     checked(d2d_->EndDraw(), "Draw UI");
+    context_->OMSetRenderTargets(1,&view,nullptr);
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     if(present) checked(swap_->Present(1,0), "Present frame");
 }
 Hit Renderer::hit(float px,float py,const Frame& f) const {
     const float x=px/scale_,y=py/scale_,w=logicalW_,h=logicalH_,bx=w*.5f-105,by=h-146;
+    if(inside(x,y,w-330,26,112,28)) return {Action::Debug,0};
     if(inside(x,y,bx,by,210,62)) return {Action::Roll,0};
     if(inside(x,y,bx+228,by,134,62)) return {Action::Auto,0};
     if(inside(x,y,w-179,by,130,62)) return {Action::Logs,0};

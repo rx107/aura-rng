@@ -24,4 +24,4 @@ if errorlevel 1 exit /b 1
 "%AURA_CMAKE%" -E chdir build-release "%AURA_CTEST%" --output-on-failure
 if errorlevel 1 exit /b 1
 echo.
-echo Ready: build-release\AuraRng.exe
+echo Ready: build-release\StarRng.exe

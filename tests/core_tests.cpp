@@ -1,8 +1,10 @@
 #include "core/aura.hpp"
+#include "core/presentation.hpp"
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <set>
 namespace {
 void check(bool value, const char* reason) { if (!value) throw std::runtime_error(reason); }
 template<class F> void rejects(F f) { bool failed = false; try { f(); } catch (const std::exception&) { failed = true; } check(failed, "Expected rejection"); }
@@ -23,14 +25,22 @@ int main(int argc, char** argv) {
             start += count;
         }
         check(start == aura::TicketPool, "Probability total");
+        check(roller.tickets(0) == aura::TicketPool / 2, "Common is exactly 50 percent");
+        check(defs[0].name == "Common" && defs[1].name == "Uncommon", "Renamed aura labels with stable IDs");
+        std::set<std::uint64_t> uniqueWeights;
+        for(std::size_t i=0;i<defs.size();++i) {
+            check(uniqueWeights.insert(roller.tickets(i)).second, "Every demo aura has a distinct probability");
+            check(aura::probabilityTickets(defs,i) == roller.tickets(i), "Displayed probability matches the actual ticket pool");
+        }
+        check(aura::oddsLabel(defs,0) == "1 / 2", "Common probability label");
         rejects([&] { roller.selectTicket(aura::TicketPool); });
         std::vector<std::uint64_t> observed(defs.size());
         for (int i = 0; i < 200000; ++i) { const auto n = roller.roll(); check(n == same.roll(), "Seed reproducibility"); ++observed[n]; }
-        check(std::abs(static_cast<double>(observed[1]) / 200000 - .5) < .01, "Glimmer distribution");
-        check(std::abs(static_cast<double>(observed[2]) / 200000 - .1) < .005, "Ember distribution");
+        check(std::abs(static_cast<double>(observed[0]) / 200000 - .5) < .01, "Common distribution");
+        check(std::abs(static_cast<double>(observed[2]) / 200000 - .125) < .005, "Ember distribution");
         auto invalid = defs; invalid[1].id = invalid[0].id;
         rejects([&] { aura::Roller bad(invalid, 1); });
-        invalid = defs; invalid[1].denominator = 0;
+        invalid = defs; invalid[0].denominator = 0;
         rejects([&] { aura::Roller bad(invalid, 1); });
         invalid = defs; invalid[1].denominator = 2; invalid[2].denominator = 2;
         rejects([&] { aura::Roller bad(invalid, 1); });
@@ -41,11 +51,13 @@ int main(int argc, char** argv) {
         const auto dir = std::filesystem::temp_directory_path() / ("aura-rng-tests-" + std::to_string(std::random_device{}()));
         std::filesystem::create_directories(dir);
         aura::Progress p(defs.size());
-        p.record(11, defs); p.record(1, defs); p.record(1, defs);
-        check(p.best == 11 && p.equipped == 1 && p.discovered() == 2, "Progress best/equip/discovery");
+        p.record(11, defs);
+        check(p.equipped == 0, "Rolling cannot equip a new aura");
+        p.equipped=11; p.record(1, defs); p.record(1, defs);
+        check(p.best == 11 && p.equipped == 11 && p.discovered() == 2, "Progress best/equip/discovery");
         const auto save = dir / "progress.txt";
         aura::saveProgress(save, p, defs);
-        p.record(3, defs); aura::saveProgress(save, p, defs);
+        p.record(3, defs); p.equipped=3; aura::saveProgress(save, p, defs);
         const auto restored = aura::loadProgress(save, defs);
         check(restored.rolls == 4 && restored.counts == p.counts && restored.best == 11 && restored.equipped == 3, "Atomic overwrite round trip");
         auto reordered = defs; std::swap(reordered[3], reordered[8]);
@@ -69,9 +81,33 @@ int main(int argc, char** argv) {
         in.close();
         { std::ofstream o(dir / "bad.csv"); o << "id,name,denominator,red,green,blue,particles,radius,speed\na,\"unclosed,0,1,1,1,1,1,1\n"; }
         rejects([&] { aura::loadCatalog(dir / "bad.csv"); });
+        aura::Presentation presentation; bool autoRoll=true;
+        const auto countsBefore=p.counts;
+        const auto rollsBefore=p.rolls;
+        presentation.showPreview(10,defs.size(),autoRoll);
+        check(!autoRoll && presentation.shown(p)==10 && p.equipped==3 && p.counts==countsBefore && p.rolls==rollsBefore,
+            "Unowned debug preview stops AutoRoll and leaves inventory untouched");
+        p.record(2,defs);
+        check(presentation.shown(p)==10 && p.equipped==3, "Roll keeps preview and equipment fixed");
+        presentation.preview.reset(); check(presentation.shown(p)==3,"Restore Collection aura");
+        rejects([&] { presentation.showPreview(defs.size(),defs.size(),autoRoll); });
+        const auto settingsPath=dir/"settings.txt";
+        check(aura::loadSettings(settingsPath).language==aura::Language::English,"Settings default");
+        aura::Settings settings; settings.language=aura::Language::Japanese; settings.shirt={.95f,.2f,.3f};
+        aura::saveSettings(settingsPath,settings); const auto loadedSettings=aura::loadSettings(settingsPath);
+        check(loadedSettings.language==aura::Language::Japanese && std::abs(loadedSettings.shirt.r-.95f)<.0001f,
+            "Language and shirt color round trip");
+        settings.shirt.g=NAN; rejects([&] { aura::saveSettings(settingsPath,settings); });
+        check(aura::displayName(defs[0],aura::Language::Japanese)=="コモン","Japanese aura names");
+        check(!aura::cooldownVisual(0).visible && !aura::cooldownVisual(-1).visible,"Cooldown bar disappears at completion");
+        check(aura::cooldownVisual(aura::RollCooldown).opacity==0,"Cooldown fades in");
+        check(aura::cooldownVisual(.001f).opacity<.01f,"Cooldown fades out");
+        const auto waveA=aura::cooldownVisual(aura::RollCooldown*.875f);
+        const auto waveB=aura::cooldownVisual(aura::RollCooldown*.625f);
+        check(waveA.progress<waveB.progress && waveA.waveY>2.9f && waveB.waveY<-2.9f,"Star follows a left-to-right wave");
         check(aura::formatNumber(1000000000) == "1,000,000,000", "Number formatting");
         std::filesystem::remove_all(dir);
-        std::cout << "PASS: ticket boundaries, seeded rolls, distribution, catalog validation, save/restore, UTF-8 CSV logs\n";
+        std::cout << "PASS: exact Common probability, distinct odds, fixed equipment, preview isolation, bilingual settings, shirt colors, cooldown wave, save/restore, UTF-8 CSV\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
 }

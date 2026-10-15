@@ -128,13 +128,28 @@ std::size_t Roller::roll() {
     return selectTicket(std::uniform_int_distribution<std::uint64_t>(0, TicketPool - 1)(random_));
 }
 std::uint64_t Roller::tickets(std::size_t index) const { return weights_.at(index); }
+std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index) {
+    const auto denominator = catalog.at(index).denominator;
+    if (denominator) return TicketPool / denominator;
+    std::uint64_t remaining = TicketPool;
+    for (const auto& d : catalog) if (d.denominator) remaining -= TicketPool / d.denominator;
+    return remaining;
+}
+std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index) {
+    const auto& d = catalog.at(index);
+    if (d.denominator) return "1 / " + formatNumber(d.denominator);
+    std::ostringstream out;
+    out << "~1 / " << std::fixed << std::setprecision(2)
+        << static_cast<double>(TicketPool) / static_cast<double>(probabilityTickets(catalog, index));
+    return out.str();
+}
 void Progress::record(std::size_t index, const std::vector<Definition>& catalog) {
     if (counts.size() != catalog.size() || index >= catalog.size()) throw std::out_of_range("Progress catalog mismatch");
     if (rolls == std::numeric_limits<std::uint64_t>::max() || counts[index] == std::numeric_limits<std::uint64_t>::max())
         throw std::overflow_error("Roll counter overflow");
     ++rolls; ++counts[index];
-    if (rolls == 1 || catalog[index].denominator > catalog[best].denominator) best = index;
-    equipped = index;
+    if (rolls == 1 || probabilityTickets(catalog, index) < probabilityTickets(catalog, best)) best = index;
+    // Rolling changes inventory and statistics only. Collection owns equipment selection.
 }
 std::size_t Progress::discovered() const {
     return static_cast<std::size_t>(std::count_if(counts.begin(), counts.end(), [](auto n) { return n != 0; }));
@@ -160,7 +175,7 @@ void saveProgress(const std::filesystem::path& path, const Progress& p, const st
 }
 Progress loadProgress(const std::filesystem::path& path, const std::vector<Definition>& catalog) {
     Progress p(catalog.size());
-    for (std::size_t i = 0; i < catalog.size(); ++i) if (catalog[i].denominator == 0) p.equipped = p.best = i;
+    for (std::size_t i = 0; i < catalog.size(); ++i) if (catalog[i].id == "still") p.equipped = p.best = i;
     if (!std::filesystem::exists(path)) return p;
     if (std::filesystem::file_size(path) > 1024 * 1024) throw std::runtime_error("Save file too large");
     std::ifstream in(path);
@@ -190,8 +205,10 @@ Progress loadProgress(const std::filesystem::path& path, const std::vector<Defin
         if (row >> extra) throw std::runtime_error("Unexpected save columns");
     }
     if (!gotRolls || !gotEquipped || total != p.rolls) throw std::runtime_error("Inconsistent progress save");
+    bool foundAny = false;
     for (std::size_t i = 0; i < catalog.size(); ++i) {
-        if (p.counts[i] && catalog[i].denominator > catalog[p.best].denominator) p.best = i;
+        if (p.counts[i] && (!foundAny || probabilityTickets(catalog, i) < probabilityTickets(catalog, p.best))) p.best = i;
+        if (p.counts[i]) foundAny = true;
         if (catalog[i].id == equipped && p.counts[i]) p.equipped = i;
     }
     return p;

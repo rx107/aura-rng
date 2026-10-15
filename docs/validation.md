@@ -1,40 +1,49 @@
-# 初版の検証記録
+# Star's RNG Alpha 0.1 検証記録
 
-検証日: 2026-10-15（日本時間）。Windows / x64、Visual C++ 19.39、Windows SDK 10.0.22621.0、CMake Release構成。
+検証日: 2026-10-15（日本時間）。Windows x64、Visual C++ 19.39、Windows SDK 10.0.22621.0、Releaseビルド。
 
-## 確認済み
+## コアテスト
 
-- C++20 / DirectX 11 のゲームEXEと、独立したコアテストEXEをビルド。
-- CTest成功。20万回の抽選でシードの再現性と通常オーラの分布を確認。
-- 全12オーラのチケット区間の先頭・末尾を検証。10億分の1のオーラもチケット区間が存在することを検証。大量抽選での偶然の当選をテスト条件にはしない。
-- 不正な確率合計、重複ID、複数の通常オーラ、NaN色、上限外分母、不正CSVを拒否。
-- セーブの上書き、復元、並べ替え、削除したオーラの再追加、破損ファイル検出。
-- 日本語・カンマ・引用符を含むオーラ名のCSVログ出力。
-- 実際のWin32入力処理を通したROLLボタン、Spaceによるクールダウン、Fによる自動ロールの切り替え、Wによる移動。
-- WM_SIZEを通した1000×700 / 1440×900へのリサイズと、両サイズのスクリーンショット確認。
-- 全12種類の演出を描画し、Direct3DとDirect2Dの描画完了を検証。
-- NVIDIA GPUとWARPソフトウェア描画で、各20ロールとセーブ再読込を検証。
+- 20万回のシード再現と分布確認。Commonの実確率が正確に50%であることを検証。
+- 全12種類の実チケット数が異なること、全区間の先頭・末尾、合計10^12枚を検証。
+- ロールで装備が変更されないことを検証。
+- 未所持プレビューは装備・所持数・ロール数を変更せず、自動ロールを停止。プレビュー中のロールでも表示が固定されることを検証。
+- セーブの上書き・復元・ID並べ替え・削除したIDの再追加、破損検出。
+- 日本語・カンマ・引用符を含むCSVログ。
+- 言語と服のRGB色の保存復元、範囲外値・NaNの拒否。
+- 星が左から右へ正弦波上を移動し、開始・終端でフェード、時間0でバーが消えることを検証。
 
-## 測定値
+## Windows描画・入力テスト
 
-| 条件 | 結果 |
+NVIDIA GPUとWARPの両方で次を確認しています。
+
+- Direct3D 11、Direct2D、Dear ImGui Win32 / DX11バックエンドの初期化・描画・終了。
+- ボタンクリック、Space、F、Wの入力経路と1000×700 / 1440×900のリサイズ。
+- 全12オーラの描画。
+- 通常・自動ロールでもコレクションの装備を維持。
+- デバッグの未所持プレビューがCSVのファイルサイズも含めて履歴を変更せず、自動ロールを停止。
+- コレクションで装備するとプレビューが解除され、装備が保存されること。
+- 英語、日本語、赤い服、ImGuiパネル、クールタイム中・完了後の画面をPNG出力し、目視確認。
+
+## ローカル測定
+
+| 条件 | 値 |
 | --- | --- |
-| ゲームEXE | 436,224バイト（約426KiB、静的VC++ランタイム） |
-| NVIDIA GeForce RTX 3050 6GB Laptop GPU | フレーム送信時間平均 約1.90ms |
-| Microsoft Basic Render Driver / WARP | フレーム送信時間平均 約3.29ms |
-| 3D描画 | 1 draw call / Verdant装備時355インスタンス |
-| 通常起動のCPU側ワーキングセット | 約72.5MiB（1回のスナップショット） |
+| EXE | 1,047,040バイト（約1.00MiB、ImGui・VC++ランタイムを静的リンク） |
+| NVIDIA GeForce RTX 3050 6GB Laptop GPU | 平均フレーム送信時間 約1.01ms |
+| Microsoft Basic Render Driver / WARP | 平均フレーム送信時間 約1.63ms |
+| 3D部分 | 1 draw call、Verdant装備時355インスタンス |
 
-描画時間は1440×900、VSyncなし、60フレームを表示せず送信したローカル検証の値です。UI描画を含みますが、独立したGPUタイマーによる測定ではなく、実プレイのFPS保証ではありません。GPU専用メモリ量はこのワーキングセットに含みません。環境、ウィンドウサイズ、ドライバーによって変わります。通常プレイはVSyncを有効にします。
+1440×900、VSyncなし、デバッグパネルを閉じた状態で60フレームを表示せず送信した値です。独立したGPUタイマーの値や実プレイのFPS保証ではありません。通常起動はVSyncを有効にし、ImGuiパネル表示時にはUIの描画バッチが追加されます。
 
-## 再現方法
+## 再現
 
 ```bat
 ctest --test-dir build-release --output-on-failure
-build-release\AuraRng.exe --smoke-test --seed=42 --save-dir=C:\Temp\aura-test-save --capture=C:\Temp\aura-preview.png --report=C:\Temp\aura-report.txt
-build-release\AuraRng.exe --smoke-test --warp --seed=42 --save-dir=C:\Temp\aura-warp-save --report=C:\Temp\aura-warp-report.txt
+build-release\StarRng.exe --smoke-test --seed=42 --save-dir=C:\Temp\star-test-save --capture=C:\Temp\star-preview.png --report=C:\Temp\star-report.txt
+build-release\StarRng.exe --smoke-test --warp --seed=42 --save-dir=C:\Temp\star-warp-save --capture=C:\Temp\star-warp.png --report=C:\Temp\star-warp-report.txt
 ```
 
-保存先と出力先は利用できるテスト専用ディレクトリーに置き換えてください。`--smoke-test` では保存先を明示する必要があり、通常のプレイヤーセーブには触れません。キャプチャ指定時は縮小画面の `*-small.png` も出力します。`--seed` はデバッグ用で、通常起動はOS側の乱数ソースから初期化します。
+出力先はテスト用の書き込み可能なフォルダーへ変更してください。`--smoke-test`では保存先の明示が必要で、通常のセーブに触れません。キャプチャ指定時は`*-small.png`、`*-cooldown.png`、`*-japanese.png`、`*-debug.png`、`*-complete.png`も出力します。GUIのコマンド処理と描画はスモークテストで検証し、全てのOS入力デバイス操作を自動化するものではありません。
 
-GitHub ActionsにはWindowsでのビルド・コアテスト・WARP描画テストと、Ubuntuでのコアテストを登録しています。オンラインCIの結果はActions画面で確認できます。
+GitHub ActionsはWindowsビルド・WARP描画テスト・コアテスト、Ubuntuのコアテストを実行します。
