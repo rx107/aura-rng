@@ -12,6 +12,7 @@ constexpr float Pi=3.14159265359f;
 // One procedural, instanced quad pass: no imported game textures or per-frame assets.
 constexpr char PixelShader[]=R"(
 cbuffer Camera : register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; };
+Texture2D lettering : register(t0); SamplerState linearClamp : register(s0);
 struct Input { float4 p:SV_POSITION; float3 n:NORMAL; float4 color:COLOR0; float3 world:TEXCOORD0; float3 local:TEXCOORD1; };
 float hash(float2 p) { return frac(sin(dot(p,float2(127.1,311.7)))*43758.5453); }
 float4 main(Input i):SV_TARGET {
@@ -33,6 +34,16 @@ float4 main(Input i):SV_TARGET {
         float scan=exp(-abs(q.y-(frac(eyeAndTime.w*.55)*2-1))*42)*.20;
         float noise=hash(floor((q+1)*float2(31,19))+floor(eyeAndTime.w*7));
         mask=(.023+lattice+scan+step(.96,noise)*.09+frame)*(1-smoothstep(.96,1,edge));
+    } else if(style==5) {
+        mask=exp(-r2*13)*1.6+exp(-r2*3.2)*.35;
+    } else if(style==6) {
+        float triangleEdge=max(abs(q.x)*1.73+q.y,-q.y*2);
+        mask=(1-smoothstep(.72,.91,triangleEdge))*.75;
+    } else if(style>=8) {
+        float2 uv=float2(q.x*.5+.5,.5-q.y*.5);
+        if(style==9) uv.x=.4375+uv.x*.125;
+        uv.y=(uv.y+(style-8))*.25;
+        mask=lettering.Sample(linearClamp,uv).a;
     } else { // Anamorphic sparkle, stronger around the white center.
         float cross=exp(-abs(q.x)*65)*exp(-abs(q.y)*2.8)+exp(-abs(q.y)*65)*exp(-abs(q.x)*2.8);
         mask=exp(-r2*15)*.8+cross*1.7;
@@ -72,10 +83,12 @@ unsigned char glyph(char c,unsigned row) {
     static const unsigned char T[]={31,4,4,4,4,4,4}, O[]={14,17,17,17,17,17,14};
     static const unsigned char N[]={17,25,25,21,19,19,17}, Y[]={17,17,10,4,4,4,4};
     static const unsigned char R[]={30,17,17,30,20,18,17}, D[]={30,17,17,17,17,17,30};
+    static const unsigned char Q[]={14,17,17,17,21,18,13}, U[]={17,17,17,17,17,17,14};
     static const unsigned char one[]={4,12,4,4,4,4,14}, two[]={14,17,1,2,4,8,31};
     switch(c) {case 'P':p=P;break;case 'I':p=I;break;case 'X':p=X;break;case 'E':p=E;break;
         case 'L':p=L;break;case 'A':p=A;break;case 'T':p=T;break;case 'O':p=O;break;case 'N':p=N;break;
-        case 'Y':p=Y;break;case 'R':p=R;break;case 'D':p=D;break;case '1':p=one;break;case '2':p=two;break;default:break;}
+        case 'Y':p=Y;break;case 'R':p=R;break;case 'D':p=D;break;case 'Q':p=Q;break;case 'U':p=U;break;
+        case '1':p=one;break;case '2':p=two;break;default:break;}
     return p?p[row]:0;
 }
 Color bright(Color c,float strength,float white=0) {
@@ -202,9 +215,13 @@ void Renderer::pixelText(const char* value,float x,float y,float z,float size,Co
         }
     }
 }
-void Renderer::buildPixelation(const Frame& f) {
+void Renderer::buildPixelation(const Frame& source) {
+    Frame f=source;
+    const auto level=f.presentation.level(f.progress,f.roller.catalog());
+    f.time=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,level);
     const auto color=pixelationColor(f.time),hot=bright(color,1.65f,.15f);
     const float t=f.time,ox=f.avatarX,oz=f.avatarZ;
+    const auto volley=pixelationVolley(t);
     auto point=[&](float x,float y,float z) {return XMVectorSet(ox+x,y,oz+z,1);};
     auto line=[&](XMVECTOR a,XMVECTOR b,float width=.10f,float energy=.8f) {pixelLine(a,b,width,hot,energy,f);};
     auto ring=[&](float radius,float y,float tilt,float turn,float energy) {
@@ -238,8 +255,7 @@ void Renderer::buildPixelation(const Frame& f) {
     }
     // Orbiting holographic players: a circular data trail, screen, and bitmap labels.
     for(unsigned player=0;player<2;++player) {
-        const float angle=t*.95f+player*Pi+.3f;
-        const float px=std::cos(angle)*2.45f,pz=std::sin(angle)*2.45f,py=2.5f+.36f*std::sin(angle*1.4f);
+        const float px=volley.players[player].x,pz=volley.players[player].z,py=volley.players[player].y;
         const auto rotation=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw);
         const auto screen=rotation*XMMatrixTranslation(ox+px,py,oz+pz);
         pixelQuad(XMMatrixScaling(1.35f,.88f,1)*screen,color,3,.9f);
@@ -264,6 +280,30 @@ void Renderer::buildPixelation(const Frame& f) {
             const float u=i/16.f,jitter=.13f*std::sin(i*7.1f+std::floor(t*15));
             const auto next=point(px*(1-u)+jitter,py+(2.35f-py)*u+jitter*.7f,pz*(1-u));
             line(previous,next,.085f,.48f); previous=next;
+        }
+    }
+    if(level>=2) {
+        if(volley.flightVisible) for(unsigned player=0;player<2;++player) {
+            const auto ball=volley.balls[player];
+            const Color white{1.8f,1.8f,1.8f};
+            pixelBillboard(ox+ball.x,ball.y,oz+ball.z,.30f,.30f,hot,5,.98f,f);
+            pixelBillboard(ox+ball.x,ball.y,oz+ball.z,.18f,.18f,white,5,.85f,f);
+            for(unsigned trail=1;trail<=6;++trail) {
+                const auto past=pixelationVolley(std::max(0.f,t-trail*.025f));
+                if(past.shotCycle!=volley.shotCycle) continue;
+                const auto p=past.balls[player];
+                const float size=.15f-trail*.015f;
+                pixelBillboard(ox+p.x,p.y,oz+p.z,size,size,hot,5,.42f*(1-trail/7.f),f);
+            }
+        }
+        if(volley.impactAge>=0 && volley.impactAge<.27f) {
+            const float u=volley.impactAge/.27f,fade=(1-u)*(1-u),r=.12f+.48f*u;
+            const auto c=volley.meeting;
+            pixelBillboard(ox+c.x,c.y,oz+c.z,.28f+u*.42f,.28f+u*.42f,{1.5f,1.5f,1.5f},4,fade*.55f,f);
+            for(unsigned i=0;i<12;++i) {
+                const float a=i*2*Pi/12;
+                pixelBillboard(ox+c.x+std::cos(a)*r,c.y+std::sin(a)*r,oz+c.z,.06f*(1-u),.06f*(1-u),hot,1,fade*.55f,f);
+            }
         }
     }
     pixelText("PIXELATION",ox,.90f,oz-.20f,.045f,hot,f);

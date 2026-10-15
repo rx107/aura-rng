@@ -28,6 +28,7 @@ struct Frame {
     std::string musicStatus;
     float cameraPitch{.52f};
     float movement{};
+    float effectTime{-1},cutsceneTime{-1};
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
@@ -43,7 +44,8 @@ public:
     std::string adapterName() const { return adapterName_; }
     std::size_t instanceCount() const { return instances_.size()+starInstances_.size(); }
     std::size_t starCount() const { return starInstances_.size(); }
-    std::size_t pixelationCount() const { return pixelationInstances_.size(); }
+    std::size_t pixelationCount() const { return pixelationVisible_?pixelationInstances_.size():0; }
+    std::size_t equinoxCount() const { return equinoxVisible_?pixelationInstances_.size()+equinoxOrbs_.size():0; }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
     float scale() const { return scale_; }
@@ -67,6 +69,11 @@ private:
     void createEffects();
     void createPixelation();
     void buildPixelation(const Frame& frame);
+    void createEquinox();
+    void createCutscene();
+    void buildEquinox(const Frame& frame);
+    void drawCutscene(const Frame& frame);
+    void cutsceneUi(const Frame& frame);
     void createPixelationTargets();
     void compositePixelation();
     void pixelQuad(DirectX::FXMMATRIX transform,Color color,unsigned style,float opacity);
@@ -102,6 +109,10 @@ private:
     ComPtr<ID3D11PixelShader> ps_;
     ComPtr<ID3D11PixelShader> holePs_;
     ComPtr<ID3D11PixelShader> pixelationPs_;
+    ComPtr<ID3D11PixelShader> equinoxOrbPs_,cutscenePs_;
+    ComPtr<ID3D11Buffer> cutsceneConstants_;
+    ComPtr<IDWriteTextFormat> cutsceneFont_,cutsceneKanjiFont_;
+    ComPtr<ID3D11ShaderResourceView> equinoxLettering_;
     ComPtr<ID3D11VertexShader> bloomVs_;
     ComPtr<ID3D11PixelShader> blurPs_,compositePs_;
     ComPtr<ID3D11Buffer> blurConstants_;
@@ -124,12 +135,13 @@ private:
     std::vector<Instance> instances_;
     std::vector<Instance> starInstances_;
     std::vector<Instance> pixelationInstances_;
+    std::vector<Instance> equinoxOrbs_;
     ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
     ComPtr<ID3D11BlendState> effectBlend_;
     ComPtr<ID3D11BlendState> additiveBlend_;
     ComPtr<ID3D11DepthStencilState> effectDepth_;
     UINT starIndexCount_{};
-    bool holeVisible_{},nameplateVisible_{};
+    bool holeVisible_{},nameplateVisible_{},pixelationVisible_{},equinoxVisible_{};
     Instance blackHole_;
     DirectX::XMFLOAT2 nameplate_{};
     ImGuiContext* imguiContext_{};

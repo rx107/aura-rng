@@ -1,6 +1,7 @@
 #include "core/animation.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace aura {
 AvatarPose avatarPose(float time,float walkPhase,float movement,bool singularity) {
@@ -30,6 +31,52 @@ AvatarPose pixelationPose(float time) {
     p.armOut={.55f,.55f}; p.armPitch={-.35f,-.35f};
     p.legPitch={-.07f,.10f}; p.legOut={.04f,.04f}; p.knee={-.04f,-.09f};
     return p;
+}
+float pixelationMotionTime(float elapsed,unsigned level) {
+    if (!std::isfinite(elapsed) || elapsed<=0) return 0;
+    return static_cast<float>(std::min(static_cast<double>(elapsed)*(level>=1?1.6:1.),
+        static_cast<double>(std::numeric_limits<float>::max())));
+}
+AvatarPose equinoxPose(float time) {
+    AvatarPose p;
+    p.fixed=true;
+    p.lift=.28f+.04f*std::sin(time*1.3f);
+    p.bodyRoll=.015f*std::sin(time*.8f);
+    p.armOut={.35f,.35f}; p.armPitch={-.15f,-.15f}; p.legOut={.03f,.03f};
+    return p;
+}
+PixelationVolley pixelationVolley(float effectTime) {
+    constexpr float Pi=3.14159265359f;
+    // Bound exceptional clocks before converting a cycle index to an integer.
+    const double time=std::isfinite(effectTime)?std::clamp(static_cast<double>(effectTime),0.,1.e12):0.;
+    const auto cycle=static_cast<std::int64_t>(std::floor(time/PixelationVolleyPeriod));
+    const double shotTime=static_cast<double>(cycle)*PixelationVolleyPeriod;
+    PixelationVolley volley;
+    volley.shotCycle=cycle;
+    volley.shotAge=static_cast<float>(time-shotTime);
+    volley.flightProgress=std::clamp(volley.shotAge/PixelationVolleyFlight,0.f,1.f);
+    volley.flightVisible=volley.shotAge<PixelationVolleyFlight;
+    volley.impactCycle=volley.flightVisible?cycle-1:cycle;
+    if (volley.impactCycle>=0) volley.impactAge=static_cast<float>(time-
+        (static_cast<double>(volley.impactCycle)*PixelationVolleyPeriod+PixelationVolleyFlight));
+    auto player=[](double clock,unsigned i) {
+        constexpr double Pi=3.14159265358979323846;
+        const double angle=clock*.95+i*Pi+.3;
+        return EffectPoint{static_cast<float>(std::cos(angle)*2.45),
+            static_cast<float>(2.5+.36*std::sin(angle*1.4)),static_cast<float>(std::sin(angle)*2.45)};
+    };
+    for (unsigned i=0;i<2;++i) {
+        volley.players[i]=player(time,i);
+        volley.launches[i]=player(shotTime,i);
+        if (volley.flightProgress>=1) volley.balls[i]=volley.meeting;
+        else {
+            const float u=volley.flightProgress,arc=.35f*std::sin(Pi*u);
+            const auto& from=volley.launches[i];
+            volley.balls[i]={from.x+(volley.meeting.x-from.x)*u,
+                from.y+(volley.meeting.y-from.y)*u+arc,from.z+(volley.meeting.z-from.z)*u};
+        }
+    }
+    return volley;
 }
 AbsorbedStar singularityStar(float time,unsigned index,unsigned count) {
     constexpr float Pi=3.14159265359f;

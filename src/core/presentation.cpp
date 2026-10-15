@@ -17,7 +17,8 @@ std::string displayName(const Definition& d, Language language) {
     const std::pair<const char*, const char*> names[] = {
         {"still", "コモン"}, {"glimmer", "アンコモン"}, {"ember", "残火"}, {"stardust", "星屑"}, {"verdant", "翠緑"},
         {"tidal", "潮流"}, {"amethyst", "アメジスト"}, {"solar", "太陽"}, {"aurora", "オーロラ"},
-        {"astral", "星界"}, {"eventide", "宵闇"}, {"zenith", "天頂"}, {"pixelation", "ピクセレーション"}, {"singularity", "特異点"}};
+        {"astral", "星界"}, {"eventide", "宵闇"}, {"zenith", "天頂"}, {"pixelation", "ピクセレーション"},
+        {"equinox", "エキノックス"}, {"singularity", "特異点"}};
     for (const auto& [id, name] : names) if (d.id == id) return name;
     return d.name;
 }
@@ -28,8 +29,10 @@ void Presentation::showPreview(std::size_t index, std::size_t catalogSize, bool&
 }
 unsigned Presentation::level(const Progress& progress,const std::vector<Definition>& catalog) const {
     const auto index=shown(progress);
-    if(catalog.at(index).id!="singularity") return 0;
-    return singularityLevel.value_or(progress.auraLevel(index,catalog));
+    const auto& id=catalog.at(index).id;
+    if(id=="singularity") return std::min(3u,singularityLevel.value_or(progress.auraLevel(index,catalog)));
+    if(id=="pixelation") return std::min(3u,pixelationLevel.value_or(progress.auraLevel(index,catalog)));
+    return 0;
 }
 namespace {
 void validate(const Settings& s) {
@@ -37,7 +40,8 @@ void validate(const Settings& s) {
         throw std::runtime_error("Invalid luck or volume");
     if ((s.avatar!=Avatar::Block && s.avatar!=Avatar::Vrm) || (s.biome!=Biome::Normal && s.biome!=Biome::Desert))
         throw std::runtime_error("Invalid avatar or biome");
-    for (const auto* p:{&s.vrmPath,&s.bgmPath}) if (p->size()>2048 || p->find_first_of("\r\n\0",0,3)!=std::string::npos)
+    for (const auto* p:{&s.vrmPath,&s.bgmPath,&s.pixelationBgmPath,&s.pixelationFinalBgmPath})
+        if (p->size()>2048 || p->find_first_of("\r\n\0",0,3)!=std::string::npos)
         throw std::runtime_error("Invalid asset path");
     if (s.language != Language::English && s.language != Language::Japanese) throw std::runtime_error("Invalid language");
     for (const float c : {s.shirt.r, s.shirt.g, s.shirt.b})
@@ -47,23 +51,28 @@ void validate(const Settings& s) {
 Settings loadSettings(const std::filesystem::path& path) {
     Settings s;
     if (!std::filesystem::exists(path)) return s;
-    if (std::filesystem::file_size(path) > 16384) throw std::runtime_error("Settings file too large");
+    if (std::filesystem::file_size(path) > 32768) throw std::runtime_error("Settings file too large");
     std::ifstream input(path);
     std::string header, kind, language, extra;
     std::getline(input, header);
-    if (header != "STARS_RNG_SETTINGS 1" && header != "STARS_RNG_SETTINGS 2") throw std::runtime_error("Invalid settings header");
+    if (header != "STARS_RNG_SETTINGS 1" && header != "STARS_RNG_SETTINGS 2" && header != "STARS_RNG_SETTINGS 3")
+        throw std::runtime_error("Invalid settings header");
     if (!(input >> kind >> language) || kind != "language" || (language != "en" && language != "ja"))
         throw std::runtime_error("Invalid language setting");
     s.language = language == "ja" ? Language::Japanese : Language::English;
     if (!(input >> kind >> s.shirt.r >> s.shirt.g >> s.shirt.b) || kind != "shirt")
         throw std::runtime_error("Invalid shirt setting");
-    if (header=="STARS_RNG_SETTINGS 2") {
+    if (header!="STARS_RNG_SETTINGS 1") {
         int avatar{},biome{};
         if (!(input>>kind>>s.luck) || kind!="luck" || !(input>>kind>>avatar) || kind!="avatar" ||
             !(input>>kind>>biome) || kind!="biome" || !(input>>kind>>s.volume) || kind!="volume" ||
             !(input>>kind>>std::quoted(s.vrmPath)) || kind!="vrm" || !(input>>kind>>std::quoted(s.bgmPath)) || kind!="bgm")
             throw std::runtime_error("Invalid asset settings");
         s.avatar=static_cast<Avatar>(avatar); s.biome=static_cast<Biome>(biome);
+        if (header=="STARS_RNG_SETTINGS 3" &&
+            (!(input>>kind>>std::quoted(s.pixelationBgmPath)) || kind!="pixelation_bgm" ||
+             !(input>>kind>>std::quoted(s.pixelationFinalBgmPath)) || kind!="pixelation_final_bgm"))
+            throw std::runtime_error("Invalid Pixelation audio settings");
     }
     if (input>>extra) throw std::runtime_error("Unexpected settings data");
     validate(s); return s;
@@ -73,10 +82,12 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     auto temporary = path; temporary += ".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    out << "STARS_RNG_SETTINGS 2\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
+    out << "STARS_RNG_SETTINGS 3\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
         << "\nshirt " << std::setprecision(17) << settings.shirt.r << ' ' << settings.shirt.g << ' ' << settings.shirt.b
         << "\nluck "<<settings.luck<<"\navatar "<<static_cast<int>(settings.avatar)<<"\nbiome "<<static_cast<int>(settings.biome)
-        <<"\nvolume "<<settings.volume<<"\nvrm "<<std::quoted(settings.vrmPath)<<"\nbgm "<<std::quoted(settings.bgmPath)<<'\n';
+        <<"\nvolume "<<settings.volume<<"\nvrm "<<std::quoted(settings.vrmPath)<<"\nbgm "<<std::quoted(settings.bgmPath)
+        <<"\npixelation_bgm "<<std::quoted(settings.pixelationBgmPath)
+        <<"\npixelation_final_bgm "<<std::quoted(settings.pixelationFinalBgmPath)<<'\n';
     out.flush();
     if (!out) throw std::runtime_error("Cannot write settings");
     out.close();

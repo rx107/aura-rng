@@ -185,7 +185,8 @@ std::string oddsInLabel(const std::vector<Definition>& catalog,std::size_t index
     return label;
 }
 unsigned Progress::auraLevel(std::size_t index,const std::vector<Definition>& catalog) const {
-    if(catalog.at(index).id!="singularity" || counts.at(index)==0) return 0;
+    const auto& id=catalog.at(index).id;
+    if((id!="singularity" && id!="pixelation") || counts.at(index)==0) return 0;
     return static_cast<unsigned>(std::min<std::uint64_t>(3,counts.at(index)-1));
 }
 std::size_t Progress::discovered() const {

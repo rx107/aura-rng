@@ -1,4 +1,5 @@
 #include "core/aura.hpp"
+#include "core/animation.hpp"
 #include "render/renderer.hpp"
 #include "platform/audio.hpp"
 #include <windowsx.h>
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <fstream>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 
@@ -17,7 +19,7 @@ using Clock=std::chrono::steady_clock;
 struct Options {
     bool smoke{},warp{},debug{};
     std::filesystem::path capture, report, saveDir;
-    std::filesystem::path vrm,bgm;
+    std::filesystem::path vrm,bgm,pixelationBgm,pixelationFinalBgm;
     std::uint64_t seed{};
 };
 Options options() {
@@ -32,6 +34,8 @@ Options options() {
         else if(a==L"--debug") result.debug=true;
         else if(a.starts_with(L"--vrm=")) result.vrm=a.substr(6);
         else if(a.starts_with(L"--bgm=")) result.bgm=a.substr(6);
+        else if(a.starts_with(L"--pixelation-bgm=")) result.pixelationBgm=a.substr(17);
+        else if(a.starts_with(L"--pixelation-final-bgm=")) result.pixelationFinalBgm=a.substr(23);
         else if(a.starts_with(L"--capture=")) result.capture=a.substr(10);
         else if(a.starts_with(L"--report=")) result.report=a.substr(9);
         else if(a.starts_with(L"--save-dir=")) result.saveDir=a.substr(11);
@@ -51,6 +55,11 @@ std::filesystem::path executableDir() {
 std::filesystem::path localData() {
     PWSTR folder{}; aura::checked(SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&folder),"Local app data");
     std::filesystem::path result=std::filesystem::path(folder)/L"AuraRng"; CoTaskMemFree(folder); return result;
+}
+std::filesystem::path downloadsFolder() {
+    PWSTR folder{};
+    if(FAILED(SHGetKnownFolderPath(FOLDERID_Downloads,0,nullptr,&folder))) return {};
+    std::filesystem::path result(folder); CoTaskMemFree(folder); return result;
 }
 class App {
 public:
@@ -72,6 +81,10 @@ public:
         auto utf8=[](const std::filesystem::path& p) {const auto u=p.u8string(); return std::string(reinterpret_cast<const char*>(u.data()),u.size());};
         if(!opts_.vrm.empty()) presentation_.settings.vrmPath=utf8(opts_.vrm);
         if(!opts_.bgm.empty()) presentation_.settings.bgmPath=utf8(opts_.bgm);
+        if(!opts_.pixelationBgm.empty()) presentation_.settings.pixelationBgmPath=utf8(opts_.pixelationBgm);
+        if(!opts_.pixelationFinalBgm.empty()) presentation_.settings.pixelationFinalBgmPath=utf8(opts_.pixelationFinalBgm);
+        downloads_=downloadsFolder();
+        if(!downloads_.empty()) cutsceneAudioPath_=downloads_/L"EquinoxReworkedCutscene.mp4.mp4";
         roller_.setLuck(presentation_.settings.luck);
     }
     aura::Frame frame() const {
@@ -84,8 +97,10 @@ public:
             else if(notice_=="Could not open the log folder.") notice="ログフォルダーを開けませんでした。";
             else if(notice_=="Settings could not be saved.") notice="言語と服の色の設定を保存できませんでした。";
         }
+        const auto audioStatus=cutsceneActive()?(cutsceneAudioAvailable_?std::string("Cutscene: ")+cutsceneMusic_.status():std::string("Cutscene / visual only"))+
+            " / Aura BGM: "+music_.status():music_.status();
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
-            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,music_.status(),pitch_,movement_};
+            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -126,12 +141,40 @@ public:
     }
     ~App() { renderer_.reset(); if(window_ && IsWindow(window_)) DestroyWindow(window_); }
 private:
+    bool cutsceneActive() const { return cutsceneTime_>=0; }
+    float effectTime() const {
+        return opts_.smoke?aura::pixelationMotionTime(time_,presentation_.level(progress_,roller_.catalog())):effectClock_;
+    }
+    std::filesystem::path audioFile(const std::string& custom,const wchar_t* filename) const {
+        if(!custom.empty()) return std::filesystem::path(aura::widen(custom));
+        const auto bundled=root_/L"data"/L"audio"/filename;
+        std::error_code error;
+        if(std::filesystem::is_regular_file(bundled,error) || downloads_.empty()) return bundled;
+        const auto local=downloads_/filename;
+        return std::filesystem::is_regular_file(local,error)?local:bundled;
+    }
+    void startCutscene() {
+        if(!cutsceneActive()) cutsceneDebugWasOpen_=renderer_->debugOpen();
+        if(renderer_->debugOpen()) renderer_->toggleDebug();
+        cutsceneTime_=0; auto_=false; keys_.fill(false); movement_=0; dragging_=false;
+        ReleaseCapture(); pending_.reset(); sfxBaseline_=false; stopCutsceneRequested_=false;
+        std::error_code error;
+        cutsceneAudioAvailable_=!cutsceneAudioPath_.empty() && std::filesystem::is_regular_file(cutsceneAudioPath_,error);
+        cutsceneMusic_.reload();
+    }
+    void stopCutscene() {
+        if(!cutsceneActive()) return;
+        cutsceneTime_=-1; keys_.fill(false); dragging_=false; ReleaseCapture(); pending_.reset();
+        cutsceneMusic_.reload();
+        if(renderer_->debugOpen()!=cutsceneDebugWasOpen_) renderer_->toggleDebug();
+        sfxBaseline_=false; stopCutsceneRequested_=false;
+    }
     void persist() {
         try { aura::saveProgress(saves_/L"progress.txt",progress_,roller_.catalog()); }
         catch(const std::exception&) { notice_="Progress could not be saved. Check the log folder / free disk space."; }
     }
     void roll() {
-        if(cooldown_>0) return;
+        if(cooldown_>0 || cutsceneActive()) return;
         const auto result=roller_.roll(); progress_.record(result,roller_.catalog());
         aura::LogEntry entry{progress_.rolls,aura::utcNow(),result};
         if(log_.size()==200) log_.erase(log_.begin());
@@ -139,8 +182,10 @@ private:
         try { aura::appendLog(saves_/L"rolls.csv",entry,roller_.catalog()[result]); }
         catch(const std::exception&) { notice_="Roll log could not be written. Check the log folder / free disk space."; }
         persist();
+        if(roller_.catalog()[result].id=="equinox") startCutscene();
     }
     void action(aura::Hit hit) {
+        if(cutsceneActive() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Logs) return;
         switch(hit.action) {
         case aura::Action::Roll: roll(); break;
         case aura::Action::Auto: auto_=!auto_; break;
@@ -152,7 +197,8 @@ private:
         case aura::Action::Equip:
             if(hit.index<progress_.counts.size() && hit.index<roller_.catalog().size() &&
                 !roller_.catalog()[hit.index].previewOnly && progress_.counts[hit.index]) {
-                progress_.equipped=hit.index; presentation_.preview.reset(); presentation_.singularityLevel.reset(); persist();
+                progress_.equipped=hit.index; presentation_.preview.reset(); presentation_.singularityLevel.reset(); presentation_.pixelationLevel.reset();
+                sfxBaseline_=false; persist();
             }
             break;
         case aura::Action::Debug:
@@ -162,16 +208,27 @@ private:
         }
     }
     void applyDebugActions(const aura::DebugActions& commands) {
+        if(commands.stopCutscene) stopCutscene();
+        if(!cutsceneActive()) {
         if(commands.preview) presentation_.showPreview(*commands.preview,roller_.catalog().size(),auto_);
-        if(commands.restore) {presentation_.preview.reset(); presentation_.singularityLevel.reset();}
+        if(commands.restore) {presentation_.preview.reset(); presentation_.singularityLevel.reset(); presentation_.pixelationLevel.reset();}
         if(commands.auraLevel) {
             presentation_.singularityLevel=std::min(3u,*commands.auraLevel);
             const auto& catalog=roller_.catalog();
             for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id=="singularity") presentation_.showPreview(i,catalog.size(),auto_);
         }
         if(commands.actualLevel) presentation_.singularityLevel.reset();
+        if(commands.pixelationLevel) {
+            presentation_.pixelationLevel=std::min(3u,*commands.pixelationLevel);
+            const auto& catalog=roller_.catalog();
+            for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id=="pixelation") presentation_.showPreview(i,catalog.size(),auto_);
+        }
+        if(commands.pixelationActualLevel) presentation_.pixelationLevel.reset();
+        if(commands.preview || commands.restore || commands.auraLevel || commands.actualLevel || commands.pixelationLevel || commands.pixelationActualLevel)
+            sfxBaseline_=false;
         if(commands.roll) roll();
-        if(commands.toggleAuto) auto_=!auto_;
+        if(commands.toggleAuto && !cutsceneActive()) auto_=!auto_;
+        }
         if(commands.language) presentation_.settings.language=*commands.language;
         if(commands.shirt) presentation_.settings.shirt=*commands.shirt;
         if(commands.luck) {roller_.setLuck(*commands.luck); presentation_.settings.luck=roller_.luck();}
@@ -179,21 +236,51 @@ private:
         if(commands.biome) presentation_.settings.biome=*commands.biome;
         if(commands.vrmPath) {presentation_.settings.vrmPath=*commands.vrmPath; renderer_->reloadVrm();}
         if(commands.bgmPath) {presentation_.settings.bgmPath=*commands.bgmPath; music_.reload();}
+        if(commands.pixelationBgmPath) {presentation_.settings.pixelationBgmPath=*commands.pixelationBgmPath; music_.reload();}
+        if(commands.pixelationFinalBgmPath) {presentation_.settings.pixelationFinalBgmPath=*commands.pixelationFinalBgmPath; music_.reload();}
         if(commands.volume) presentation_.settings.volume=*commands.volume;
-        if(commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath || commands.volume) {
+        if(commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
+            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.volume) {
             try { aura::saveSettings(saves_/L"settings.txt",presentation_.settings); }
             catch(const std::exception&) { notice_="Settings could not be saved."; }
         }
+        if(commands.playEquinoxCutscene) startCutscene();
     }
     void update(float dt) {
+        dt=std::max(0.f,dt);
         time_+=dt; cooldown_=std::max(0.f,cooldown_-dt);
         if(pending_) { action(*pending_); pending_.reset(); }
+        if(stopCutsceneRequested_) stopCutscene();
+        if(cutsceneActive()) {
+            cutsceneTime_+=dt;
+            if(cutsceneTime_>=aura::EquinoxCutsceneDuration) stopCutscene();
+        }
         if(auto_ && cooldown_<=0) roll();
         const auto& s=presentation_.settings;
-        const auto bgm=s.bgmPath.empty()?root_/L"data"/L"audio"/L"Tides_of_the_Outer_Reach.mp3":std::filesystem::path(aura::widen(s.bgmPath));
-        music_.update(bgm,roller_.catalog()[presentation_.shown(progress_)].id=="singularity",s.volume,dt);
+        const auto shown=presentation_.shown(progress_); const auto& id=roller_.catalog()[shown].id;
+        const auto level=presentation_.level(progress_,roller_.catalog());
+        if(shown!=effectAura_) {effectAura_=shown; effectClock_=0; sfxBaseline_=false;}
+        effectClock_+=dt*(id=="pixelation" && level>=1?1.6f:1.f);
+        bool musicActive=false;
+        if(!cutsceneActive() && id=="singularity") {audioPath_=audioFile(s.bgmPath,L"Tides_of_the_Outer_Reach.mp3"); musicActive=true;}
+        if(!cutsceneActive() && id=="pixelation" && level>=1) {
+            audioPath_=level>=3?audioFile(s.pixelationFinalBgmPath,L"Censored.mp3.mpeg"):audioFile(s.pixelationBgmPath,L"Redline_Shift.mp3");
+            musicActive=true;
+        }
+        music_.update(audioPath_,musicActive,s.volume,dt);
+        // The reference video remains local. Its audio is stopped at the cinematic
+        // boundary, before the recording's later Collection footage can be heard.
+        cutsceneMusic_.update(cutsceneAudioPath_,cutsceneActive() && cutsceneAudioAvailable_,s.volume,dt);
+        if(!cutsceneActive() && id=="pixelation" && level>=2) {
+            const auto volley=aura::pixelationVolley(effectTime());
+            if(sfxBaseline_) {
+                if(volley.shotCycle>lastShotCycle_) sfx_.playShot(s.volume);
+                if(volley.impactCycle>=0 && volley.impactCycle>lastImpactCycle_) sfx_.playImpact(s.volume);
+            }
+            lastShotCycle_=volley.shotCycle; lastImpactCycle_=volley.impactCycle; sfxBaseline_=true;
+        } else sfxBaseline_=false;
         bool moving=false;
-        if((foreground_ || opts_.smoke) && !renderer_->wantsKeyboard()) {
+        if(!cutsceneActive() && (foreground_ || opts_.smoke) && !renderer_->wantsKeyboard()) {
             float mx=0,mz=0;
             if(keys_['W'] || keys_[VK_UP]) mz+=1;
             if(keys_['S'] || keys_[VK_DOWN]) mz-=1;
@@ -235,7 +322,7 @@ private:
             for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id==id) return i;
             throw std::runtime_error(std::string("Smoke aura is missing: ")+id);
         };
-        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation");
+        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox");
         const auto startingRolls=progress_.rolls;
         const auto initialEquipped=progress_.equipped;
         // Exercise the actual window input path, cooldown, auto toggle and resizing.
@@ -320,7 +407,10 @@ private:
             presentation_.preview.reset(); cooldown_=0; render(false); captureVariant(L"-complete");
         }
         auto captureExtra=[&](const wchar_t* suffix) {
-            if(!opts_.capture.empty()) renderer_->capture(opts_.capture.parent_path()/(opts_.capture.stem().wstring()+suffix+L".png"));
+            if(opts_.capture.empty()) return;
+            const float measuredFps=fps_; fps_=0; render(false);
+            renderer_->capture(opts_.capture.parent_path()/(opts_.capture.stem().wstring()+suffix+L".png"));
+            fps_=measuredFps;
         };
         const auto pixelationCounts=progress_.counts;
         const auto pixelationRolls=progress_.rolls; const auto pixelationLogs=log_.size();
@@ -352,6 +442,60 @@ private:
             if(!renderer_->pixelationCount()) throw std::runtime_error("Pixelation animation lost its effect geometry");
             const auto suffix=L"-pixelation-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
         }
+        std::array<std::size_t,4> pixelationLevelInstances{};
+        std::size_t redlineDecoded=0,finalDecoded=0;
+        aura::DebugActions speed; speed.pixelationLevel=0; applyDebugActions(speed); update(0);
+        const float normalClock=effectClock_; update(.1f);
+        if(std::abs(effectClock_-normalClock-.1f)>.0001f) throw std::runtime_error("Pixelation normal motion clock failed");
+        const float switchingClock=effectClock_; speed.pixelationLevel=1; applyDebugActions(speed); update(0);
+        if(std::abs(effectClock_-switchingClock)>.0001f) throw std::runtime_error("Pixelation level switch reset its motion clock");
+        update(.1f);
+        if(std::abs(effectClock_-switchingClock-.16f)>.0001f) throw std::runtime_error("Pixelation accelerated motion clock failed");
+        for(unsigned level=0;level<=3;++level) {
+            aura::DebugActions effect; effect.pixelationLevel=level; auto_=true; applyDebugActions(effect);
+            time_=.25f; update(.4f); render(false);
+            pixelationLevelInstances[level]=renderer_->pixelationCount();
+            if(auto_ || presentation_.shown(progress_)!=pixelation || presentation_.level(progress_,roller_.catalog())!=level || !pixelationLevelInstances[level])
+                throw std::runtime_error("Pixelation Aura Level switch failed");
+            if(!level && music_.playing()) throw std::runtime_error("Pixelation Lv0 played music");
+            if(level>=1 && level<=2 && !opts_.pixelationBgm.empty()) {
+                if(audioPath_!=opts_.pixelationBgm || !music_.playing() || !music_.decodedBytes()) throw std::runtime_error("Pixelation Redline BGM failed: "+music_.status());
+                redlineDecoded=music_.decodedBytes();
+            }
+            if(level==3 && !opts_.pixelationFinalBgm.empty()) {
+                if(audioPath_!=opts_.pixelationFinalBgm || !music_.playing() || !music_.decodedBytes()) throw std::runtime_error("Pixelation final BGM failed: "+music_.status());
+                finalDecoded=music_.decodedBytes();
+            }
+            const auto suffix=L"-pixelation-level"+std::to_wstring(level); captureExtra(suffix.c_str());
+        }
+        aura::DebugActions volleyLevel; volleyLevel.pixelationLevel=2; applyDebugActions(volleyLevel);
+        time_=0; update(0); const auto baselineSfx=sfx_.playCount();
+        time_=.39f; update(0); render(false); captureExtra(L"-pixelation-before-impact");
+        const auto impactsBefore=sfx_.impactCount();
+        time_=.4f; update(0); render(false); captureExtra(L"-pixelation-impact");
+        if(sfx_.available() && sfx_.impactCount()!=impactsBefore+1) throw std::runtime_error("Pixelation collision did not play one impact");
+        const auto collisionSfx=sfx_.playCount();
+        for(int i=0;i<8;++i) update(0);
+        if(sfx_.playCount()!=collisionSfx) throw std::runtime_error("Pixelation repeated an impact in the same cycle");
+        time_=.43f; update(0); render(false); captureExtra(L"-pixelation-after-impact");
+        const auto shotsBefore=sfx_.shotCount(); time_=1.01f; update(0);
+        if(sfx_.available() && sfx_.shotCount()!=shotsBefore+1) throw std::runtime_error("Pixelation volley did not play one shot");
+        const auto volleySfx=sfx_.playCount();
+        for(int i=0;i<8;++i) update(0);
+        if(!opts_.warp && !opts_.capture.empty()) {
+            for(int i=0;i<36;++i) {
+                time_=i/18.f;
+                const auto suffix=L"-volley-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+            }
+        }
+        time_=10; applyDebugActions(pixels); update(0);
+        volleyLevel.pixelationLevel=3; applyDebugActions(volleyLevel); update(0);
+        if(sfx_.playCount()!=volleySfx || collisionSfx<baselineSfx) throw std::runtime_error("Pixelation preview / level switch replayed old sound events");
+        aura::DebugActions commonAudio; commonAudio.preview=0; applyDebugActions(commonAudio); update(.6f);
+        if(music_.playing()) throw std::runtime_error("Pixelation music did not stop on another aura");
+        volleyLevel.pixelationLevel=0; applyDebugActions(volleyLevel); update(.6f);
+        if(music_.playing()) throw std::runtime_error("Pixelation music did not stop at Lv0");
+        aura::DebugActions actualPixelation; actualPixelation.pixelationActualLevel=true; applyDebugActions(actualPixelation);
         applyDebugActions(previewCommand); render(false);
         if(renderer_->pixelationCount()) throw std::runtime_error("Pixelation geometry remained after switching aura");
         action({aura::Action::Equip,chosen});
@@ -378,6 +522,81 @@ private:
             applyDebugActions(previewCommand); update(.4f);
             if(!music_.playing()) throw std::runtime_error("BGM did not restart on Singularity");
         }
+        const auto cutCounts=progress_.counts;
+        const auto cutRolls=progress_.rolls; const auto cutLogs=log_.size();
+        const auto cutLogBytes=std::filesystem::file_size(saves_/L"rolls.csv");
+        aura::DebugActions equinoxPreview; equinoxPreview.preview=equinox; auto_=true; applyDebugActions(equinoxPreview);
+        time_=2; distance_=11; pitch_=.27f; movement_=0; walk_=0; render(false); captureExtra(L"-equinox");
+        if(auto_ || !renderer_->equinoxCount() || renderer_->pixelationCount()) throw std::runtime_error("Equinox preview failed");
+        const auto equinoxBegin=Clock::now();
+        for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
+        const double meanEquinoxMs=std::chrono::duration<double,std::milli>(Clock::now()-equinoxBegin).count()/60;
+        const auto equinoxInstances=renderer_->equinoxCount();
+        if(!opts_.warp && !opts_.capture.empty()) {
+            for(int i=0;i<36;++i) {
+                time_=i*(1.565f/36);
+                const auto suffix=L"-equinox-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+            }
+        }
+        applyDebugActions(previewCommand); render(false);
+        if(renderer_->equinoxCount()) throw std::runtime_error("Equinox remained after aura switch");
+        const auto cutShown=presentation_.shown(progress_); const auto cutPreview=presentation_.preview;
+        const auto cutSingularityLevel=presentation_.singularityLevel,cutPixelationLevel=presentation_.pixelationLevel;
+        const bool debugBeforeCut=renderer_->debugOpen();
+        if(!renderer_->debugOpen()) renderer_->toggleDebug();
+        auto_=true; keys_['W']=true;
+        aura::DebugActions playCutscene; playCutscene.playEquinoxCutscene=true; applyDebugActions(playCutscene);
+        if(!cutsceneActive() || auto_ || renderer_->debugOpen() || keys_['W'] || dragging_) throw std::runtime_error("Cutscene did not suspend gameplay / debug");
+        const auto cutX=x_,cutZ=z_,cutYaw=yaw_,cutPitch=pitch_,cutDistance=distance_;
+        cooldown_=0; roll(); action({aura::Action::Auto,0});
+        SendMessageW(window_,WM_KEYDOWN,VK_SPACE,0); SendMessageW(window_,WM_KEYDOWN,'F',0); SendMessageW(window_,WM_KEYDOWN,'W',0);
+        SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(540,340)); SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(600,370));
+        SendMessageW(window_,WM_RBUTTONUP,0,MAKELPARAM(600,370)); SendMessageW(window_,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);
+        update(.1f);
+        if(auto_ || x_!=cutX || z_!=cutZ || yaw_!=cutYaw || pitch_!=cutPitch || distance_!=cutDistance || progress_.rolls!=cutRolls)
+            throw std::runtime_error("Cutscene accepted gameplay input");
+        std::size_t cutsceneDecoded=0;
+        if(cutsceneAudioAvailable_) {
+            if(!cutsceneMusic_.playing() || !cutsceneMusic_.decodedBytes()) throw std::runtime_error("Local MP4 cutscene audio failed: "+cutsceneMusic_.status());
+            cutsceneDecoded=cutsceneMusic_.decodedBytes();
+        }
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false); captureExtra(L"-cutscene-small");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        update(.6f);
+        if(music_.playing()) throw std::runtime_error("Aura BGM did not fade during cutscene");
+        cutsceneTime_=1.5f; render(false);
+        constexpr int CutsceneBenchmarkFrames=20;
+        const auto cutsceneBegin=Clock::now();
+        for(int i=0;i<CutsceneBenchmarkFrames;++i) render(false);
+        const double meanCutsceneMs=std::chrono::duration<double,std::milli>(Clock::now()-cutsceneBegin).count()/CutsceneBenchmarkFrames;
+        constexpr float cutTimes[]={.5f,1.5f,3.5f,6,8.5f,10.5f};
+        for(const float cutSecond:cutTimes) {
+            cutsceneTime_=cutSecond; render(false);
+            const auto suffix=L"-cutscene-"+std::to_wstring(static_cast<int>(cutSecond*10)); captureExtra(suffix.c_str());
+        }
+        for(int i=0;i<60;++i) {
+            cutsceneTime_=i*.18f; render(false);
+            const auto suffix=L"-cutscene-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+        }
+        cutsceneTime_=aura::EquinoxCutsceneDuration-.01f; update(.02f);
+        if(cutsceneActive() || cutsceneMusic_.playing() || !renderer_->debugOpen()) throw std::runtime_error("Cutscene timeout did not stop audio / restore debug state");
+        applyDebugActions(playCutscene);
+        if(cutsceneMusic_.playing() || cutsceneMusic_.decodedBytes()) throw std::runtime_error("Cutscene restart did not reset audio to its beginning");
+        update(.05f);
+        if(cutsceneAudioAvailable_ && (!cutsceneMusic_.playing() || cutsceneMusic_.decodedBytes()!=cutsceneDecoded))
+            throw std::runtime_error("Local cutscene audio did not restart");
+        SendMessageW(window_,WM_KEYDOWN,VK_ESCAPE,0); update(0);
+        if(cutsceneActive() || cutsceneMusic_.playing() || quitting_ || !renderer_->debugOpen()) throw std::runtime_error("Cutscene Escape cancellation failed");
+        applyDebugActions(playCutscene); SendMessageW(window_,WM_KEYDOWN,VK_F1,0); update(0);
+        if(!cutsceneActive() || !renderer_->debugOpen()) throw std::runtime_error("F1 did not reopen debug during cutscene");
+        aura::DebugActions stop; stop.stopCutscene=true; applyDebugActions(stop);
+        if(cutsceneActive() || cutsceneMusic_.playing() || !renderer_->debugOpen()) throw std::runtime_error("Cutscene debug stop failed");
+        if(renderer_->debugOpen()!=debugBeforeCut) renderer_->toggleDebug();
+        if(progress_.counts!=cutCounts || progress_.rolls!=cutRolls || log_.size()!=cutLogs ||
+            std::filesystem::file_size(saves_/L"rolls.csv")!=cutLogBytes || progress_.equipped!=chosen ||
+            presentation_.shown(progress_)!=cutShown || presentation_.preview!=cutPreview ||
+            presentation_.singularityLevel!=cutSingularityLevel || presentation_.pixelationLevel!=cutPixelationLevel)
+            throw std::runtime_error("Equinox / cutscene changed collection, levels or roll history");
         if(!opts_.vrm.empty()) {
             aura::DebugActions avatar; avatar.avatar=aura::Avatar::Vrm; applyDebugActions(avatar);
             const auto deadline=Clock::now()+std::chrono::seconds(45);
@@ -390,6 +609,11 @@ private:
             if(std::abs(pixelationFixedA.x-pixelationFixedB.x)+std::abs(pixelationFixedA.y-pixelationFixedB.y)+
                 std::abs(pixelationFixedA.z-pixelationFixedB.z)>.00001f)
                 throw std::runtime_error("Moving changed the fixed Pixelation VRM pose");
+            applyDebugActions(equinoxPreview); movement_=0; walk_=0; distance_=11; pitch_=.27f; render(false); captureExtra(L"-vrm-equinox");
+            const auto equinoxFixedA=renderer_->vrmBone(4);
+            movement_=1; walk_=2; render(false); const auto equinoxFixedB=renderer_->vrmBone(4);
+            if(!renderer_->equinoxCount() || std::abs(equinoxFixedA.x-equinoxFixedB.x)+std::abs(equinoxFixedA.y-equinoxFixedB.y)+
+                std::abs(equinoxFixedA.z-equinoxFixedB.z)>.00001f) throw std::runtime_error("Moving changed the fixed Equinox VRM pose");
             aura::DebugActions common; common.preview=0; applyDebugActions(common);
             movement_=0; walk_=0; distance_=7; pitch_=.20f; yaw_=.15f;
             render(false); captureExtra(L"-vrm");
@@ -436,8 +660,21 @@ private:
             out<<"Pixelation: PASS / preview-only, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
                <<"Pixelation instances: "<<pixelationInstances<<"\nMean Pixelation frame submission time: "<<meanPixelationMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
+            out<<"Pixelation levels: PASS / 0..3, motion speed, synchronized collision, one sound event per cycle, preview/level baseline reset\n"
+               <<"Pixelation level instances: "<<pixelationLevelInstances[0]<<", "<<pixelationLevelInstances[1]<<", "<<pixelationLevelInstances[2]<<", "<<pixelationLevelInstances[3]
+               <<"\nSFX: "<<sfx_.shotCount()<<" shots / "<<sfx_.impactCount()<<" impacts / "<<sfx_.status()<<"\n"
+               <<"Equinox: PASS / preview, clean switching, no progress/history mutation\n"
+               <<"Cutscene: PASS / gameplay suppression, resize, 60 frames, timeout, Escape and debug stop, restored preview/levels/debug\n";
+            out<<"Equinox instances: "<<equinoxInstances<<"\nMean Equinox frame submission time: "<<meanEquinoxMs
+               <<" ms/frame (60 offscreen frames, no vsync)\n"
+               <<"Cutscene instances: 0 / one fullscreen triangle, procedural shader\nMean Cutscene frame submission time: "<<meanCutsceneMs
+               <<" ms/frame ("<<CutsceneBenchmarkFrames<<" offscreen frames at t=1.5, no vsync)\n";
+            if(cutsceneDecoded) out<<"Local cutscene audio: PASS / "<<cutsceneDecoded<<" decoded PCM bytes / MP4 audio stream, restart from beginning, immediate stop before Collection footage\n";
+            else out<<"Local cutscene audio: visual-only / reference MP4 unavailable\n";
+            if(!opts_.pixelationBgm.empty()) out<<"Redline Shift: PASS / "<<redlineDecoded<<" decoded PCM bytes / Lv1-2 loop and stop\n";
+            if(!opts_.pixelationFinalBgm.empty()) out<<"Censored: PASS / "<<finalDecoded<<" decoded PCM bytes / Lv3 switch and stop\n";
             if(!opts_.vrm.empty()) out<<"VRM: PASS / "<<renderer_->vrmVertices()<<" vertices / "<<renderer_->vrmDraws()<<" additional draw calls / "<<vrmFrameMs
-                <<" ms/frame submission / standing, walking, Singularity and Pixelation fixed poses during movement, textures, reload and missing-file fallback\n";
+                <<" ms/frame submission / standing, walking, Singularity / Pixelation / Equinox fixed poses during movement, textures, reload and missing-file fallback\n";
             if(!opts_.bgm.empty()) out<<"BGM: PASS / "<<music_.decodedBytes()<<" decoded PCM bytes / supplied and bundled tracks, loop, stop and restart\n";
             if(!out) throw std::runtime_error("Cannot write smoke report");
         }
@@ -452,9 +689,13 @@ private:
         if(!app) return DefWindowProcW(window,message,wp,lp);
         if(message==WM_KEYUP && wp<256) app->keys_[wp]=false;
         if(message==WM_KEYDOWN && wp==VK_F1 && !(lp & (1LL<<30))) { app->pending_=aura::Hit{aura::Action::Debug,0}; return 0; }
+        if(app->cutsceneActive() && message==WM_KEYDOWN && wp==VK_ESCAPE) {
+            if(!(lp & (1LL<<30))) app->stopCutsceneRequested_=true;
+            return 0;
+        }
         // Once a drag starts on the stage it owns the mouse until release or
         // capture loss. ImGui's previous-frame capture flag must not interrupt it.
-        if(message==WM_RBUTTONDOWN && app->renderer_ && app->renderer_->canOrbit(
+        if(message==WM_RBUTTONDOWN && !app->cutsceneActive() && app->renderer_ && app->renderer_->canOrbit(
             static_cast<float>(GET_X_LPARAM(lp)),static_cast<float>(GET_Y_LPARAM(lp)))) {
             app->lastMouseX_=GET_X_LPARAM(lp); app->lastMouseY_=GET_Y_LPARAM(lp);
             app->dragging_=true; SetFocus(window); SetCapture(window); return 0;
@@ -471,6 +712,10 @@ private:
         }
         if(message==WM_CAPTURECHANGED) app->dragging_=false;
         if(app->renderer_ && app->renderer_->handleMessage(window,message,wp,lp)) return 0;
+        if(app->cutsceneActive()) {
+            if(message==WM_KEYDOWN) return 0;
+            if(message==WM_LBUTTONUP || message==WM_RBUTTONDOWN || message==WM_RBUTTONUP || message==WM_MOUSEWHEEL) return 0;
+        }
         // No disk I/O or throwing renderer calls are made inside the window procedure.
         switch(message) {
         case WM_CLOSE: app->quitting_=true; return 0;
@@ -517,12 +762,17 @@ private:
         default: return DefWindowProcW(window,message,wp,lp);
         }
     }
-    Options opts_; std::filesystem::path root_,saves_;
+    Options opts_; std::filesystem::path root_,saves_,downloads_,audioPath_,cutsceneAudioPath_;
     aura::Roller roller_; aura::Progress progress_; aura::Presentation presentation_; std::vector<aura::LogEntry> log_;
-    aura::Music music_;
+    aura::Music music_,cutsceneMusic_; aura::SoundEffects sfx_;
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;
     bool quitting_{},minimized_{},foreground_{true},auto_{},dragging_{};
+    bool cutsceneDebugWasOpen_{},stopCutsceneRequested_{},sfxBaseline_{};
+    bool cutsceneAudioAvailable_{};
+    float effectClock_{},cutsceneTime_{-1};
+    std::size_t effectAura_{std::numeric_limits<std::size_t>::max()};
+    std::int64_t lastShotCycle_{-1},lastImpactCycle_{-1};
     unsigned pendingWidth_{},pendingHeight_{},fpsFrames_{};
     int collectionScroll_{},logScroll_{},lastMouseX_{},lastMouseY_{};
     float pitch_{.52f};

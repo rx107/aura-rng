@@ -23,8 +23,8 @@ bool inside(float x,float y,float rx,float ry,float w,float h) { return x>=rx &&
 std::optional<std::string> chooseAsset(HWND owner,bool vrm) {
     ComPtr<IFileOpenDialog> dialog;
     if(FAILED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))) return {};
-    const COMDLG_FILTERSPEC filter=vrm?COMDLG_FILTERSPEC{L"VRM avatar (*.vrm)",L"*.vrm"}:COMDLG_FILTERSPEC{L"Audio (*.mp3;*.wav;*.m4a)",L"*.mp3;*.wav;*.m4a"};
-    dialog->SetFileTypes(1,&filter); dialog->SetTitle(vrm?L"Select VRM avatar / VRMアバターを選択":L"Select Singularity BGM / BGMを選択");
+    const COMDLG_FILTERSPEC filter=vrm?COMDLG_FILTERSPEC{L"VRM avatar (*.vrm)",L"*.vrm"}:COMDLG_FILTERSPEC{L"Audio (*.mp3;*.mpeg;*.wav;*.m4a)",L"*.mp3;*.mpeg;*.wav;*.m4a"};
+    dialog->SetFileTypes(1,&filter); dialog->SetTitle(vrm?L"Select VRM avatar / VRMアバターを選択":L"Select aura BGM / オーラBGMを選択");
     dialog->SetOptions(FOS_FILEMUSTEXIST|FOS_PATHMUSTEXIST|FOS_FORCEFILESYSTEM|FOS_NOCHANGEDIR);
     if(FAILED(dialog->Show(owner))) return {};
     ComPtr<IShellItem> item; if(FAILED(dialog->GetResult(&item))) return {};
@@ -163,6 +163,21 @@ void Renderer::debugUi(const Frame& f) {
                 ImGui::PopStyleColor();
                 ImGui::TextWrapped("%s",t("Animated pixel fragments, hologram panels and a rotating wireframe cube. Visual prototype: excluded from rolls.",
                     "色が移り変わるピクセル片、ホログラムパネル、回転するワイヤー立方体。見た目の試作のため、ロールの抽選対象外です。"));
+                const auto actualPixelationLevel=f.progress.auraLevel(i,f.roller.catalog());
+                int pixelationLevel=static_cast<int>(f.presentation.pixelationLevel.value_or(actualPixelationLevel));
+                if(ImGui::SliderInt("Pixelation / Aura Level",&pixelationLevel,0,3)) debugActions_.pixelationLevel=static_cast<unsigned>(pixelationLevel);
+                if(ImGui::SmallButton(t("Use Collection level##pixelation","所持数に応じたレベルへ戻す##pixelation"))) debugActions_.pixelationActualLevel=true;
+                ImGui::TextWrapped("%s",t("0: original / 1: faster + Redline Shift / 2: exchange of fire + short synthesized effects / 3: BGM changes to Censored. Debug levels are temporary.",
+                    "0: 通常 / 1: 速度アップ＋Redline Shift / 2: 打ち合い＋短い合成効果音 / 3: BGMをCensoredへ変更。デバッグレベルは一時的です。"));
+            }
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="equinox") {
+                ImGui::Separator();
+                if(ImGui::Button(t("Preview Equinox","Equinox を表示"),{-1,34})) debugActions_.preview=i;
+                ImGui::TextWrapped("%s",t("Cutscene-only playback does not equip or grant an aura. It stops AutoRoll and adds no roll history.",
+                    "カットシーンのみの再生ではオーラの装備や取得は行いません。自動ロールを止め、履歴には追加しません。"));
+                if(ImGui::Button(t("Play cutscene only##equinox","カットシーンのみ再生##equinox"))) debugActions_.playEquinoxCutscene=true;
+                ImGui::SameLine();
+                if(ImGui::Button(t("Stop cutscene##equinox","カットシーン停止##equinox"))) debugActions_.stopCutscene=true;
             }
             if (ImGui::Button(t("Restore Collection aura","コレクションの装備に戻す"),{-1,30})) debugActions_.restore=true;
             ImGui::Separator();
@@ -189,13 +204,25 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::EndTabItem();
             }
             if(ImGui::BeginTabItem(t("Audio","音楽"))) {
-                ImGui::TextWrapped("%s",t("The selected track loops only while Singularity is displayed, including Debug Preview.","選択した曲はSingularity表示中のみループします。デバッグプレビューにも対応します。"));
-                if(ImGui::Button(t("Choose BGM...","BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.bgmPath=*path;
-                ImGui::TextWrapped("%s",f.presentation.settings.bgmPath.empty()?t("Bundled: Tides of the Outer Reach","同梱BGM: Tides of the Outer Reach"):f.presentation.settings.bgmPath.c_str());
+                ImGui::TextWrapped("%s",t("BGM follows the displayed aura and its level, including Debug Preview. Choose local files or restore each default track.",
+                    "表示オーラとレベルに応じてBGMを切り替えます。デバッグプレビューにも対応します。ローカルファイルの選択と各曲の初期設定への復帰ができます。"));
                 float volume=f.presentation.settings.volume;
-                if(ImGui::SliderFloat(t("Volume","音量"),&volume,0,1,"%.2f")) debugActions_.volume=volume;
+                if(ImGui::SliderFloat(t("Music / SFX volume","音楽・効果音の音量"),&volume,0,1,"%.2f")) debugActions_.volume=volume;
                 ImGui::TextWrapped("%s",f.musicStatus.c_str());
-                if(ImGui::Button(t("Use bundled BGM","同梱BGMを使用"))) debugActions_.bgmPath=std::string{};
+                ImGui::Separator(); ImGui::TextUnformatted("Singularity");
+                if(ImGui::Button(t("Choose Singularity BGM...","Singularity BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.bgmPath=*path;
+                ImGui::TextWrapped("%s",f.presentation.settings.bgmPath.empty()?t("Bundled: Tides of the Outer Reach","同梱BGM: Tides of the Outer Reach"):f.presentation.settings.bgmPath.c_str());
+                if(ImGui::SmallButton(t("Use default track##singularity","初期設定の曲を使用##singularity"))) debugActions_.bgmPath=std::string{};
+                ImGui::Separator(); ImGui::TextUnformatted("Pixelation / Lv 1-2");
+                if(ImGui::Button(t("Choose Redline Shift BGM...","Redline Shift用BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.pixelationBgmPath=*path;
+                ImGui::TextWrapped("%s",f.presentation.settings.pixelationBgmPath.empty()?t("Default: Redline Shift (bundled or local Downloads)",
+                    "初期設定: Redline Shift（同梱またはローカルDownloads）"):f.presentation.settings.pixelationBgmPath.c_str());
+                if(ImGui::SmallButton(t("Use default track##pixelation","初期設定の曲を使用##pixelationAudio"))) debugActions_.pixelationBgmPath=std::string{};
+                ImGui::Separator(); ImGui::TextUnformatted("Pixelation / Lv 3");
+                if(ImGui::Button(t("Choose Censored BGM...","Censored用BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.pixelationFinalBgmPath=*path;
+                ImGui::TextWrapped("%s",f.presentation.settings.pixelationFinalBgmPath.empty()?t("Default: Censored (bundled or local Downloads)",
+                    "初期設定: Censored（同梱またはローカルDownloads）"):f.presentation.settings.pixelationFinalBgmPath.c_str());
+                if(ImGui::SmallButton(t("Use default track##pixelationFinal","初期設定の曲を使用##pixelationFinal"))) debugActions_.pixelationFinalBgmPath=std::string{};
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -299,14 +326,16 @@ void Renderer::ui(const Frame& f) {
     const float titleY=h-281;
     label(f.presentation.preview?t("DEBUG PREVIEW","デバッグプレビュー"):t("EQUIPPED AURA","装備中のオーラ"),276,titleY,300,20,10,Muted,true);
     label(name(shown),276,titleY+23,w-650,45,32,tint(equipped.color),true);
-    label(oddsLabel(defs,shown)+(equipped.id=="singularity"?"   /   Aura Level "+std::to_string(f.presentation.level(f.progress,defs))+" / 3":""),276,titleY+67,w-650,25,12,Muted);
+    label(oddsLabel(defs,shown)+((equipped.id=="singularity" || equipped.id=="pixelation")?"   /   Aura Level "+std::to_string(f.presentation.level(f.progress,defs))+" / 3":""),276,titleY+67,w-650,25,12,Muted);
     if(nameplateVisible_) {
         d2d_->PushAxisAlignedClip(D2D1::RectF(258,172,w-342,h-294),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         const float width=std::min(440.f,w-624),x=std::clamp(nameplate_.x-width*.5f,264.f,w-348-width),y=nameplate_.y;
-        label(name(shown),x+1,y+1,width,32,23,D2D1::ColorF(0,0,0,.8f),true,true);
-        label(name(shown),x,y,width,32,23,tint(equipped.color),true,true);
-        label(oddsInLabel(defs,shown),x,y+31,width,25,14,White,false,true);
-        if(equipped.id=="singularity") label("Aura Level "+std::to_string(f.presentation.level(f.progress,defs)),x,y+56,width,24,12,Mint,true,true);
+        if(equipped.id!="equinox") {
+            label(name(shown),x+1,y+1,width,32,23,D2D1::ColorF(0,0,0,.8f),true,true);
+            label(name(shown),x,y,width,32,23,tint(equipped.color),true,true);
+        }
+        label(oddsInLabel(defs,shown),x,y+(equipped.id=="equinox"?0:31),width,25,14,White,false,true);
+        if(equipped.id=="singularity" || equipped.id=="pixelation") label("Aura Level "+std::to_string(f.presentation.level(f.progress,defs)),x,y+56,width,24,12,Mint,true,true);
         d2d_->PopAxisAlignedClip();
     }
     rect(right,96,290,h-280,Panel,14); stroke(right,96,290,h-280,Border,14);

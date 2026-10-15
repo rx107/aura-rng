@@ -3,6 +3,9 @@
 #include <xaudio2.h>
 #include <wrl/client.h>
 #include <filesystem>
+#include <array>
+#include <chrono>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -26,5 +29,28 @@ private:
     std::string status_{"No music selected"};
     bool mf_{},playing_{},attemptedLoad_{};
     float gain_{};
+};
+// Small original PCM effects. No decoding, looping or allocations during playback.
+class SoundEffects {
+public:
+    ~SoundEffects();
+    void playShot(float volume) noexcept;
+    void playImpact(float volume) noexcept;
+    std::size_t playCount() const { return counts_[0]+counts_[1]; }
+    std::size_t shotCount() const { return counts_[0]; }
+    std::size_t impactCount() const { return counts_[1]; }
+    bool available() const { return ready_; }
+    const std::string& status() const { return status_; }
+private:
+    void initialize();
+    void play(unsigned sound,float volume) noexcept;
+    Microsoft::WRL::ComPtr<IXAudio2> engine_;
+    IXAudio2MasteringVoice* master_{};
+    std::array<IXAudio2SourceVoice*,4> voices_{};
+    std::array<std::vector<std::int16_t>,2> pcm_;
+    std::array<std::chrono::steady_clock::time_point,2> lastPlay_{};
+    std::array<std::size_t,2> counts_{};
+    std::string status_{"Ready / original synthesized effects"};
+    bool attempted_{},ready_{};
 };
 }
