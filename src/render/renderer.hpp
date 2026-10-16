@@ -29,6 +29,8 @@ struct Frame {
     float cameraPitch{.52f};
     float movement{};
     float effectTime{-1},cutsceneTime{-1};
+    CutsceneKind cutsceneKind{CutsceneKind::Equinox};
+    std::string discordStatus;
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
@@ -46,6 +48,7 @@ public:
     std::size_t starCount() const { return starInstances_.size(); }
     std::size_t pixelationCount() const { return pixelationVisible_?pixelationInstances_.size():0; }
     std::size_t equinoxCount() const { return equinoxVisible_?pixelationInstances_.size()+equinoxOrbs_.size():0; }
+    std::size_t breakthroughCount() const { return breakthroughVisible_?pixelationInstances_.size():0; }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
     float scale() const { return scale_; }
@@ -74,6 +77,10 @@ private:
     void buildEquinox(const Frame& frame);
     void drawCutscene(const Frame& frame);
     void cutsceneUi(const Frame& frame);
+    void createBreakthrough();
+    void buildBreakthrough(const Frame& frame);
+    void drawBreakthroughCutscene(const Frame& frame);
+    void breakthroughCutsceneUi(const Frame& frame);
     void createPixelationTargets();
     void compositePixelation();
     void pixelQuad(DirectX::FXMMATRIX transform,Color color,unsigned style,float opacity);
@@ -110,6 +117,10 @@ private:
     ComPtr<ID3D11PixelShader> holePs_;
     ComPtr<ID3D11PixelShader> pixelationPs_;
     ComPtr<ID3D11PixelShader> equinoxOrbPs_,cutscenePs_;
+    ComPtr<ID3D11PixelShader> breakthroughCutscenePs_;
+    ComPtr<ID3D11PixelShader> breakthroughPs_;
+    ComPtr<ID3D11ShaderResourceView> breakthroughLettering_;
+    ComPtr<ID3D11Buffer> breakthroughConstants_;
     ComPtr<ID3D11Buffer> cutsceneConstants_;
     ComPtr<IDWriteTextFormat> cutsceneFont_,cutsceneKanjiFont_;
     ComPtr<ID3D11ShaderResourceView> equinoxLettering_;
@@ -141,7 +152,7 @@ private:
     ComPtr<ID3D11BlendState> additiveBlend_;
     ComPtr<ID3D11DepthStencilState> effectDepth_;
     UINT starIndexCount_{};
-    bool holeVisible_{},nameplateVisible_{},pixelationVisible_{},equinoxVisible_{};
+    bool holeVisible_{},nameplateVisible_{},pixelationVisible_{},equinoxVisible_{},breakthroughVisible_{};
     Instance blackHole_;
     DirectX::XMFLOAT2 nameplate_{};
     ImGuiContext* imguiContext_{};

@@ -1,103 +1,63 @@
-# Star's RNG Alpha 0.1 / v0.1.5 検証記録
+# Star's RNG Alpha 0.1 / v0.1.6 検証記録
 
-検証日: 2026-10-16（日本時間）。Windows x64、Visual C++ 19.39、Windows SDK 10.0.22621.0、Releaseビルド。
+検証日: 2026-10-16（日本時間）。Windows x64、Visual C++ 19.39、Windows SDK 10.0.22621.0、Release / C++20 / MT。
 
-## コアテスト
+## 自動テスト
 
-- 20万回のシード再現と分布確認。Commonの実確率が正確に50%であることを検証。
-- 全13種類の実チケット数が異なること、全区間の先頭・末尾、合計10^12枚を検証。Uncommonは正確に25%、Stardustは残り6.9888989%。
-- PixelationとEquinoxはプレビュー専用で0チケット。Luck 1.5 / 2 / 10 / 1000 / 100万倍でも抽選対象外で、既存13種類の基礎確率・Luck適用後の配分は追加前と同一。
-- 旧9列CSVを読み込めること、追加の`preview_only`列では0 / 1以外を拒否することを確認。
-- ロールで装備が変更されないことを検証。
-- 未所持プレビューは装備・所持数・ロール数を変更せず、自動ロールを停止。プレビュー中のロールでも表示が固定されることを検証。
-- セーブの上書き・復元・ID並べ替え・削除したIDの再追加、破損検出。
-- 旧12種・13種・14項目のセーブからSingularityの所持数・装備・Aura Levelを保持し、PixelationとEquinoxを所持数0で追加。
-- Pixelationの通常取得・ログ登録を拒否し、拒否後の所持数・CSVは不変。不正な非0所持数を含むセーブのロード、試作オーラの装備・best・非0所持数の保存を拒否。
-- 試作オーラをカタログの先頭へ移動しても、初期装備とbestは通常オーラから選ぶことを確認。Commonの旧IDが存在しない場合や、旧ID自体が試作専用の場合も確認。
-- 日本語・カンマ・引用符を含むCSVログ。
-- 言語と服のRGB色の保存復元、範囲外値・NaNの拒否。
-- 星が左から右へ正弦波上を移動し、開始・終端でフェード、時間0でバーが消えることを検証。
-- Luck 1.5 / 2 / 10 / 1000 / 100万倍でチケット合計を維持。2倍でCommonが25%、Singularityがほぼ2倍。1倍に戻すと元の配分へ完全復元。NaN・範囲外の拒否。
-- Luck、アバター、バイオーム、音量、3曲のパス、日本語・空白・引用符入りのファイルパスの保存復元。旧schema 1 / 2からschema 3への移行。
-- Singularityの初取得レベル0、重複で1〜3、上限3、所持数の保存復元、プレビューのレベルによる所持数不変を確認。
-- Pixelationのレベル0〜3がSingularityの設定に影響せず、履歴・所持数を変更しないことを確認。重複時の計算規則と上限3を検証し、現行のプレビュー専用設定では実取得できないことも確認。
-- Pixelationのレベル1〜3は共有モーション時計が1.6倍速。20周期分の球の発射点、同時到達する共通衝突点、飛行中も継続するPlayer軌道、発射・衝突のcycle IDを検証。
-- Equinoxの固定浮遊ポーズの有限値と、カットシーンの共通尺10.9秒を確認。
-- 固定ポーズが歩行位相と移動量に影響されないこと、通常の歩行で左右の脚が交互に動くことを確認。
-- レベル3の星がブラックホールへ近づき、縮小する軌道を確認。
+- コアテスト成功。20万回のシード再現、Common 1/2・Uncommon 1/4・全13抽選オーラの異なる確率・合計10^12チケットを検証。
+- カタログ16項目中、Pixelation・Equinox・BreakThroughの3種類はプレビュー専用。Luck 1〜100万倍でも0チケットで、既存13種類の確率は追加前と同一。
+- 旧12〜15項目のカタログを含むセーブ移行、ID並べ替え・削除・再追加、所持数と装備・Singularity Levelの保持、試作オーラの記録拒否・不正セーブ拒否。
+- save schema 1の読込、schema 2の独立した総ロール回数と在庫合計。0回へ変更後のロールでもbestを保持し、回数編集で在庫・既存ログを変更しないことを検証。
+- settings schema 1〜3をschema 4へ移行。日本語・引用符入りユーザー名、UTF-8検査、範囲外値、制御文字、パス・プロフィール・Discord設定の保存復元。
+- Pixelation共有時計はLevel 0=1倍、1〜2=1.6倍、3=3倍。レベル変更で時計をリセットしないこと、20周期で両弾が同一時刻・同一座標へ衝突することを確認。
+- 固定ポーズは移動・歩行位相から独立。通常の歩行、Singularityの吸収軌道、クールタイムの星とフェードも検証。
 
-## Windows描画・入力テスト
+## Windows描画・入力・音声
 
-NVIDIA GPUとWARPの両方で次を確認しています。最終の衝突点の高さ・頭上ラベル位置・Equinoxの衡文字の白黒反転の調整後はNVIDIA GPUで再検証しました。WARPの記録は、この見た目の調整前の同じ描画・入力経路による結果です。
+最終ソースをNVIDIA GPUとWARPで実行し、双方で成功しました。
 
-- Direct3D 11、Direct2D、Dear ImGui Win32 / DX11バックエンドの初期化・描画・終了。
-- ボタンクリック、Space、F、Wの入力経路と1000×700 / 1440×900のリサイズ。
-- 全13抽選オーラとPixelation・Equinoxの描画。頭上には名前・`1 in N`を表示し、試作2種類は`Preview only`を表示。
-- 通常・自動ロールでもコレクションの装備を維持。
-- デバッグの未所持プレビューがCSVのファイルサイズも含めて履歴を変更せず、自動ロールを停止。
-- Pixelationへの切り替えでAutoRollが停止し、所持数・装備・履歴・CSVサイズを変更しないことを確認。プレビュー中の通常ロールでも表示を維持し、抽選対象外のPixelationを所持数へ追加しない。
-- Pixelationの24フレームを出力し、色の循環、キューブ・リング・ピクセル・HUDの動きを確認。1000×700から1440×900へのリサイズ、別オーラへ切り替えた後に専用演出が残らないことを検証。
-- PixelationのLevel 0〜3、1.6倍の演出速度、両球が同時に同じ場所で衝突することを確認。最終表示の衝突点はアバター相対Y=3.60の頭上です。制御した1周期で発射音・衝突音がそれぞれ1回となり、プレビュー・レベル変更後に過去の音をまとめて鳴らさないことを検証。
-- Equinoxの通常表示、別オーラとの切り替え、履歴・装備・所持数の不変を確認。
-- Equinoxカットシーンの入力制御、AutoRoll停止、リサイズ、60フレームの連続描画、10.9秒での終了、Escとデバッグ停止、元のプレビュー・レベル・デバッグ画面への復元を検証。
-- コレクションで装備するとプレビューが解除され、装備が保存されること。
-- 英語、日本語、赤い服、ImGuiパネル、クールタイム中・完了後の画面をPNG出力し、目視確認。
-- 右ドラッグの開始・上下左右の移動・デバッグ画面上までの継続・ボタン解放・キャプチャ喪失での終了。パネル開閉の両方でテスト。
-- ImGuiのコマンドからLuckと通常 / 砂漠を切り替え、各景観・Singularityの浮遊ポーズを描画。
-- 独自の24頂点・10ボーンのVRMテストモデルでWARP上のGLB・初期モーフ・埋め込みPNG・GPUスキニング・歩行・固定ポーズ・再読み込み・不在時のブロック表示を検証。
-- 添付VRM 0.xモデルで124,172頂点・22プリミティブの読み込み、腕を下ろした立ち姿、衣服を含む歩行を確認。脚の骨の座標変化も検証。Singularity・Pixelation・Equinoxの固定ポーズの骨座標は移動中も不変。独自VRMのWARPテストでも3種の固定ポーズを確認。モデルとその画像は公開リポジトリに含めていません。
-- 添付MP3を11,061,696バイトのPCMにデコードし、XAudio2でSingularity表示時のループ開始・他オーラへの変更による停止・再選択での再生を検証。オーラ・景観・音声の設定で履歴が増えないことも確認。
-- NVIDIA GPUの実行でRedline Shiftを11,550,144バイト、Censoredを41,290,176バイトのPCMにデコード。Pixelation Level 1〜2のループ再生、Level 3での曲の切り替え、表示変更後の停止を検証。
-- ローカルの参考MP4から音声ストリームを2,924,544バイトのPCMへデコードし、カットシーン開始時に先頭から再生、終了・スキップ時に即停止することをGPU・WARPで検証。元動画の後半のコレクション映像の音声へ進まないことを確認。元動画がない場合の映像のみの経路も実装。
-- Aura Level 0〜3で星・ブラックホールの有無が変わることと、デバッグ操作で履歴が増えないことを確認。
-- 拡張ステージの旧境界より外（X=12）でも移動できることを確認。ステージは64×64単位。
+- D3D11 / D2D / Dear ImGuiの初期化、1000×700 / 1440×900リサイズ、Roll・クールタイム・AutoRoll・移動・保存復元。
+- 右ドラッグの上下・左右回転、デバッグ開閉中の入力、ボタン解放・capture loss。ロールで装備・表示を変更しないこと。
+- 全16オーラの表示経路。Pixelation Level 0〜3、加速、衝突の前後と即時爆発、1周期1回の発射/衝突音、表示切替後の描画クリア。
+- Equinoxの煙、白黒1個ずつの交換、2球を結ぶ光と公転の軌跡、床面の大きな衡、少量の吸込霧を連続画像と俯瞰で確認。
+- BreakThroughの7本の塔、ガラス模様、暗い破片、巻く光、2光源、名札・霧を確認。通常表示49フレームを保存。
+- Equinox約10.9秒 / BreakThrough約30秒のカットシーン。単独再生、AutoRoll停止、入力抑止、リサイズ、自然終了、Esc、F1から停止、種類切替、元の表示・レベル・debug開閉の復元。在庫・CSV・履歴は不変。
+- カットシーンはEquinox 60枚、BreakThrough 100枚の連続キャプチャと主要段階の静止画を確認。元動画の転載ではなくコードによる近似のため、煙・塔の模様・細部には差があります。
+- ローカルBreakThrough動画の音声を4.5秒から30秒へ切り出して非ループ再生（5,760,000 PCM bytes）。終了/再起動/種類切替で停止と先頭復帰を確認。動画は同梱しません。
+- Tides: 11,061,696、Redline Shift: 11,550,144、Censored: 41,290,176 PCM bytesをデコード。表示オーラ/レベルとの連動、ループ、切替、停止を確認。
+- ローカルChocolat VRM 124,172頂点 / 22 draw callsをGPUで確認。立ち姿、歩行、全固定ポーズの移動時保持、テクスチャ、再読込・欠落時フォールバック。WARPは独自24頂点fixtureを使用。VRMは公開資産へ含めません。
+- プロフィールの日本語名とDiscord設定の保存、総回数0 / 123456789 / 元の値の適用を実アプリ処理で確認。AutoRollを止め、在庫・best・既存CSVを維持します。
+
+## Discord IPC
+
+Windowsの独立fake named pipeサーバーで、HANDSHAKE v1 → READY → SET_ACTIVITYとnonce応答、名前/回数、JSON/UTF-8、5秒の更新集約、PING/PONG、無効化/終了時の消去、切断・再接続、ERROR/過大パケット、非ブロック更新と終了を検証し成功しました。ゲームのsmokeでは実Discordへの投稿を無効にしています。
+
+実Discordデスクトップのプロセスとpipe0の実在を確認しましたが、制限された検証環境からの接続はWindows ERROR_ACCESS_DENIED (5)となりました。**実Discordの更新応答・プロフィール上の表示成功は未確認です。** 既存Discordのアクセス権は変更していません。通常の起動方法と設定は[Discord連携](discord.md)を参照してください。
 
 ## ローカル測定
 
-| 条件 | 値 |
-| --- | --- |
-| EXE | 1,490,944バイト（約1.42MiB、ImGui・パーサー・VC++ランタイムを静的リンク） |
-| NVIDIA GeForce RTX 3050 6GB Laptop GPU / 通常ブロック | 平均フレーム送信時間 1.24554ms |
-| 同GPU / Pixelation / ブロック | 2.98197ms |
-| 同GPU / Equinox / ブロック | 2.81075ms |
-| 同GPU / カットシーン | 0.80195ms |
-| 同GPU / 添付124,172頂点VRM | 2.98632ms、アバターで22 draw callsを追加 |
-| Microsoft Basic Render Driver / WARP / 通常ブロック | 2.76075ms |
-| WARP / Pixelation / ブロック | 6.67084ms |
-| WARP / Equinox / ブロック | 5.97956ms |
-| WARP / カットシーン | 1.58987ms |
-| WARP / 独自24頂点VRM | 5.79416ms、アバターで1 draw callを追加 |
-| 共有キューブのワールド描画 | 1 draw call（オーラや景観でインスタンス数が変動） |
-| Pixelationの演出 | 1213インスタンスを1バッチ |
-| Equinoxの演出 | 発光と専用マテリアルの四角形を合わせて1016インスタンス |
-| カットシーン | 全画面三角形1枚のシェーダー描画と字幕UI |
-| Pixelation表示時のブロック3D合計 | ワールド1 + 演出1 + ブルームぼかし2 + 合成1 = 5 draw calls |
-| Pixelationのブルーム用ターゲット | 1440×900で約7.4MiB、初回使用時に遅延確保してキャッシュ |
+EXE: 1,611,264バイト。追加のゲームエンジン、Discord SDK DLLは使用しません。
 
-1440×900、VSyncなし、デバッグパネルを閉じた状態で表示せず送信した値です。通常・オーラ・VRMは60フレーム、カットシーンの性能測定は時刻1.5秒を固定した20フレームです。別途、カットシーンの連続描画60フレームも検証しています。独立したGPUタイマーの値や実プレイのFPS保証ではありません。通常起動はVSyncを有効にし、ImGuiパネル表示時にはUIの描画バッチが追加されます。
+| 1440×900の送信時間 | NVIDIA RTX 3050 Laptop | WARP |
+| --- | --- | --- |
+| 通常ブロック | 2.13092ms | 3.88782ms |
+| Pixelation | 3.86361ms | 6.49782ms |
+| Equinox | 4.72215ms | 4.60411ms |
+| BreakThrough | 3.81655ms | 4.56099ms |
+| Equinox CutScene | 1.11445ms | 3.06888ms |
 
-PixelationとEquinoxのブルームは全解像度1枚と半解像度2枚の`R11G11B10_FLOAT`テクスチャを共有します。標準オーラではこの後処理を実行しません。標準オーラの粒子上限は160個、Pixelationは専用の180ピクセル・20光点を使用し、Level 2以降は飛行・衝突の位相に応じて球や衝突光も追加します。
+デバッグを閉じ、表示せずVSyncなしで送信した測定です。通常/オーラは60フレーム、Equinox CutSceneは時刻1.5秒固定の20フレーム。GPUタイマー値や実プレイFPSの保証ではありません。VRMモデルや電源・他プロセスなどで変動します。
+
+Pixelation基礎1213、Equinox1108、BreakThrough1225の演出インスタンスを確認。BreakThroughの暗い塔は共有キューブの同一バッチへ追加します。ブルームは全解像度1枚と半解像度2枚を共有し、1440×900で約7.4MiBを初回に確保して再使用。通常オーラでは実行しません。カットシーンは全画面三角形1枚と字幕です。
 
 ## 再現
 
 ```bat
-ctest --test-dir build-release --output-on-failure
+build.cmd
 build-release\StarRng.exe --smoke-test --seed=42 --save-dir=C:\Temp\star-test-save --capture=C:\Temp\star-preview.png --report=C:\Temp\star-report.txt
-build-release\StarRng.exe --smoke-test --warp --seed=42 --save-dir=C:\Temp\star-warp-save --capture=C:\Temp\star-warp.png --report=C:\Temp\star-warp-report.txt
+build-release\StarRng.exe --smoke-test --warp --seed=42 --save-dir=C:\Temp\star-warp-save --report=C:\Temp\star-warp-report.txt
 ```
 
-出力先はテスト用の書き込み可能なフォルダーへ変更してください。`--smoke-test`では保存先の明示が必要で、通常のセーブに触れません。キャプチャ指定時は`*-small.png`、`*-cooldown.png`、`*-japanese.png`、`*-debug.png`、`*-complete.png`も出力します。GUIのコマンド処理と描画はスモークテストで検証し、全てのOS入力デバイス操作を自動化するものではありません。
+テスト用の書き込み可能な保存先を指定してください。通常のセーブには触れません。`--vrm=` / `--bgm=` / `--pixelation-bgm=` / `--pixelation-final-bgm=`でローカル資産の検証を追加できます。参考MP4音声はDownloadsの各原ファイルを使用し、動画・GIF・VRMは再配布しません。許可済みの新2曲は配布ZIPのみに含めます。
 
-追加で`*-desert.png`と`*-space.png`を生成します。`--vrm="C:\path\avatar.vrm"`を指定するとVRMの読み込み・切り替え・欠落ファイルのテストと`*-vrm.png`を追加します。`--bgm="C:\path\music.mp3"`を指定すると実際の再生・停止も確認します（音声出力デバイスが必要）。通常起動でもこれらの引数でローカルファイルを指定できます。
-
-各`*-level0.png`〜`*-level3.png`、`*-vrm-walk-a.png` / `-b.png`、`*-vrm-space.png`も生成します。VRM指定時は歩行24フレームの画像を追加し、衣服の追従も目視確認しています。同梱BGMへの切り替え後の再生も検証します。
-
-Pixelationは`*-pixelation.png`と`*-pixelation-frame-0.png`〜`*-pixelation-frame-23.png`を生成します。抽選やプレビューの状態確認に加え、連続画像で色と動きを確認できます。VRM指定時は`*-vrm-pixelation.png`を生成し、固定ポーズも検証します。
-
-Level 0〜3は`*-pixelation-level0.png`〜`*-pixelation-level3.png`、打ち合いは`*-pixelation-before-impact.png` / `-impact.png` / `-after-impact.png`と`*-volley-frame-*.png`を出力します。Equinoxは`*-equinox.png`と連続フレーム、カットシーンは`*-cutscene-small.png`、各段階の画像、`*-cutscene-frame-*.png`を出力します。VRM指定時は`*-vrm-equinox.png`も生成します。
-
-新2曲の検証は`--pixelation-bgm="C:\path\Redline_Shift.mp3"`と`--pixelation-final-bgm="C:\path\Censored.mp3.mpeg"`で明示できます。参考MP4の音声検証には、Downloadsの`EquinoxReworkedCutscene.mp4.mp4`を使用します。新2曲は公開ZIPへ同梱し、GitHubソースには含めません。参考動画とVRMはソース・公開ZIPへ含めていません。
-
-VRM 1.0も読み込みとプロシージャルアニメーション経路を実装していますが、今回の実モデル検証はVRM 0.xです。MToon、Spring Bone、表情は検証対象外・未実装です。
-
-GitHub ActionsはWindowsビルド・WARP描画テスト・コアテスト、Ubuntuのコアテストを実行します。
+GitHub ActionsはWindowsビルド・core/Discord IPCテスト・WARP smokeと、Ubuntu coreテストを実行します。入力検証はWin32メッセージ経路によるもので、全OS入力デバイスの自動操作を保証するものではありません。VRM 1.0経路は実装し、今回の実モデルはVRM 0.x。MToon / Spring Bone / 表情は未実装です。

@@ -77,6 +77,16 @@ void validate(const std::vector<Definition>& definitions) {
     }
     if (fallback != 1) throw std::runtime_error("Exactly one denominator=0 fallback is required");
 }
+std::uint64_t collectedTotal(const Progress& progress) {
+    std::uint64_t total=0;
+    const auto add=[&](std::uint64_t count) {
+        if(count>std::numeric_limits<std::uint64_t>::max()-total) throw std::overflow_error("Inventory total overflow");
+        total+=count;
+    };
+    for(auto count:progress.counts) add(count);
+    for(const auto& entry:progress.retiredCounts) add(entry.second);
+    return total;
+}
 } // namespace
 
 std::vector<Definition> loadCatalog(const std::filesystem::path& path) {
@@ -172,10 +182,11 @@ std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index)
 void Progress::record(std::size_t index, const std::vector<Definition>& catalog) {
     if (counts.size() != catalog.size() || index >= catalog.size()) throw std::out_of_range("Progress catalog mismatch");
     if (catalog[index].previewOnly) throw std::invalid_argument("Cannot record a preview-only aura as a roll");
-    if (rolls == std::numeric_limits<std::uint64_t>::max() || counts[index] == std::numeric_limits<std::uint64_t>::max())
+    if (rolls == std::numeric_limits<std::uint64_t>::max() || counts[index] == std::numeric_limits<std::uint64_t>::max() ||
+        collectedTotal(*this)==std::numeric_limits<std::uint64_t>::max())
         throw std::overflow_error("Roll counter overflow");
     ++rolls; ++counts[index];
-    if (rolls == 1 || probabilityTickets(catalog, index) < probabilityTickets(catalog, best)) best = index;
+    if (counts.at(best)==0 || probabilityTickets(catalog, index) < probabilityTickets(catalog, best)) best = index;
     // Rolling changes inventory and statistics only. Collection owns equipment selection.
 }
 std::string oddsInLabel(const std::vector<Definition>& catalog,std::size_t index) {
@@ -199,10 +210,11 @@ void saveProgress(const std::filesystem::path& path, const Progress& p, const st
         throw std::runtime_error("Preview-only auras cannot be equipment or discoveries");
     for (std::size_t i=0;i<catalog.size();++i) if (catalog[i].previewOnly && p.counts[i]!=0)
         throw std::runtime_error("Preview-only auras cannot have inventory counts");
+    const auto collected=collectedTotal(p);
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     auto temporary = path; temporary += ".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    out << "AURA_RNG_SAVE 1\nrolls " << p.rolls << "\nequipped " << catalog[p.equipped].id << '\n';
+    out << "AURA_RNG_SAVE 2\nrolls " << p.rolls << "\ncollected "<<collected<<"\nequipped " << catalog[p.equipped].id << '\n';
     for (std::size_t i = 0; i < catalog.size(); ++i) out << "count " << catalog[i].id << ' ' << p.counts[i] << '\n';
     for (const auto& [id, count] : p.retiredCounts) out << "count " << id << ' ' << count << '\n';
     out.flush();
@@ -227,16 +239,18 @@ Progress loadProgress(const std::filesystem::path& path, const std::vector<Defin
     std::ifstream in(path);
     std::string line;
     std::getline(in, line);
-    if (line != "AURA_RNG_SAVE 1") throw std::runtime_error("Unsupported progress save");
+    const bool legacy=line=="AURA_RNG_SAVE 1";
+    if (!legacy && line != "AURA_RNG_SAVE 2") throw std::runtime_error("Unsupported progress save");
     std::unordered_set<std::string> seen;
-    bool gotRolls = false, gotEquipped = false;
-    std::uint64_t total = 0;
+    bool gotRolls = false, gotEquipped = false, gotCollected=false;
+    std::uint64_t total = 0, declaredCollected=0;
     std::string equipped;
     while (std::getline(in, line)) {
         std::istringstream row(line);
         std::string kind, id, value, extra;
         row >> kind;
         if (kind == "rolls" && !gotRolls) { row >> value; p.rolls = integer(value); gotRolls = true; }
+        else if (kind == "collected" && !legacy && !gotCollected) {row>>value; declaredCollected=integer(value); gotCollected=true;}
         else if (kind == "equipped" && !gotEquipped) { row >> equipped; gotEquipped = true; }
         else if (kind == "count") {
             row >> id >> value;
@@ -253,7 +267,8 @@ Progress loadProgress(const std::filesystem::path& path, const std::vector<Defin
         } else throw std::runtime_error("Invalid progress save row");
         if (row >> extra) throw std::runtime_error("Unexpected save columns");
     }
-    if (!gotRolls || !gotEquipped || total != p.rolls) throw std::runtime_error("Inconsistent progress save");
+    if (!gotRolls || !gotEquipped || (legacy?total!=p.rolls:(!gotCollected || total!=declaredCollected)))
+        throw std::runtime_error("Inconsistent progress save");
     bool foundAny = false;
     for (std::size_t i = 0; i < catalog.size(); ++i) {
         if (catalog[i].previewOnly) continue;

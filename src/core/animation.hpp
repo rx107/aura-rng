@@ -12,6 +12,7 @@ struct AvatarPose {
 AvatarPose avatarPose(float time,float walkPhase,float movement,bool singularity);
 AvatarPose pixelationPose(float time);
 AvatarPose equinoxPose(float time);
+float pixelationMotionSpeed(unsigned level);
 float pixelationMotionTime(float elapsed,unsigned level);
 struct EffectPoint { float x{},y{},z{}; };
 inline constexpr float PixelationVolleyPeriod=1.6f;

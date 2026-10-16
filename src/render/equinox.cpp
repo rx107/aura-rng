@@ -21,7 +21,7 @@ float4 main(Input i):SV_TARGET {
     if(style==3) {
         float2 uv=float2(.4375+(q.x*.5+.5)*.125,(1.5-q.y*.5)*.25);
         float alpha=lettering.Sample(linearClamp,uv).a;
-        float c=cos(time*3.93)>0?.025:.95;
+        float c=.82+.10*sin(time*.8);
         return float4(c,c,c,alpha);
     }
     clip(1-r);
@@ -34,25 +34,28 @@ float4 main(Input i):SV_TARGET {
         float alpha=saturate((disk+.52)*(1-smoothstep(.90,1,r)));
         return float4(shade.xxx,alpha);
     }
-    float surface=cloud(q*4.5+float2(time*.035,0));
     float z=sqrt(saturate(1-r*r));
+    // Domain-warped layers drift at different rates, so the interiors curl and
+    // billow like smoke rather than reading as a textured solid moon.
+    float2 flow=float2(noise(q*2.3+float2(time*.17,-time*.11)),
+                       noise(q*2.3+float2(13-time*.13,7+time*.15)))-.5;
+    float angle=.7*z+time*.16,cs=cos(angle),sn=sin(angle);
+    float2 p=float2(q.x*cs-q.y*sn,q.x*sn+q.y*cs)*3.4+flow*1.8;
+    float surface=cloud(p+float2(time*.08,-time*.19));
+    float wisps=1-abs(noise(p*2.8+float2(-time*.16,time*.09))*2-1);
+    wisps=pow(saturate(wisps),5);
     float light=.25+.65*saturate(dot(float3(q,z),normalize(float3(-.6,.65,1))));
     float rings=exp(-abs(r-.95)*180)+exp(-abs(r-.87)*180)*.28;
     float star=1-smoothstep(.43,.47,pow(abs(q.x),.55)+pow(abs(q.y),.55));
     float3 color;
     if(style==0) {
-        float crater=0;
-        [unroll]for(int j=0;j<12;++j) {
-            float2 center=float2(hash(float2(j,2)),hash(float2(j,7)))*1.55-.775;
-            float radius=.06+hash(float2(j,3))*.15,d=length(q-center);
-            crater+=exp(-pow((d-radius)*25,2))*.10-exp(-d*d/(radius*radius)*4)*.07;
-        }
-        float gray=saturate((.40+surface*.53+crater)*light);
+        float density=smoothstep(.24,.76,surface);
+        float gray=saturate((.25+density*.71+wisps*.16)*(.66+light*.34));
         color=lerp(gray.xxx,float3(.012,.015,.022),star);
         color+=rings*.48;
     } else {
-        float crack=pow(saturate(.5+.5*sin(a*11+r*29+cloud(q*8+time*.2)*8)),18);
-        color=float3(.005,.007,.012)+surface*.025+crack*(.06+.35*r*r)+rings*.36;
+        float smoke=smoothstep(.31,.79,surface);
+        color=float3(.005,.007,.012)+smoke*.18+wisps*.055+smoke*wisps*.12+ rings*.36;
         color+=star*2.2;
     }
     return float4(color,1-smoothstep(.985,1,r));
@@ -101,7 +104,9 @@ void Renderer::buildEquinox(const Frame& source) {
     auto material=[&](FXMMATRIX model,unsigned style) {Instance v;XMStoreFloat4x4(&v.world,model);v.color={1,1,1,style+.95f};equinoxOrbs_.push_back(v);};
     material(XMMatrixScaling(8.2f,8.2f,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,.19f,oz),2);
     const auto billboard=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw);
-    material(XMMatrixScaling(.95f,.75f,1)*billboard*XMMatrixTranslation(ox+std::sin(f.cameraYaw)*.9f,.80f,oz-std::cos(f.cameraYaw)*.9f),3);
+    // A large inscription lies on the floor inside the outer silver circle.
+    // The atlas already crops the character to a square, preserving its shape.
+    material(XMMatrixScaling(5.6f,5.6f,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,.225f,oz),3);
     // Thick, softly glowing spiral bands with independently moving dark/bright filaments.
     for(unsigned ring=0;ring<3;++ring) {
         const float radius=2.1f+ring*.63f,height=.28f+ring*.07f;
@@ -112,15 +117,38 @@ void Renderer::buildEquinox(const Frame& source) {
                  point(std::cos(b)*radius,height+wave,std::sin(b)*radius),.17f+ring*.025f,.31f+ring*.12f);
         }
     }
-    for(unsigned i=0;i<58;++i) {
-        const float u=i/58.f,a=u*2*Pi*3+t*.42f,r=1.15f+u*2.85f;
-        const float size=.90f+.40f*std::sin(i*2.f)*std::sin(i*2.f);
-        pixelBillboard(ox+std::cos(a)*r,.35f+.16f*std::sin(i+t),oz+std::sin(a)*r,size,size,silver,0,.56f,f);
+    for(unsigned i=0;i<22;++i) {
+        const float u=std::fmod(i*.618034f+t*.16f,1.f);
+        const float a=i*2.399963f+t*.22f+u*1.25f,r=4.1f*(1-u)+.15f;
+        const float size=.60f+.45f*(1-u),fade=std::sin(u*Pi);
+        pixelBillboard(ox+std::cos(a)*r,.30f+.52f*u,oz+std::sin(a)*r,size,size*.60f,silver,0,.24f*fade,f,a);
     }
     struct Orb {float x,y,z;unsigned style;}; Orb orbs[2];
+    // Swap the two polarities together every half revolution: there is always
+    // exactly one white orb and one black orb, including the exchange frame.
+    const unsigned polarity=static_cast<unsigned>(std::floor(t/(1.565f*.5f)))&1u;
     for(unsigned side=0;side<2;++side) {
         const float a=t*2*Pi/1.565f+side*Pi;
-        orbs[side]={std::cos(a)*2.25f,3.1f+.20f*std::sin(a),std::sin(a)*2.25f,side};
+        orbs[side]={std::cos(a)*2.25f,3.1f+.20f*std::sin(a),std::sin(a)*2.25f,side^polarity};
+    }
+    // Two narrow, gently twisting filaments connect the pair through the middle.
+    // A short arc behind each moving orb makes their light leave a visible wake.
+    const float orbit=t*2*Pi/1.565f;
+    for(unsigned strand=0;strand<2;++strand) for(unsigned j=0;j<40;++j) {
+        auto bridge=[&](float u) {
+            const float envelope=std::sin(u*Pi),wave=(strand?1.f:-1.f)*envelope;
+            const float offset=wave*(.22f+.06f*std::sin(t*2.4f+u*2*Pi));
+            return point(orbs[0].x+(orbs[1].x-orbs[0].x)*u-std::sin(orbit)*offset,
+                orbs[0].y+(orbs[1].y-orbs[0].y)*u+wave*.22f,
+                orbs[0].z+(orbs[1].z-orbs[0].z)*u+std::cos(orbit)*offset);
+        };
+        const float u=j/40.f,v=(j+1)/40.f,energy=.12f+.30f*std::sin(u*Pi);
+        line(bridge(u),bridge(v),.10f,energy);
+    }
+    for(unsigned side=0;side<2;++side) for(unsigned j=0;j<24;++j) {
+        const float a=orbit+side*Pi-j*.023f,b=a-.023f,fade=1-j/24.f;
+        line(point(std::cos(a)*2.25f,3.1f+.20f*std::sin(a),std::sin(a)*2.25f),
+            point(std::cos(b)*2.25f,3.1f+.20f*std::sin(b),std::sin(b)*2.25f),.11f,.20f*fade);
     }
     const float eyeX=std::sin(f.cameraYaw),eyeZ=-std::cos(f.cameraYaw);
     if(orbs[0].x*eyeX+orbs[0].z*eyeZ>orbs[1].x*eyeX+orbs[1].z*eyeZ) std::swap(orbs[0],orbs[1]);

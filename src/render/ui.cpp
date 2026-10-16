@@ -104,6 +104,63 @@ void Renderer::debugUi(const Frame& f) {
             if (!japaneseFont_) ImGui::TextWrapped("A Japanese Windows font is unavailable. Install Japanese supplemental fonts for this panel.");
             ImGui::Spacing();
             if(ImGui::BeginTabBar("DebugTabs")) {
+            if(ImGui::BeginTabItem(t("Profile","プロフィール"))) {
+            static std::array<char,65> usernameDraft{};
+            static std::array<char,21> applicationDraft{};
+            static std::string usernameSource,applicationSource;
+            const auto& profile=f.presentation.settings;
+            if(usernameSource!=profile.username) {
+                usernameDraft.fill(0); std::copy_n(profile.username.begin(),std::min(profile.username.size(),usernameDraft.size()-1),usernameDraft.begin());
+                usernameSource=profile.username;
+            }
+            if(applicationSource!=profile.discordApplicationId) {
+                applicationDraft.fill(0); std::copy_n(profile.discordApplicationId.begin(),std::min(profile.discordApplicationId.size(),applicationDraft.size()-1),applicationDraft.begin());
+                applicationSource=profile.discordApplicationId;
+            }
+            ImGui::TextUnformatted(t("PLAYER PROFILE","プレイヤープロフィール"));
+            ImGui::InputText(t("Username","ユーザー名"),usernameDraft.data(),usernameDraft.size());
+            const bool usernameValid=validUsername(usernameDraft.data());
+            ImGui::BeginDisabled(!usernameValid);
+            if(ImGui::Button(t("Apply username","ユーザー名を適用"),{-1,30})) debugActions_.username=std::string(usernameDraft.data());
+            ImGui::EndDisabled();
+            ImGui::TextWrapped("%s",t("1–64 UTF-8 bytes. Your name can be changed at any time.",
+                "1〜64バイトのUTF-8文字列。ユーザー名はいつでも変更できます。"));
+            if(!usernameValid) ImGui::TextWrapped("%s",t("Enter a name without control characters or line breaks.","改行・制御文字を含まない名前を入力してください。"));
+            ImGui::Separator();
+            ImGui::TextUnformatted("DISCORD RICH PRESENCE");
+            bool discordEnabled=profile.discordEnabled;
+            if(ImGui::Checkbox(t("Show activity in Discord","Discordにプレイ状況を表示"),&discordEnabled)) debugActions_.discordEnabled=discordEnabled;
+            ImGui::TextWrapped("%s",t("Star's RNG is configured. Start Discord desktop to show your username and roll count.",
+                "Star's RNG用の設定済みです。Discordのデスクトップ版を起動すると、ユーザー名とロール回数を表示します。"));
+            ImGui::TextWrapped("%s",f.discordStatus.c_str());
+            if(ImGui::CollapsingHeader(t("Advanced Discord settings","Discordの詳細設定"))) {
+            ImGui::InputText(t("Application ID","Application ID"),applicationDraft.data(),applicationDraft.size(),ImGuiInputTextFlags_CharsDecimal);
+            const bool applicationValid=validDiscordApplicationId(applicationDraft.data());
+            ImGui::BeginDisabled(!applicationValid);
+            if(ImGui::Button(t("Apply Application ID","Application IDを適用"),{-1,30})) debugActions_.discordApplicationId=std::string(applicationDraft.data());
+            ImGui::EndDisabled();
+            ImGui::TextWrapped("%s",t("The default Application ID is already set. Only change it when using a different Discord application.",
+                "初期設定のApplication IDを使用できます。別のDiscordアプリと連携するときだけ変更してください。"));
+            }
+            ImGui::Separator();
+            ImGui::TextUnformatted(t("ROLL COUNTER / DEBUG","ロール回数 / デバッグ"));
+            static std::uint64_t rollDraft{},rollSource{};
+            static bool rollInitialized{},rollDirty{};
+            if(!rollInitialized || rollSource!=f.progress.rolls) {
+                if(!rollDirty) rollDraft=f.progress.rolls;
+                rollSource=f.progress.rolls; rollInitialized=true;
+            }
+            if(ImGui::InputScalar(t("Total rolls","総ロール回数"),ImGuiDataType_U64,&rollDraft)) {
+                rollDraft=std::min<std::uint64_t>(rollDraft,1'000'000'000'000'000ULL); rollDirty=true;
+            }
+            if(ImGui::Button(t("Apply roll count","ロール回数を適用"),{-1,30})) {
+                debugActions_.rollCount=rollDraft; rollDirty=false;
+            }
+            if(ImGui::SmallButton(t("Use current count","現在の回数に戻す"))) {rollDraft=f.progress.rolls;rollDirty=false;}
+            ImGui::TextWrapped("%s",t("Changes the saved total and Discord activity. Inventory and existing roll history are preserved; this action adds no roll history entry. Range: 0–1,000,000,000,000,000.",
+                "保存される総回数とDiscord表示を変更します。在庫・既存履歴はそのままで、この操作は履歴に追加しません。入力範囲: 0〜1,000,000,000,000,000。"));
+            ImGui::EndTabItem();
+            }
             if(ImGui::BeginTabItem(t("World","ワールド"))) {
             ImGui::BeginDisabled(f.cooldown>0);
             if (ImGui::Button(t("Roll##debugRoll","ロール##debugRoll"),{120,32})) debugActions_.roll=true;
@@ -167,8 +224,8 @@ void Renderer::debugUi(const Frame& f) {
                 int pixelationLevel=static_cast<int>(f.presentation.pixelationLevel.value_or(actualPixelationLevel));
                 if(ImGui::SliderInt("Pixelation / Aura Level",&pixelationLevel,0,3)) debugActions_.pixelationLevel=static_cast<unsigned>(pixelationLevel);
                 if(ImGui::SmallButton(t("Use Collection level##pixelation","所持数に応じたレベルへ戻す##pixelation"))) debugActions_.pixelationActualLevel=true;
-                ImGui::TextWrapped("%s",t("0: original / 1: faster + Redline Shift / 2: exchange of fire + short synthesized effects / 3: BGM changes to Censored. Debug levels are temporary.",
-                    "0: 通常 / 1: 速度アップ＋Redline Shift / 2: 打ち合い＋短い合成効果音 / 3: BGMをCensoredへ変更。デバッグレベルは一時的です。"));
+                ImGui::TextWrapped("%s",t("0: original / 1: faster + Redline Shift / 2: exchange of fire + short synthesized effects / 3: faster again + Censored. Impact flashes, shock rings and fragments. Debug levels are temporary.",
+                    "0: 通常 / 1: 速度アップ＋Redline Shift / 2: 打ち合い＋短い合成効果音 / 3: さらに加速＋Censored。着弾に閃光・衝撃波・破片を表示。デバッグレベルは一時的です。"));
             }
             for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="equinox") {
                 ImGui::Separator();
@@ -178,6 +235,15 @@ void Renderer::debugUi(const Frame& f) {
                 if(ImGui::Button(t("Play cutscene only##equinox","カットシーンのみ再生##equinox"))) debugActions_.playEquinoxCutscene=true;
                 ImGui::SameLine();
                 if(ImGui::Button(t("Stop cutscene##equinox","カットシーン停止##equinox"))) debugActions_.stopCutscene=true;
+            }
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="breakthrough") {
+                ImGui::Separator();
+                if(ImGui::Button(t("Preview BreakThrough","BreakThrough を表示"),{-1,34})) debugActions_.preview=i;
+                ImGui::TextWrapped("%s",t("Preview only. The cutscene does not equip, grant or log an aura. Esc skips playback.",
+                    "プレビュー専用。カットシーンでは装備・取得・履歴を変更しません。Escでスキップできます。"));
+                if(ImGui::Button(t("Play cutscene only##breakthrough","カットシーンのみ再生##breakthrough"))) debugActions_.playBreakthroughCutscene=true;
+                ImGui::SameLine();
+                if(ImGui::Button(t("Stop cutscene##breakthrough","カットシーン停止##breakthrough"))) debugActions_.stopCutscene=true;
             }
             if (ImGui::Button(t("Restore Collection aura","コレクションの装備に戻す"),{-1,30})) debugActions_.restore=true;
             ImGui::Separator();
@@ -359,7 +425,7 @@ void Renderer::ui(const Frame& f) {
     label(t("TOTAL ROLLS","総ロール数"),44,h-148,140,20,10,Muted,true);
     label(formatNumber(f.progress.rolls),44,h-125,170,40,30,White,true);
     label(t("BEST DISCOVERY","最もレアな発見"),230,h-148,180,20,10,Muted,true);
-    label(f.progress.rolls?name(f.progress.best):t("Waiting for a roll","最初のロールを待っています"),230,h-121,205,26,17,White,true);
+    label(f.progress.discovered()?name(f.progress.best):t("Waiting for a roll","最初のロールを待っています"),230,h-121,205,26,17,White,true);
     const float bx=w*.5f-105,by=h-146; const bool ready=f.cooldown<=0;
     const bool hover=inside(f.mouseX/scale_,f.mouseY/scale_,bx,by,210,62);
     rect(bx,by,210,62,ready?(hover?D2D1::ColorF(.68f,1,.88f):Mint):D2D1::ColorF(.18f,.31f,.32f),10);

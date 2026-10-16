@@ -2,6 +2,7 @@
 #include "core/animation.hpp"
 #include "render/renderer.hpp"
 #include "platform/audio.hpp"
+#include "platform/discord.hpp"
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -100,7 +101,7 @@ public:
         const auto audioStatus=cutsceneActive()?(cutsceneAudioAvailable_?std::string("Cutscene: ")+cutsceneMusic_.status():std::string("Cutscene / visual only"))+
             " / Aura BGM: "+music_.status():music_.status();
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
-            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_};
+            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status()};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -153,9 +154,11 @@ private:
         const auto local=downloads_/filename;
         return std::filesystem::is_regular_file(local,error)?local:bundled;
     }
-    void startCutscene() {
+    void startCutscene(aura::CutsceneKind kind=aura::CutsceneKind::Equinox) {
         if(!cutsceneActive()) cutsceneDebugWasOpen_=renderer_->debugOpen();
         if(renderer_->debugOpen()) renderer_->toggleDebug();
+        cutsceneKind_=kind;
+        cutsceneAudioPath_=downloads_.empty()?std::filesystem::path{}:downloads_/(kind==aura::CutsceneKind::Breakthrough?L"BreakthroughCutsceneV2.mp4.mp4":L"EquinoxReworkedCutscene.mp4.mp4");
         cutsceneTime_=0; auto_=false; keys_.fill(false); movement_=0; dragging_=false;
         ReleaseCapture(); pending_.reset(); sfxBaseline_=false; stopCutsceneRequested_=false;
         std::error_code error;
@@ -183,6 +186,7 @@ private:
         catch(const std::exception&) { notice_="Roll log could not be written. Check the log folder / free disk space."; }
         persist();
         if(roller_.catalog()[result].id=="equinox") startCutscene();
+        if(roller_.catalog()[result].id=="breakthrough") startCutscene(aura::CutsceneKind::Breakthrough);
     }
     void action(aura::Hit hit) {
         if(cutsceneActive() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Logs) return;
@@ -230,6 +234,11 @@ private:
         if(commands.toggleAuto && !cutsceneActive()) auto_=!auto_;
         }
         if(commands.language) presentation_.settings.language=*commands.language;
+        if(commands.username && aura::validUsername(*commands.username)) presentation_.settings.username=*commands.username;
+        if(commands.discordApplicationId && aura::validDiscordApplicationId(*commands.discordApplicationId))
+            presentation_.settings.discordApplicationId=*commands.discordApplicationId;
+        if(commands.discordEnabled) presentation_.settings.discordEnabled=*commands.discordEnabled;
+        if(commands.rollCount) {progress_.setRollCount(*commands.rollCount); auto_=false; persist();}
         if(commands.shirt) presentation_.settings.shirt=*commands.shirt;
         if(commands.luck) {roller_.setLuck(*commands.luck); presentation_.settings.luck=roller_.luck();}
         if(commands.avatar) presentation_.settings.avatar=*commands.avatar;
@@ -239,12 +248,13 @@ private:
         if(commands.pixelationBgmPath) {presentation_.settings.pixelationBgmPath=*commands.pixelationBgmPath; music_.reload();}
         if(commands.pixelationFinalBgmPath) {presentation_.settings.pixelationFinalBgmPath=*commands.pixelationFinalBgmPath; music_.reload();}
         if(commands.volume) presentation_.settings.volume=*commands.volume;
-        if(commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
+        if(commands.username || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
             commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.volume) {
             try { aura::saveSettings(saves_/L"settings.txt",presentation_.settings); }
             catch(const std::exception&) { notice_="Settings could not be saved."; }
         }
         if(commands.playEquinoxCutscene) startCutscene();
+        if(commands.playBreakthroughCutscene) startCutscene(aura::CutsceneKind::Breakthrough);
     }
     void update(float dt) {
         dt=std::max(0.f,dt);
@@ -253,14 +263,15 @@ private:
         if(stopCutsceneRequested_) stopCutscene();
         if(cutsceneActive()) {
             cutsceneTime_+=dt;
-            if(cutsceneTime_>=aura::EquinoxCutsceneDuration) stopCutscene();
+            if(cutsceneTime_>=aura::cutsceneDuration(cutsceneKind_)) stopCutscene();
         }
         if(auto_ && cooldown_<=0) roll();
         const auto& s=presentation_.settings;
+        discord_.update(!opts_.smoke && s.discordEnabled,s.discordApplicationId,s.username,progress_.rolls,dt);
         const auto shown=presentation_.shown(progress_); const auto& id=roller_.catalog()[shown].id;
         const auto level=presentation_.level(progress_,roller_.catalog());
         if(shown!=effectAura_) {effectAura_=shown; effectClock_=0; sfxBaseline_=false;}
-        effectClock_+=dt*(id=="pixelation" && level>=1?1.6f:1.f);
+        effectClock_+=dt*(id=="pixelation"?aura::pixelationMotionSpeed(level):1.f);
         bool musicActive=false;
         if(!cutsceneActive() && id=="singularity") {audioPath_=audioFile(s.bgmPath,L"Tides_of_the_Outer_Reach.mp3"); musicActive=true;}
         if(!cutsceneActive() && id=="pixelation" && level>=1) {
@@ -270,7 +281,9 @@ private:
         music_.update(audioPath_,musicActive,s.volume,dt);
         // The reference video remains local. Its audio is stopped at the cinematic
         // boundary, before the recording's later Collection footage can be heard.
-        cutsceneMusic_.update(cutsceneAudioPath_,cutsceneActive() && cutsceneAudioAvailable_,s.volume,dt);
+        cutsceneMusic_.update(cutsceneAudioPath_,cutsceneActive() && cutsceneAudioAvailable_,s.volume,dt,
+            cutsceneKind_==aura::CutsceneKind::Breakthrough?aura::BreakthroughAudioStart:0.f,
+            cutsceneKind_==aura::CutsceneKind::Breakthrough?aura::BreakthroughCutsceneDuration:0.f);
         if(!cutsceneActive() && id=="pixelation" && level>=2) {
             const auto volley=aura::pixelationVolley(effectTime());
             if(sfxBaseline_) {
@@ -322,7 +335,7 @@ private:
             for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id==id) return i;
             throw std::runtime_error(std::string("Smoke aura is missing: ")+id);
         };
-        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox");
+        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough");
         const auto startingRolls=progress_.rolls;
         const auto initialEquipped=progress_.equipped;
         // Exercise the actual window input path, cooldown, auto toggle and resizing.
@@ -451,6 +464,9 @@ private:
         if(std::abs(effectClock_-switchingClock)>.0001f) throw std::runtime_error("Pixelation level switch reset its motion clock");
         update(.1f);
         if(std::abs(effectClock_-switchingClock-.16f)>.0001f) throw std::runtime_error("Pixelation accelerated motion clock failed");
+        speed.pixelationLevel=3; applyDebugActions(speed); const float finalClock=effectClock_; update(.1f);
+        if(std::abs(effectClock_-finalClock-.1f*aura::pixelationMotionSpeed(3))>.0001f || aura::pixelationMotionSpeed(3)<=aura::pixelationMotionSpeed(2))
+            throw std::runtime_error("Pixelation final level did not accelerate further");
         for(unsigned level=0;level<=3;++level) {
             aura::DebugActions effect; effect.pixelationLevel=level; auto_=true; applyDebugActions(effect);
             time_=.25f; update(.4f); render(false);
@@ -491,6 +507,10 @@ private:
         time_=10; applyDebugActions(pixels); update(0);
         volleyLevel.pixelationLevel=3; applyDebugActions(volleyLevel); update(0);
         if(sfx_.playCount()!=volleySfx || collisionSfx<baselineSfx) throw std::runtime_error("Pixelation preview / level switch replayed old sound events");
+        if(!opts_.warp && !opts_.capture.empty()) for(int i=0;i<42;++i) {
+            time_=i/30.f;
+            const auto suffix=L"-volley3-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+        }
         aura::DebugActions commonAudio; commonAudio.preview=0; applyDebugActions(commonAudio); update(.6f);
         if(music_.playing()) throw std::runtime_error("Pixelation music did not stop on another aura");
         volleyLevel.pixelationLevel=0; applyDebugActions(volleyLevel); update(.6f);
@@ -532,6 +552,11 @@ private:
         for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
         const double meanEquinoxMs=std::chrono::duration<double,std::milli>(Clock::now()-equinoxBegin).count()/60;
         const auto equinoxInstances=renderer_->equinoxCount();
+        for(float second:{.60f,.95f,2.8f}) {
+            time_=second; render(false);
+            const auto suffix=L"-equinox-polarity-"+std::to_wstring(static_cast<int>(second*100)); captureExtra(suffix.c_str());
+        }
+        pitch_=.75f; render(false); captureExtra(L"-equinox-floor"); pitch_=.27f;
         if(!opts_.warp && !opts_.capture.empty()) {
             for(int i=0;i<36;++i) {
                 time_=i*(1.565f/36);
@@ -597,6 +622,79 @@ private:
             presentation_.shown(progress_)!=cutShown || presentation_.preview!=cutPreview ||
             presentation_.singularityLevel!=cutSingularityLevel || presentation_.pixelationLevel!=cutPixelationLevel)
             throw std::runtime_error("Equinox / cutscene changed collection, levels or roll history");
+
+        aura::DebugActions breakthroughPreview; breakthroughPreview.preview=breakthrough;
+        auto_=true; applyDebugActions(breakthroughPreview); time_=2; pitch_=.27f; distance_=13; movement_=0; render(false);
+        captureExtra(L"-breakthrough");
+        if(auto_ || roller_.tickets(breakthrough) || !renderer_->breakthroughCount() || renderer_->pixelationCount() || renderer_->equinoxCount())
+            throw std::runtime_error("BreakThrough preview / effect isolation failed");
+        const auto breakthroughInstances=renderer_->breakthroughCount();
+        const auto breakthroughBegin=Clock::now();
+        for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
+        const double meanBreakthroughMs=std::chrono::duration<double,std::milli>(Clock::now()-breakthroughBegin).count()/60;
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false);
+        if(!renderer_->breakthroughCount()) throw std::runtime_error("BreakThrough resize failed");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        if(!opts_.warp && !opts_.capture.empty()) for(int i=0;i<49;++i) {
+            time_=i*.1f; render(false);
+            const auto suffix=L"-breakthrough-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+        }
+        const auto breakthroughShown=presentation_.shown(progress_);
+        const bool debugBeforeBreakthrough=renderer_->debugOpen();
+        if(!renderer_->debugOpen()) renderer_->toggleDebug();
+        aura::DebugActions playBreakthrough; playBreakthrough.playBreakthroughCutscene=true;
+        auto_=true; keys_['W']=true; applyDebugActions(playBreakthrough);
+        if(!cutsceneActive() || cutsceneKind_!=aura::CutsceneKind::Breakthrough || auto_ || keys_['W'] || renderer_->debugOpen())
+            throw std::runtime_error("BreakThrough cutscene did not suspend gameplay");
+        const auto breakX=x_,breakZ=z_,breakYaw=yaw_;
+        cooldown_=0; roll(); action({aura::Action::Auto,0});
+        SendMessageW(window_,WM_KEYDOWN,'W',0); SendMessageW(window_,WM_KEYDOWN,VK_SPACE,0);
+        SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(540,340));
+        SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(600,370));
+        SendMessageW(window_,WM_RBUTTONUP,0,MAKELPARAM(600,370));
+        update(.1f); render(false);
+        if(auto_ || x_!=breakX || z_!=breakZ || yaw_!=breakYaw || renderer_->breakthroughCount() || renderer_->equinoxCount())
+            throw std::runtime_error("BreakThrough cinematic accepted input / retained world geometry");
+        std::size_t breakthroughAudioBytes=0;
+        if(cutsceneAudioAvailable_) {
+            breakthroughAudioBytes=cutsceneMusic_.decodedBytes();
+            if(!cutsceneMusic_.playing() || breakthroughAudioBytes<1'000'000 || breakthroughAudioBytes>12'000'000 ||
+                cutsceneAudioPath_.filename()!=L"BreakthroughCutsceneV2.mp4.mp4")
+                throw std::runtime_error("BreakThrough local clipped audio failed: "+cutsceneMusic_.status());
+        }
+        constexpr float breakCutTimes[]={1,4,9,13,14.5f,15.5f,18,22,26,28.5f,29.5f};
+        for(float second:breakCutTimes) {
+            cutsceneTime_=second; render(false);
+            const auto suffix=L"-breakthrough-cutscene-"+std::to_wstring(static_cast<int>(second*10)); captureExtra(suffix.c_str());
+        }
+        if(!opts_.warp && !opts_.capture.empty()) for(int i=0;i<100;++i) {
+            cutsceneTime_=i*.3f; render(false);
+            const auto suffix=L"-breakthrough-cutscene-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+        }
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false); captureExtra(L"-breakthrough-cutscene-small");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        cutsceneTime_=aura::BreakthroughCutsceneDuration-.01f; update(.02f);
+        if(cutsceneActive() || cutsceneMusic_.playing() || !renderer_->debugOpen() || presentation_.shown(progress_)!=breakthroughShown)
+            throw std::runtime_error("BreakThrough timeout failed to restore display / debug");
+        applyDebugActions(playBreakthrough); update(.05f);
+        if(cutsceneAudioAvailable_ && (!cutsceneMusic_.playing() || cutsceneMusic_.decodedBytes()!=breakthroughAudioBytes))
+            throw std::runtime_error("BreakThrough audio restart failed");
+        applyDebugActions(playCutscene);
+        if(cutsceneKind_!=aura::CutsceneKind::Equinox || cutsceneTime_!=0 || cutsceneMusic_.playing())
+            throw std::runtime_error("Switching cinematic did not reset kind / audio");
+        applyDebugActions(playBreakthrough); update(.05f);
+        SendMessageW(window_,WM_KEYDOWN,VK_ESCAPE,0); update(0);
+        if(cutsceneActive() || cutsceneMusic_.playing() || quitting_ || !renderer_->debugOpen())
+            throw std::runtime_error("BreakThrough Escape cancellation failed");
+        applyDebugActions(playBreakthrough); SendMessageW(window_,WM_KEYDOWN,VK_F1,0); update(0); applyDebugActions(stop);
+        if(cutsceneActive() || cutsceneMusic_.playing() || !renderer_->debugOpen()) throw std::runtime_error("BreakThrough debug stop failed");
+        if(renderer_->debugOpen()!=debugBeforeBreakthrough) renderer_->toggleDebug();
+        if(progress_.counts!=cutCounts || progress_.rolls!=cutRolls || log_.size()!=cutLogs ||
+            std::filesystem::file_size(saves_/L"rolls.csv")!=cutLogBytes || progress_.equipped!=chosen ||
+            presentation_.shown(progress_)!=breakthroughShown || presentation_.singularityLevel!=cutSingularityLevel || presentation_.pixelationLevel!=cutPixelationLevel)
+            throw std::runtime_error("BreakThrough preview / cinematic changed inventory or history");
+        applyDebugActions(previewCommand); render(false);
+        if(renderer_->breakthroughCount()) throw std::runtime_error("BreakThrough remained after aura switching");
         if(!opts_.vrm.empty()) {
             aura::DebugActions avatar; avatar.avatar=aura::Avatar::Vrm; applyDebugActions(avatar);
             const auto deadline=Clock::now()+std::chrono::seconds(45);
@@ -614,6 +712,11 @@ private:
             movement_=1; walk_=2; render(false); const auto equinoxFixedB=renderer_->vrmBone(4);
             if(!renderer_->equinoxCount() || std::abs(equinoxFixedA.x-equinoxFixedB.x)+std::abs(equinoxFixedA.y-equinoxFixedB.y)+
                 std::abs(equinoxFixedA.z-equinoxFixedB.z)>.00001f) throw std::runtime_error("Moving changed the fixed Equinox VRM pose");
+            applyDebugActions(breakthroughPreview); movement_=0; walk_=0; distance_=13; pitch_=.27f; render(false); captureExtra(L"-vrm-breakthrough");
+            const auto breakthroughFixedA=renderer_->vrmBone(4);
+            movement_=1; walk_=2; render(false); const auto breakthroughFixedB=renderer_->vrmBone(4);
+            if(!renderer_->breakthroughCount() || std::abs(breakthroughFixedA.x-breakthroughFixedB.x)+std::abs(breakthroughFixedA.y-breakthroughFixedB.y)+
+                std::abs(breakthroughFixedA.z-breakthroughFixedB.z)>.00001f) throw std::runtime_error("Moving changed the fixed BreakThrough VRM pose");
             aura::DebugActions common; common.preview=0; applyDebugActions(common);
             movement_=0; walk_=0; distance_=7; pitch_=.20f; yaw_=.15f;
             render(false); captureExtra(L"-vrm");
@@ -646,6 +749,29 @@ private:
             if(!renderer_->vrmReady()) throw std::runtime_error("VRM reload failed");
         }
         if(progress_.rolls!=beforeSettingsRolls || log_.size()!=beforeSettingsLogs) throw std::runtime_error("World/avatar/audio settings modified roll history");
+        const auto profileCounts=progress_.counts; const auto profileRolls=progress_.rolls;
+        const auto profileBest=progress_.best,profileLogs=log_.size();
+        const auto profileLogBytes=std::filesystem::file_size(saves_/L"rolls.csv");
+        const auto originalUsername=presentation_.settings.username;
+        const auto originalApplicationId=presentation_.settings.discordApplicationId;
+        const auto originalDiscordEnabled=presentation_.settings.discordEnabled;
+        aura::DebugActions profileEdit; profileEdit.username="星のプレイヤー";
+        profileEdit.discordApplicationId="1560569853184573590"; profileEdit.discordEnabled=false;
+        applyDebugActions(profileEdit);
+        const auto profileSettings=aura::loadSettings(saves_/L"settings.txt");
+        if(profileSettings.username!=*profileEdit.username || profileSettings.discordApplicationId!=*profileEdit.discordApplicationId || profileSettings.discordEnabled)
+            throw std::runtime_error("Profile / Discord settings did not save");
+        for(std::uint64_t count:{0ULL,123'456'789ULL,profileRolls}) {
+            aura::DebugActions counterEdit; counterEdit.rollCount=count; auto_=true; applyDebugActions(counterEdit);
+            const auto savedCounter=aura::loadProgress(saves_/L"progress.txt",roller_.catalog());
+            if(auto_ || progress_.rolls!=count || savedCounter.rolls!=count || savedCounter.counts!=profileCounts ||
+                progress_.counts!=profileCounts || progress_.best!=profileBest || log_.size()!=profileLogs ||
+                std::filesystem::file_size(saves_/L"rolls.csv")!=profileLogBytes)
+                throw std::runtime_error("Editing roll counter changed inventory / history or failed to save");
+        }
+        profileEdit.username=originalUsername; profileEdit.discordApplicationId=originalApplicationId; profileEdit.discordEnabled=originalDiscordEnabled;
+        applyDebugActions(profileEdit); update(0);
+        if(discord_.state()!=aura::DiscordPresenceState::Disabled) throw std::runtime_error("Smoke test must never publish a real Discord activity");
         persist();
         const auto restored=aura::loadProgress(saves_/L"progress.txt",roller_.catalog());
         if(restored.counts!=progress_.counts) throw std::runtime_error("Progress smoke check failed");
@@ -657,6 +783,8 @@ private:
                <<renderer_->instanceCount()<<"\nMean frame submission time: "<<seconds/60*1000
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: 64 x 64 world units / four times each original dimension\n";
+            out<<"Profile: PASS / UTF-8 username and Discord settings save/restore; editable total 0 / 123456789 / original, AutoRoll stop, inventory/history/best unchanged\n"
+               <<"Discord integration: disabled during game smoke; transport and payload covered by isolated fake IPC tests\n";
             out<<"Pixelation: PASS / preview-only, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
                <<"Pixelation instances: "<<pixelationInstances<<"\nMean Pixelation frame submission time: "<<meanPixelationMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
@@ -669,6 +797,12 @@ private:
                <<" ms/frame (60 offscreen frames, no vsync)\n"
                <<"Cutscene instances: 0 / one fullscreen triangle, procedural shader\nMean Cutscene frame submission time: "<<meanCutsceneMs
                <<" ms/frame ("<<CutsceneBenchmarkFrames<<" offscreen frames at t=1.5, no vsync)\n";
+            out<<"BreakThrough: PASS / preview-only, AutoRoll stop, clean switching, resize, inventory/history unchanged\n"
+               <<"BreakThrough instances: "<<breakthroughInstances<<"\nMean BreakThrough frame submission time: "<<meanBreakthroughMs
+               <<" ms/frame (60 offscreen frames, no vsync)\n"
+               <<"BreakThrough cutscene: PASS / 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
+            if(breakthroughAudioBytes) out<<"BreakThrough local audio: PASS / "<<breakthroughAudioBytes<<" PCM bytes / 4.5s offset, 30s non-looping clip, restart and immediate stop\n";
+            else out<<"BreakThrough local audio: visual-only / reference MP4 unavailable\n";
             if(cutsceneDecoded) out<<"Local cutscene audio: PASS / "<<cutsceneDecoded<<" decoded PCM bytes / MP4 audio stream, restart from beginning, immediate stop before Collection footage\n";
             else out<<"Local cutscene audio: visual-only / reference MP4 unavailable\n";
             if(!opts_.pixelationBgm.empty()) out<<"Redline Shift: PASS / "<<redlineDecoded<<" decoded PCM bytes / Lv1-2 loop and stop\n";
@@ -765,11 +899,13 @@ private:
     Options opts_; std::filesystem::path root_,saves_,downloads_,audioPath_,cutsceneAudioPath_;
     aura::Roller roller_; aura::Progress progress_; aura::Presentation presentation_; std::vector<aura::LogEntry> log_;
     aura::Music music_,cutsceneMusic_; aura::SoundEffects sfx_;
+    aura::DiscordPresence discord_;
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;
     bool quitting_{},minimized_{},foreground_{true},auto_{},dragging_{};
     bool cutsceneDebugWasOpen_{},stopCutsceneRequested_{},sfxBaseline_{};
     bool cutsceneAudioAvailable_{};
+    aura::CutsceneKind cutsceneKind_{aura::CutsceneKind::Equinox};
     float effectClock_{},cutsceneTime_{-1};
     std::size_t effectAura_{std::numeric_limits<std::size_t>::max()};
     std::int64_t lastShotCycle_{-1},lastImpactCycle_{-1};

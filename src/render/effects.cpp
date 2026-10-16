@@ -47,6 +47,7 @@ void Renderer::createEffects() {
     starInstances_.reserve(256);
     createPixelation();
     createEquinox();
+    createBreakthrough();
 }
 void Renderer::particleStar(float x,float y,float z,float size,Color color,float rotation,const Frame& f) {
     if(starInstances_.size()>=512 || size<=.001f) return;
@@ -85,8 +86,8 @@ void Renderer::drawEffects(const Frame&) {
         createPixelationTargets();
         const float black[]={0,0,0,0}; context_->ClearRenderTargetView(bloomTargets_[0].Get(),black);
         ID3D11RenderTargetView* emission=bloomTargets_[0].Get(); context_->OMSetRenderTargets(1,&emission,depth_.Get());
-        context_->PSSetShader(pixelationPs_.Get(),nullptr,0);
-        ID3D11ShaderResourceView* letters=equinoxLettering_.Get(); context_->PSSetShaderResources(0,1,&letters);
+        context_->PSSetShader(breakthroughVisible_?breakthroughPs_.Get():pixelationPs_.Get(),nullptr,0);
+        ID3D11ShaderResourceView* letters=breakthroughVisible_?breakthroughLettering_.Get():equinoxLettering_.Get(); context_->PSSetShaderResources(0,1,&letters);
         ID3D11SamplerState* sampler=bloomSampler_.Get(); context_->PSSetSamplers(0,1,&sampler);
         context_->OMSetBlendState(additiveBlend_.Get(),nullptr,0xffffffff);
         context_->OMSetDepthStencilState(effectDepth_.Get(),0);

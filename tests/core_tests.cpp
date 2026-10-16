@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <set>
 namespace {
@@ -15,12 +16,15 @@ int main(int argc, char** argv) {
     try {
         check(argc == 2, "Catalog path required");
         const auto defs = aura::loadCatalog(argv[1]);
-        check(defs.size() == 15, "Expected 13 rollable auras and two previews");
+        check(defs.size() == 16, "Expected 13 rollable auras and three previews");
         const auto findAura=[&](const std::string& id) {
             const auto found=std::find_if(defs.begin(),defs.end(),[&](const auto& d){return d.id==id;});
             check(found!=defs.end(),"Required aura ID"); return static_cast<std::size_t>(found-defs.begin());
         };
-        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox");
+        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough");
+        const auto previewIndices={pixelation,equinox,breakthrough};
+        check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==3 &&
+            defs[breakthrough].previewOnly && defs[breakthrough].denominator==0,"BreakThrough is the third unpriced preview");
         aura::Roller roller(defs, 42), same(defs, 42);
         std::uint64_t start = 0;
         for (std::size_t i = 0; i < defs.size(); ++i) {
@@ -43,8 +47,9 @@ int main(int argc, char** argv) {
             check(old!=previousDefinitions.end() && roller.tickets(i)==previousRoller.tickets(static_cast<std::size_t>(old-previousDefinitions.begin())),
                 "Adding a preview preserves every previous aura's ticket count");
         }
-        check(aura::oddsLabel(defs,pixelation)=="Preview only" && aura::oddsInLabel(defs,pixelation)=="Preview only",
-            "Unpriced preview does not claim a probability");
+        for(auto preview:previewIndices)
+            check(aura::oddsLabel(defs,preview)=="Preview only" && aura::oddsInLabel(defs,preview)=="Preview only",
+                "Unpriced previews do not claim a probability");
         check(roller.tickets(0) == aura::TicketPool / 2, "Common is exactly 50 percent");
         check(roller.tickets(1) == aura::TicketPool / 4, "Uncommon is exactly 25 percent");
         check(defs[3].id=="stardust" && roller.tickets(3)==69'888'989'000ULL,"Stardust receives only the remaining probability");
@@ -67,7 +72,7 @@ int main(int argc, char** argv) {
                     "Preview leaves every existing aura's Luck-adjusted probability unchanged");
             }
             check(total==aura::TicketPool,"Luck preserves total probability");
-            check(roller.tickets(pixelation)==0 && roller.tickets(equinox)==0,"Luck never makes previews rollable");
+            for(auto preview:previewIndices) check(roller.tickets(preview)==0,"Luck never makes previews rollable");
             check(roller.tickets(0)<aura::TicketPool/2 && roller.tickets(singularity)>1000,"Luck raises rare tail and reduces Common");
         }
         roller.setLuck(2);
@@ -82,7 +87,7 @@ int main(int argc, char** argv) {
         check(std::abs(static_cast<double>(observed[0]) / 200000 - .5) < .01, "Common distribution");
         check(std::abs(static_cast<double>(observed[2]) / 200000 - .125) < .005, "Ember distribution");
         check(std::abs(static_cast<double>(observed[1]) / 200000 - .25) < .005,"Uncommon distribution");
-        check(observed[pixelation]==0 && observed[equinox]==0,"Preview-only auras are never rolled");
+        for(auto preview:previewIndices) check(observed[preview]==0,"Preview-only auras are never rolled");
         auto invalid = defs; invalid[1].id = invalid[0].id;
         rejects([&] { aura::Roller bad(invalid, 1); });
         invalid = defs; invalid[0].denominator = 0;
@@ -98,23 +103,26 @@ int main(int argc, char** argv) {
         const auto dir = std::filesystem::temp_directory_path() / ("aura-rng-tests-" + std::to_string(std::random_device{}()));
         std::filesystem::create_directories(dir);
         aura::Progress p(defs.size());
-        rejects([&] { p.record(pixelation,defs); });
-        rejects([&] { p.record(equinox,defs); });
-        check(p.rolls==0 && p.counts[pixelation]==0,"Rejected preview record leaves progress intact");
+        for(auto preview:previewIndices) rejects([&] { p.record(preview,defs); });
+        check(p.rolls==0 && p.discovered()==0,"Rejected preview records leave progress intact");
         const auto invalidPreviewSave=dir/"invalid-preview-progress.txt";
-        auto invalidPreviewProgress=p; invalidPreviewProgress.equipped=pixelation;
-        rejects([&]{aura::saveProgress(invalidPreviewSave,invalidPreviewProgress,defs);});
-        invalidPreviewProgress=p; invalidPreviewProgress.best=pixelation;
-        rejects([&]{aura::saveProgress(invalidPreviewSave,invalidPreviewProgress,defs);});
-        invalidPreviewProgress=p; invalidPreviewProgress.counts[pixelation]=1; invalidPreviewProgress.rolls=1;
-        rejects([&]{aura::saveProgress(invalidPreviewSave,invalidPreviewProgress,defs);});
+        for(auto preview:previewIndices) {
+            auto invalidPreviewProgress=p; invalidPreviewProgress.equipped=preview;
+            rejects([&]{aura::saveProgress(invalidPreviewSave,invalidPreviewProgress,defs);});
+            invalidPreviewProgress=p; invalidPreviewProgress.best=preview;
+            rejects([&]{aura::saveProgress(invalidPreviewSave,invalidPreviewProgress,defs);});
+            invalidPreviewProgress=p; invalidPreviewProgress.counts[preview]=1; invalidPreviewProgress.rolls=1;
+            rejects([&]{aura::saveProgress(invalidPreviewSave,invalidPreviewProgress,defs);});
+        }
         check(!std::filesystem::exists(invalidPreviewSave),"Invalid preview state is rejected before writing a save");
-        {std::ofstream o(invalidPreviewSave); o<<"AURA_RNG_SAVE 1\nrolls 2\nequipped pixelation\ncount still 1\ncount pixelation 1\n";}
-        rejects([&]{aura::loadProgress(invalidPreviewSave,defs);});
-        {std::ofstream o(invalidPreviewSave); o<<"AURA_RNG_SAVE 1\nrolls 1\nequipped pixelation\ncount still 1\ncount pixelation 0\n";}
-        const auto unownedPreviewSave=aura::loadProgress(invalidPreviewSave,defs);
-        check(unownedPreviewSave.equipped==0 && unownedPreviewSave.best==0 && unownedPreviewSave.counts[pixelation]==0,
-            "A preview ID without inventory cannot become equipment or best discovery");
+        for(auto preview:previewIndices) {
+            {std::ofstream o(invalidPreviewSave); o<<"AURA_RNG_SAVE 1\nrolls 2\nequipped "<<defs[preview].id<<"\ncount still 1\ncount "<<defs[preview].id<<" 1\n";}
+            rejects([&]{aura::loadProgress(invalidPreviewSave,defs);});
+            {std::ofstream o(invalidPreviewSave); o<<"AURA_RNG_SAVE 1\nrolls 1\nequipped "<<defs[preview].id<<"\ncount still 1\ncount "<<defs[preview].id<<" 0\n";}
+            const auto unownedPreviewSave=aura::loadProgress(invalidPreviewSave,defs);
+            check(unownedPreviewSave.equipped==0 && unownedPreviewSave.best==0 && unownedPreviewSave.counts[preview]==0,
+                "A preview ID without inventory cannot become equipment or best discovery");
+        }
         auto previewFirst=defs; std::swap(previewFirst[0],previewFirst[pixelation]);
         auto initialPreviewFirst=aura::loadProgress(dir/"preview-first-missing",previewFirst);
         check(initialPreviewFirst.equipped==pixelation && initialPreviewFirst.best==pixelation && !previewFirst[initialPreviewFirst.equipped].previewOnly,
@@ -134,6 +142,40 @@ int main(int argc, char** argv) {
         p.record(3, defs); p.equipped=3; aura::saveProgress(save, p, defs);
         const auto restored = aura::loadProgress(save, defs);
         check(restored.rolls == 4 && restored.counts == p.counts && restored.best == 11 && restored.equipped == 3, "Atomic overwrite round trip");
+        auto editedCounter=p;
+        const auto counterCounts=editedCounter.counts;
+        editedCounter.setRollCount(1'000'000'000'000'000ULL);
+        const auto editedSave=dir/"edited-counter.txt";
+        aura::saveProgress(editedSave,editedCounter,defs);
+        const auto editedRestored=aura::loadProgress(editedSave,defs);
+        check(editedRestored.rolls==1'000'000'000'000'000ULL && editedRestored.counts==counterCounts &&
+            editedRestored.equipped==p.equipped && editedRestored.best==p.best,"An edited roll counter saves independently of inventory and equipment");
+        {std::ifstream input(editedSave); std::string bytes((std::istreambuf_iterator<char>(input)),{});
+            check(bytes.starts_with("AURA_RNG_SAVE 2\n") && bytes.find("\ncollected 4\n")!=std::string::npos,
+                "Save schema 2 records the actual inventory sum separately from the displayed roll counter");}
+        editedCounter.setRollCount(0); editedCounter.record(0,defs);
+        check(editedCounter.rolls==1 && editedCounter.best==p.best && editedCounter.counts[0]==counterCounts[0]+1 &&
+            editedCounter.equipped==p.equipped,"Rolling after resetting the counter keeps an existing rarer best discovery");
+        aura::Progress firstWithEditedCounter(defs.size()); firstWithEditedCounter.setRollCount(500); firstWithEditedCounter.record(1,defs);
+        check(firstWithEditedCounter.best==1 && firstWithEditedCounter.rolls==501,"The first acquired aura sets best even after editing the counter upward");
+        editedCounter.setRollCount(std::numeric_limits<std::uint64_t>::max());
+        const auto maxCounterCounts=editedCounter.counts;
+        rejects([&]{editedCounter.record(0,defs);});
+        check(editedCounter.counts==maxCounterCounts,"A counter overflow rejects the roll before changing inventory");
+        {std::ofstream out(editedSave); out<<"AURA_RNG_SAVE 1\nrolls 3\nequipped zenith\ncount zenith 2\ncount retired_star 1\n";}
+        auto legacyCounter=aura::loadProgress(editedSave,defs); legacyCounter.setRollCount(0);
+        aura::saveProgress(editedSave,legacyCounter,defs); const auto retiredCounter=aura::loadProgress(editedSave,defs);
+        check(retiredCounter.rolls==0 && retiredCounter.counts[11]==2 && retiredCounter.retiredCounts.size()==1 &&
+            retiredCounter.retiredCounts[0].second==1 && retiredCounter.equipped==11,
+            "Schema 1 migrates to an independent counter while collected includes retired inventory");
+        for(const char* corrupt:{"AURA_RNG_SAVE 2\nrolls 100\ncollected 3\nequipped still\ncount still 2\n",
+                "AURA_RNG_SAVE 2\nrolls 2\nequipped still\ncount still 2\n",
+                "AURA_RNG_SAVE 2\nrolls 2\ncollected 2\ncollected 2\nequipped still\ncount still 2\n"}) {
+            {std::ofstream out(editedSave);out<<corrupt;} rejects([&]{aura::loadProgress(editedSave,defs);});
+        }
+        aura::Progress overflowInventory(defs.size()); overflowInventory.counts[0]=std::numeric_limits<std::uint64_t>::max(); overflowInventory.counts[1]=1;
+        rejects([&]{aura::saveProgress(dir/"overflow-inventory.txt",overflowInventory,defs);});
+        check(!std::filesystem::exists(dir/"overflow-inventory.txt"),"Inventory-total overflow is rejected before writing");
         auto reordered = defs; std::swap(reordered[3], reordered[8]);
         const auto reorderedProgress = aura::loadProgress(save, reordered);
         check(reorderedProgress.equipped == 8 && reorderedProgress.counts[8] == 1, "Stable IDs after catalog reorder");
@@ -153,7 +195,7 @@ int main(int argc, char** argv) {
         check(content.find("\"光, \"\"星\"\"\"") != std::string::npos, "CSV escaping / UTF-8");
         check(content.find("roll,utc_time", 1) == std::string::npos, "One CSV header");
         in.close();
-        rejects([&] { aura::appendLog(log,{3,"2026-01-01T00:00:02Z",pixelation},defs[pixelation]); });
+        for(auto preview:previewIndices) rejects([&] { aura::appendLog(log,{3,"2026-01-01T00:00:02Z",preview},defs[preview]); });
         check(std::filesystem::file_size(log)==content.size(),"Rejected preview log leaves CSV intact");
         { std::ofstream o(dir / "bad.csv"); o << "id,name,denominator,red,green,blue,particles,radius,speed\na,\"unclosed,0,1,1,1,1,1,1\n"; }
         rejects([&] { aura::loadCatalog(dir / "bad.csv"); });
@@ -179,6 +221,9 @@ int main(int argc, char** argv) {
         autoRoll=true; presentation.showPreview(equinox,defs.size(),autoRoll);
         check(!autoRoll && presentation.shown(p)==equinox && p.rolls==prototypeRolls && p.counts==prototypeCounts,
             "Equinox preview leaves roll history and inventory untouched");
+        autoRoll=true; presentation.showPreview(breakthrough,defs.size(),autoRoll);
+        check(!autoRoll && presentation.shown(p)==breakthrough && p.equipped==3 && p.rolls==prototypeRolls && p.counts==prototypeCounts,
+            "BreakThrough preview stops AutoRoll and leaves equipment, roll history, and inventory untouched");
         const auto settingsPath=dir/"settings.txt";
         check(aura::loadSettings(settingsPath).language==aura::Language::English,"Settings default");
         aura::Settings settings; settings.language=aura::Language::Japanese; settings.shirt={.95f,.2f,.3f};
@@ -186,6 +231,7 @@ int main(int argc, char** argv) {
         settings.vrmPath="C:/モデル/Chocolat.vrm"; settings.bgmPath="C:/Music/Tides of the Outer Reach.mp3"; settings.volume=.35f;
         settings.pixelationBgmPath="C:/音楽/Pixelation base.mp3";
         settings.pixelationFinalBgmPath="C:/Music/Pixelation \"final\".mp3";
+        settings.username="星の \"Player\" 🌟"; settings.discordEnabled=false; settings.discordApplicationId="12345678901234567890";
         aura::saveSettings(settingsPath,settings); const auto loadedSettings=aura::loadSettings(settingsPath);
         check(loadedSettings.language==aura::Language::Japanese && std::abs(loadedSettings.shirt.r-.95f)<.0001f,
             "Language and shirt color round trip");
@@ -193,13 +239,33 @@ int main(int argc, char** argv) {
             loadedSettings.vrmPath==settings.vrmPath && loadedSettings.bgmPath==settings.bgmPath && loadedSettings.volume==settings.volume &&
             loadedSettings.pixelationBgmPath==settings.pixelationBgmPath && loadedSettings.pixelationFinalBgmPath==settings.pixelationFinalBgmPath,
             "Extended settings / UTF-8 audio paths / quoted names round trip");
+        check(loadedSettings.username==settings.username && !loadedSettings.discordEnabled && loadedSettings.discordApplicationId==settings.discordApplicationId,
+            "Schema 4 preserves Unicode/quoted usernames and Discord preferences");
         {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 1\nlanguage ja\nshirt 0.5 0.7 0.9\n";}
         const auto migrated=aura::loadSettings(settingsPath);
-        check(migrated.language==aura::Language::Japanese && migrated.luck==1 && migrated.avatar==aura::Avatar::Block,"Previous settings migrate");
+        check(migrated.language==aura::Language::Japanese && migrated.luck==1 && migrated.avatar==aura::Avatar::Block &&
+            migrated.username=="Player" && migrated.discordEnabled && migrated.discordApplicationId=="1560569853184573590","Schema 1 settings migrate with the game Discord Application ID");
         {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 2\nlanguage en\nshirt 0.5 0.7 0.9\nluck 2.5\navatar 1\nbiome 1\nvolume 0.25\nvrm \"avatar.vrm\"\nbgm \"space.mp3\"\n";}
         const auto migratedV2=aura::loadSettings(settingsPath);
         check(migratedV2.luck==2.5 && migratedV2.vrmPath=="avatar.vrm" && migratedV2.bgmPath=="space.mp3" &&
-            migratedV2.pixelationBgmPath.empty() && migratedV2.pixelationFinalBgmPath.empty(),"Schema 2 retains old audio paths and defaults new ones");
+            migratedV2.pixelationBgmPath.empty() && migratedV2.pixelationFinalBgmPath.empty() && migratedV2.username=="Player" &&
+            migratedV2.discordEnabled && migratedV2.discordApplicationId=="1560569853184573590","Schema 2 retains audio paths and defaults new profile settings");
+        {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 3\nlanguage en\nshirt 0.5 0.7 0.9\nluck 2.5\navatar 1\nbiome 1\nvolume 0.25\nvrm \"avatar.vrm\"\nbgm \"space.mp3\"\npixelation_bgm \"base.mp3\"\npixelation_final_bgm \"final.mp3\"\n";}
+        const auto migratedV3=aura::loadSettings(settingsPath);
+        check(migratedV3.pixelationBgmPath=="base.mp3" && migratedV3.pixelationFinalBgmPath=="final.mp3" && migratedV3.username=="Player" &&
+            migratedV3.discordEnabled && migratedV3.discordApplicationId=="1560569853184573590","Schema 3 retains Pixelation music and defaults new profile settings");
+        check(aura::validUsername(std::string(64,'a')) && aura::validUsername("星🌟") && !aura::validUsername(std::string(65,'a')) &&
+            !aura::validUsername("") && !aura::validUsername("bad\nname") && !aura::validUsername("bad\tname") &&
+            !aura::validUsername(std::string("a\0b",3)) && !aura::validUsername("a\x7f") && !aura::validUsername("\xc0\xaf") &&
+            !aura::validUsername("\xed\xa0\x80") && !aura::validUsername("\xf4\x90\x80\x80") && !aura::validUsername("\xe2\x80\xa8"),
+            "Username validation enforces byte limits, strict UTF-8, and no control characters or line breaks");
+        check(aura::validDiscordApplicationId("") && aura::validDiscordApplicationId("12345678901234567890") &&
+            !aura::validDiscordApplicationId("123456789012345678901") && !aura::validDiscordApplicationId("12a") &&
+            !aura::validDiscordApplicationId("12\n"),"Discord Application IDs accept only up to 20 digits or an empty value");
+        settings.username="bad\nname"; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.username="Player";
+        settings.discordApplicationId="wrong"; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.discordApplicationId.clear();
+        aura::saveSettings(settingsPath,settings);
+        check(aura::loadSettings(settingsPath).discordApplicationId.empty(),"An explicitly cleared Application ID stays empty rather than restoring the default");
         settings.luck=INFINITY; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.luck=1;
         settings.avatar=static_cast<aura::Avatar>(3); rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.avatar=aura::Avatar::Block;
         settings.vrmPath="bad\npath"; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.vrmPath.clear();
@@ -209,6 +275,7 @@ int main(int argc, char** argv) {
         check(aura::displayName(defs[0],aura::Language::Japanese)=="コモン","Japanese aura names");
         check(aura::displayName(defs[pixelation],aura::Language::Japanese)=="ピクセレーション","Japanese Pixelation name");
         check(aura::displayName(defs[equinox],aura::Language::Japanese)=="エキノックス","Japanese Equinox name");
+        check(aura::displayName(defs[breakthrough],aura::Language::Japanese)=="ブレイクスルー","Japanese BreakThrough name");
         check(!aura::cooldownVisual(0).visible && !aura::cooldownVisual(-1).visible,"Cooldown bar disappears at completion");
         check(aura::cooldownVisual(aura::RollCooldown).opacity==0,"Cooldown fades in");
         check(aura::cooldownVisual(.001f).opacity<.01f,"Cooldown fades out");
@@ -225,26 +292,42 @@ int main(int argc, char** argv) {
         aura::saveProgress(save,levels,defs);
         check(aura::loadProgress(save,defs).auraLevel(singularity,defs)==3,"Aura Level survives save via stable counts");
         auto previousCatalog=previousDefinitions; previousCatalog.erase(previousCatalog.begin()+3);
+        check(previousCatalog.size()==12 && previousDefinitions.size()==13,"Historical rollable catalogs contain 12 and 13 entries");
         aura::Progress previousProgress(previousCatalog.size());
         for(int i=0;i<3;++i) previousProgress.record(previousCatalog.size()-1,previousCatalog);
         previousProgress.equipped=previousCatalog.size()-1; aura::saveProgress(save,previousProgress,previousCatalog);
         const auto migratedProgress=aura::loadProgress(save,defs);
         check(migratedProgress.equipped==singularity && migratedProgress.auraLevel(singularity,defs)==2 && migratedProgress.counts[3]==0,
             "Previous 12-aura saves retain Singularity counts and gain a derived Aura Level");
-        check(migratedProgress.counts[pixelation]==0,"Previous saves add Pixelation with zero inventory");
+        for(auto preview:previewIndices) check(migratedProgress.counts[preview]==0,"12-aura saves add every preview with zero inventory");
         aura::Progress v013Progress(previousDefinitions.size());
         for(int i=0;i<4;++i) v013Progress.record(previousDefinitions.size()-1,previousDefinitions);
         v013Progress.equipped=previousDefinitions.size()-1; aura::saveProgress(save,v013Progress,previousDefinitions);
         const auto v014Progress=aura::loadProgress(save,defs);
         check(v014Progress.rolls==4 && v014Progress.equipped==singularity && v014Progress.auraLevel(singularity,defs)==3 &&
-            v014Progress.counts[pixelation]==0,"Previous 13-aura saves retain counts, equipment, and Singularity level");
-        auto previousV014=defs; previousV014.erase(previousV014.begin()+equinox);
+            v014Progress.counts[pixelation]==0 && v014Progress.counts[equinox]==0 && v014Progress.counts[breakthrough]==0,
+            "Previous 13-aura saves retain counts, equipment, and Singularity level");
+        auto previousV014=defs;
+        std::erase_if(previousV014,[](const auto& d){return d.id=="equinox" || d.id=="breakthrough";});
+        check(previousV014.size()==14,"The v0.1.4 catalog contains 13 rollable auras and Pixelation");
         aura::Progress v014Saved(previousV014.size());
         const auto v014Singularity=static_cast<std::size_t>(std::find_if(previousV014.begin(),previousV014.end(),[](const auto& d){return d.id=="singularity";})-previousV014.begin());
         v014Saved.record(v014Singularity,previousV014); v014Saved.equipped=v014Singularity;
         aura::saveProgress(save,v014Saved,previousV014); const auto v015Progress=aura::loadProgress(save,defs);
         check(v015Progress.equipped==singularity && v015Progress.counts[singularity]==1 && v015Progress.counts[equinox]==0 &&
-            v015Progress.counts[pixelation]==0,"Previous 14-entry save migrates Equinox and preserves zero preview inventory");
+            v015Progress.counts[pixelation]==0 && v015Progress.counts[breakthrough]==0,
+            "Previous 14-entry saves add Equinox and BreakThrough with zero preview inventory");
+        auto previousV015=defs; std::erase_if(previousV015,[](const auto& d){return d.id=="breakthrough";});
+        check(previousV015.size()==15,"The v0.1.5 catalog contains 13 rollable auras and two previews");
+        aura::Progress v015Saved(previousV015.size());
+        const auto v015Singularity=static_cast<std::size_t>(std::find_if(previousV015.begin(),previousV015.end(),[](const auto& d){return d.id=="singularity";})-previousV015.begin());
+        for(unsigned i=0;i<4;++i) v015Saved.record(v015Singularity,previousV015);
+        v015Saved.record(0,previousV015); v015Saved.equipped=v015Singularity;
+        aura::saveProgress(save,v015Saved,previousV015); const auto v016Progress=aura::loadProgress(save,defs);
+        check(v016Progress.rolls==5 && v016Progress.equipped==singularity && v016Progress.best==singularity &&
+            v016Progress.counts[0]==1 && v016Progress.counts[singularity]==4 && v016Progress.auraLevel(singularity,defs)==3 &&
+            v016Progress.counts[pixelation]==0 && v016Progress.counts[equinox]==0 && v016Progress.counts[breakthrough]==0,
+            "Previous 15-entry saves preserve all discoveries and equipment while adding BreakThrough with zero inventory");
         const auto levelCounts=levels.counts;
         presentation.preview=singularity; presentation.singularityLevel=1;
         check(presentation.level(levels,defs)==1 && levels.counts==levelCounts,"Debug Aura Level leaves inventory untouched");
@@ -260,6 +343,7 @@ int main(int argc, char** argv) {
         presentation.preview=singularity; check(presentation.level(levels,defs)==3,"Pixelation level cannot override Singularity");
         presentation.singularityLevel=9; check(presentation.level(levels,defs)==3,"Singularity preview level remains capped");
         presentation.preview=equinox; check(presentation.level(levels,defs)==0,"Equinox has no borrowed Aura Level");
+        presentation.preview=breakthrough; check(presentation.level(levels,defs)==0,"BreakThrough has no borrowed Aura Level");
         presentation.pixelationLevel.reset(); presentation.preview=pixelation;
         check(presentation.level(levels,defs)==0,"Restoring Pixelation's owned level returns to zero");
         auto futurePixelation=defs; futurePixelation[pixelation].previewOnly=false; futurePixelation[pixelation].denominator=2'000'000;
@@ -285,8 +369,9 @@ int main(int argc, char** argv) {
             equinoxPose.legPitch[0]==0 && equinoxPose.legPitch[1]==0,"Equinox has a finite calm fixed floating pose");
         check(aura::EquinoxCutsceneDuration==10.9f,"Equinox cutscene has one shared duration");
         check(aura::pixelationMotionTime(3,0)==3 && std::abs(aura::pixelationMotionTime(3,1)-4.8f)<.00001f &&
-            aura::pixelationMotionTime(3,1)==aura::pixelationMotionTime(3,2) && aura::pixelationMotionTime(3,2)==aura::pixelationMotionTime(3,3),
-            "Pixelation levels one through three accelerate the shared motion clock by 1.6");
+            aura::pixelationMotionTime(3,1)==aura::pixelationMotionTime(3,2) && aura::pixelationMotionTime(3,3)==9 &&
+            aura::pixelationMotionSpeed(3)==3 && aura::pixelationMotionSpeed(3)>aura::pixelationMotionSpeed(2),
+            "Pixelation levels one and two run at 1.6x and level three accelerates the shared motion clock to 3x");
         check(aura::pixelationMotionTime(-1,1)==0 && aura::pixelationMotionTime(NAN,1)==0,"Invalid motion times do not propagate");
         auto pointDistance=[](const aura::EffectPoint& a,const aura::EffectPoint& b) {
             return std::sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z));

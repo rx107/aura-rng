@@ -32,9 +32,12 @@ AvatarPose pixelationPose(float time) {
     p.legPitch={-.07f,.10f}; p.legOut={.04f,.04f}; p.knee={-.04f,-.09f};
     return p;
 }
+float pixelationMotionSpeed(unsigned level) {
+    return level>=3?3.f:(level>=1?1.6f:1.f);
+}
 float pixelationMotionTime(float elapsed,unsigned level) {
     if (!std::isfinite(elapsed) || elapsed<=0) return 0;
-    return static_cast<float>(std::min(static_cast<double>(elapsed)*(level>=1?1.6:1.),
+    return static_cast<float>(std::min(static_cast<double>(elapsed)*pixelationMotionSpeed(level),
         static_cast<double>(std::numeric_limits<float>::max())));
 }
 AvatarPose equinoxPose(float time) {

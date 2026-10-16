@@ -240,9 +240,10 @@ void Renderer::world(const Frame& f) {
     const bool floating=d.id=="singularity";
     const bool pixelated=d.id=="pixelation";
     const bool equinox=d.id=="equinox";
-    pixelationVisible_=pixelated; equinoxVisible_=equinox;
+    const bool breakthrough=d.id=="breakthrough";
+    pixelationVisible_=pixelated; equinoxVisible_=equinox; breakthroughVisible_=breakthrough;
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
-    const auto pose=pixelated?pixelationPose(effectTime):equinox?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
+    const auto pose=pixelated?pixelationPose(effectTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
     auto base=XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift,f.avatarZ);
     auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,FXMMATRIX transform) {
@@ -252,7 +253,8 @@ void Renderer::world(const Frame& f) {
         auto lit=c;
         if(pixelated) {const auto hue=pixelationColor(effectTime); lit={.45f+hue.r*.55f,.45f+hue.g*.55f,.45f+hue.b*.55f};}
         if(equinox) lit={.83f,.85f,.90f};
-        instance.color={lit.r,lit.g,lit.b,pixelated?1.8f:equinox?.65f:0.f}; instances_.push_back(instance);
+        if(breakthrough) lit={.65f,.71f,1.f};
+        instance.color={lit.r,lit.g,lit.b,pixelated?1.8f:(equinox || breakthrough)?.65f:0.f}; instances_.push_back(instance);
     };
     const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
     for(int side=0;side<2;++side) {
@@ -271,12 +273,12 @@ void Renderer::world(const Frame& f) {
     part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
     part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},identity);
     const float t=f.time*d.speed;
-    for (unsigned i=0;!pixelated && !equinox && i<48;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && i<48;++i) {
         const float a=i*2*Pi/48+t*.5f;
         if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
         else box(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
-    for (unsigned i=0;!pixelated && !equinox && i<d.particles;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
         const float y=.4f+std::fmod(u*3.3f+f.time*.38f,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
@@ -297,21 +299,22 @@ void Renderer::world(const Frame& f) {
     }
     if(pixelated) buildPixelation(f);
     if(equinox) buildEquinox(f);
+    if(breakthrough) buildBreakthrough(f);
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
-    const float focus=holeVisible_?2.5f:(equinox?2.3f:(floating || pixelated?2.f:1.4f));
+    const float focus=breakthrough?3.3f:holeVisible_?2.5f:(equinox?2.3f:(floating || pixelated?2.f:1.4f));
     const float cameraDistance=f.cameraDistance;
     const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,
         focus+std::sin(f.cameraPitch)*cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,1);
     const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,focus,f.avatarZ,1),XMVectorSet(0,1,0,0));
     const auto projection=XMMatrixPerspectiveFovLH(.80f,worldW/worldH,.1f,160);
-    const float tagHeight=equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
+    const float tagHeight=breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
     XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,tagHeight,f.avatarZ,1),
         viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));
-    nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=tag.z>0 && tag.z<1;
+    nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=!breakthrough && tag.z>0 && tag.z<1;
     struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye,light; } camera{};
     XMStoreFloat4x4(&camera.vp,view*projection); XMStoreFloat4(&camera.eye,eye); camera.eye.w=pixelated?effectTime:f.time;
-    camera.light={pixelated?.30f:equinox?.20f:1.f,0,0,0};
+    camera.light={pixelated?.30f:(equinox || breakthrough)?.20f:1.f,0,0,0};
     context_->UpdateSubresource(constants_.Get(),0,nullptr,&camera,0,0);
     D3D11_MAPPED_SUBRESOURCE mapped{}; checked(context_->Map(instanceBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped), "Map instances");
     std::memcpy(mapped.pData,instances_.data(),instances_.size()*sizeof(Instance)); context_->Unmap(instanceBuffer_.Get(),0);
@@ -358,12 +361,14 @@ void Renderer::draw(const Frame& frame,bool present) {
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     if(frame.cutsceneTime>=0) {
         instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear();
-        pixelationVisible_=equinoxVisible_=holeVisible_=false;
-        drawCutscene(frame);
+        pixelationVisible_=equinoxVisible_=breakthroughVisible_=holeVisible_=false;
+        if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame); else drawCutscene(frame);
     } else world(frame);
     context_->OMSetRenderTargets(0,nullptr,nullptr);
     d2d_->BeginDraw(); d2d_->SetTransform(D2D1::Matrix3x2F::Scale(scale_,scale_));
-    if(frame.cutsceneTime>=0) cutsceneUi(frame); else ui(frame);
+    if(frame.cutsceneTime>=0) {
+        if(frame.cutsceneKind==CutsceneKind::Breakthrough) breakthroughCutsceneUi(frame); else cutsceneUi(frame);
+    } else ui(frame);
     checked(d2d_->EndDraw(), "Draw UI");
     context_->OMSetRenderTargets(1,&view,nullptr);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

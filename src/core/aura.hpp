@@ -47,6 +47,7 @@ struct Progress {
     std::size_t equipped{}, best{};
     explicit Progress(std::size_t count) : counts(count, 0) {}
     void record(std::size_t index, const std::vector<Definition>& catalog);
+    void setRollCount(std::uint64_t value) { rolls=value; }
     std::size_t discovered() const;
     unsigned auraLevel(std::size_t index,const std::vector<Definition>& catalog) const;
 };

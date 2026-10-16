@@ -17,7 +17,7 @@ void Music::clear() {
 Music::~Music() {
     clear(); if(master_) master_->DestroyVoice(); engine_.Reset(); if(mf_) MFShutdown();
 }
-void Music::load(const std::filesystem::path& path) {
+void Music::load(const std::filesystem::path& path,float startSeconds,float durationSeconds) {
     if(path.empty()) throw std::runtime_error("Choose an aura BGM file");
     if(!std::filesystem::is_regular_file(path) || std::filesystem::file_size(path)>128ull*1024*1024)
         throw std::runtime_error("BGM is missing or exceeds 128 MiB");
@@ -54,17 +54,29 @@ void Music::load(const std::filesystem::path& path) {
         if(flags&MF_SOURCE_READERF_ENDOFSTREAM) break;
     }
     if(pcm_.empty()) throw std::runtime_error("BGM contains no audio");
+    if(startSeconds>0 || durationSeconds>0) {
+        const auto begin=static_cast<std::size_t>(startSeconds*wave->nSamplesPerSec)*wave->nBlockAlign;
+        if(begin>=pcm_.size()) throw std::runtime_error("Audio clip starts beyond its duration");
+        pcm_.erase(pcm_.begin(),pcm_.begin()+begin);
+        if(durationSeconds>0) {
+            const auto bytes=static_cast<std::size_t>(durationSeconds*wave->nSamplesPerSec)*wave->nBlockAlign;
+            if(pcm_.size()>bytes) pcm_.resize(bytes);
+        }
+    }
     checked(engine_->CreateSourceVoice(&voice_,wave.get()),"BGM source voice");
     checked(voice_->SetVolume(0),"BGM initial volume");
     XAUDIO2_BUFFER buffer{}; buffer.AudioBytes=static_cast<UINT32>(pcm_.size()); buffer.pAudioData=pcm_.data();
-    buffer.Flags=XAUDIO2_END_OF_STREAM; buffer.LoopCount=XAUDIO2_LOOP_INFINITE;
+    buffer.Flags=XAUDIO2_END_OF_STREAM; buffer.LoopCount=durationSeconds>0?0:XAUDIO2_LOOP_INFINITE;
     checked(voice_->SubmitSourceBuffer(&buffer),"BGM loop buffer");
 }
-void Music::update(const std::filesystem::path& path,bool active,float volume,float dt) {
-    if(path!=attempted_) { clear(); attempted_=path; attemptedLoad_=false; status_="Ready when the matching aura is displayed"; }
+void Music::update(const std::filesystem::path& path,bool active,float volume,float dt,float startSeconds,float durationSeconds) {
+    if(path!=attempted_ || startSeconds!=clipStart_ || durationSeconds!=clipDuration_) {
+        clear(); attempted_=path; clipStart_=startSeconds; clipDuration_=durationSeconds; attemptedLoad_=false;
+        status_="Ready when the matching aura is displayed";
+    }
     if(active && !attemptedLoad_) {
         attemptedLoad_=true;
-        try {load(path); status_="Ready";}
+        try {load(path,startSeconds,durationSeconds); status_="Ready";}
         catch(const std::exception& e) {clear(); status_=e.what();}
     }
     if(!voice_) return;
@@ -73,26 +85,38 @@ void Music::update(const std::filesystem::path& path,bool active,float volume,fl
     if(active && !playing_) {checked(voice_->Start(),"Start BGM"); playing_=true;}
     checked(voice_->SetVolume(gain_),"BGM volume");
     if(!active && gain_<=.0001f && playing_) {checked(voice_->Stop(),"Stop BGM"); playing_=false;}
-    status_=playing_?(active?"Playing / loop":"Fading out"):"Stopped";
+    status_=playing_?(active?(durationSeconds>0?"Playing / clip":"Playing / loop"):"Fading out"):"Stopped";
 }
 namespace {
 std::vector<std::int16_t> synthesizeEffect(unsigned sound) {
     constexpr unsigned Rate=48000;
     constexpr double Pi=3.14159265358979323846;
-    const double duration=sound?.20:.115;
+    const double duration=sound?.30:.115;
     std::vector<std::int16_t> samples(static_cast<std::size_t>(duration*Rate));
     std::uint32_t noiseState=sound?0x81915a3du:0x2718b52fu;
-    double phase=0;
+    double phase=0,lowNoise=0,glassPhase=0;
     for(std::size_t i=0;i<samples.size();++i) {
         const double t=static_cast<double>(i)/Rate,u=t/duration;
         noiseState^=noiseState<<13; noiseState^=noiseState>>17; noiseState^=noiseState<<5;
         const double noise=(static_cast<double>(noiseState&0xffff)/32767.5)-1;
-        phase+=2*Pi*(sound?(105-60*u):(2100-1450*u))/Rate;
-        const double attack=std::min(1.,t/.003),tail=std::max(0.,1-u);
-        const double tone=sound?(.48*std::sin(phase)+.46*noise*std::exp(-t*21)):
-            (.63*std::sin(phase)+.17*std::sin(phase*2.1)+.10*noise);
-        const double envelope=attack*tail*tail*std::exp(-t*(sound?10:15));
-        samples[i]=static_cast<std::int16_t>(std::clamp(tone*envelope*.42,-1.,1.)*32767);
+        phase+=2*Pi*(sound?(58+190*std::exp(-t*48)):(2100-1450*u))/Rate;
+        glassPhase+=2*Pi*(2300-1550*u)/Rate;
+        lowNoise+=.18*(noise-lowNoise);
+        const double attack=std::min(1.,t/(sound?.0007:.003)),tail=std::max(0.,1-u);
+        double sample;
+        if(sound) {
+            // A tight broadband crack, descending bass punch and bright digital debris.
+            // Independent decays keep the collision clear even while fast volleys repeat.
+            const double crack=.38*noise*std::exp(-t*95);
+            const double body=.65*std::sin(phase)*std::exp(-t*20);
+            const double burst=.80*lowNoise*std::exp(-t*17);
+            const double debris=(.16*std::sin(glassPhase)+.08*std::sin(glassPhase*1.43))*std::exp(-t*25);
+            sample=(crack+body+burst+debris)*attack*tail*tail*.84;
+        } else {
+            const double tone=.63*std::sin(phase)+.17*std::sin(phase*2.1)+.10*noise;
+            sample=tone*attack*tail*tail*std::exp(-t*15)*.42;
+        }
+        samples[i]=static_cast<std::int16_t>(std::clamp(sample,-1.,1.)*32767);
     }
     return samples;
 }

@@ -13,13 +13,13 @@ namespace aura {
 class Music {
 public:
     ~Music();
-    void update(const std::filesystem::path& path,bool active,float volume,float dt);
+    void update(const std::filesystem::path& path,bool active,float volume,float dt,float startSeconds=0,float durationSeconds=0);
     const std::string& status() const { return status_; }
     bool playing() const { return playing_; }
     std::size_t decodedBytes() const { return pcm_.size(); }
     void reload() { clear(); attemptedLoad_=false; }
 private:
-    void load(const std::filesystem::path& path);
+    void load(const std::filesystem::path& path,float startSeconds,float durationSeconds);
     void clear();
     Microsoft::WRL::ComPtr<IXAudio2> engine_;
     IXAudio2MasteringVoice* master_{};
@@ -29,6 +29,7 @@ private:
     std::string status_{"No music selected"};
     bool mf_{},playing_{},attemptedLoad_{};
     float gain_{};
+    float clipStart_{},clipDuration_{};
 };
 // Small original PCM effects. No decoding, looping or allocations during playback.
 class SoundEffects {

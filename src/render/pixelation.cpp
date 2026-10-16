@@ -39,6 +39,9 @@ float4 main(Input i):SV_TARGET {
     } else if(style==6) {
         float triangleEdge=max(abs(q.x)*1.73+q.y,-q.y*2);
         mask=(1-smoothstep(.72,.91,triangleEdge))*.75;
+    } else if(style==7) { // Expanding impact ring with a bright edge and a soft pressure wave.
+        float radius=sqrt(r2);
+        mask=(exp(-abs(radius-.72)*95)*1.65+exp(-abs(radius-.72)*17)*.42)*(1-smoothstep(.90,1,radius));
     } else if(style>=8) {
         float2 uv=float2(q.x*.5+.5,.5-q.y*.5);
         if(style==9) uv.x=.4375+uv.x*.125;
@@ -296,13 +299,34 @@ void Renderer::buildPixelation(const Frame& source) {
                 pixelBillboard(ox+p.x,p.y,oz+p.z,size,size,hot,5,.42f*(1-trail/7.f),f);
             }
         }
-        if(volley.impactAge>=0 && volley.impactAge<.27f) {
-            const float u=volley.impactAge/.27f,fade=(1-u)*(1-u),r=.12f+.48f*u;
+        const float impactDuration=level>=3?.78f:.65f;
+        if(volley.impactAge>=0 && volley.impactAge<impactDuration) {
+            // The event still uses the exact shared meeting point. The opening white flash
+            // is immediate; pressure rings and pixel shards carry the energy outward.
+            const float u=volley.impactAge/impactDuration,fade=(1-u)*(1-u);
+            const float force=level>=3?1.30f:1.f,r=(.08f+1.70f*(1-std::pow(1-u,3.f)))*force;
+            const float flash=std::exp(-u*15.f),glow=std::exp(-u*5.f);
             const auto c=volley.meeting;
-            pixelBillboard(ox+c.x,c.y,oz+c.z,.28f+u*.42f,.28f+u*.42f,{1.5f,1.5f,1.5f},4,fade*.55f,f);
-            for(unsigned i=0;i<12;++i) {
-                const float a=i*2*Pi/12;
-                pixelBillboard(ox+c.x+std::cos(a)*r,c.y+std::sin(a)*r,oz+c.z,.06f*(1-u),.06f*(1-u),hot,1,fade*.55f,f);
+            const Color white{2.5f,2.5f,2.5f},blast=bright(color,2.2f,.28f);
+            pixelBillboard(ox+c.x,c.y,oz+c.z,1.65f*force,1.65f*force,white,5,flash*.98f,f);
+            pixelBillboard(ox+c.x,c.y,oz+c.z,(3.0f+u*2)*force,(3.0f+u*2)*force,blast,0,glow*.95f,f);
+            pixelBillboard(ox+c.x,c.y,oz+c.z,(4.4f+u*2)*force,.60f*force,white,4,flash*.94f,f);
+            pixelBillboard(ox+c.x,c.y,oz+c.z,1.7f*force,1.7f*force,white,4,glow*.86f,f,Pi*.25f);
+            for(unsigned wave=0;wave<2;++wave) {
+                const float radius=r*(wave?.69f:1.f);
+                pixelBillboard(ox+c.x,c.y,oz+c.z,radius*2.7f,radius*2.7f,blast,7,fade*(wave?.48f:.90f),f);
+            }
+            for(unsigned i=0;i<36;++i) {
+                const float azimuth=i*2.399963f+static_cast<float>(volley.impactCycle%16)*.43f;
+                const float dy=1.f-2.f*(i+.5f)/36.f,horizontal=std::sqrt(std::max(0.f,1-dy*dy));
+                const float dx=std::cos(azimuth)*horizontal,dz=std::sin(azimuth)*horizontal;
+                const float reach=r*(.70f+.30f*std::sin(i*4.7f)*std::sin(i*4.7f));
+                const float size=(.075f+.075f*(i%3)/2.f)*(1-u)*force;
+                const auto end=point(c.x+dx*reach,c.y+dy*reach-.25f*u*u,c.z+dz*reach);
+                if(i%2==0) pixelLine(point(c.x+dx*reach*.62f,c.y+dy*reach*.62f,c.z+dz*reach*.62f),
+                    end,.045f*force,blast,fade*.90f,f);
+                pixelBillboard(ox+c.x+dx*reach,c.y+dy*reach-.25f*u*u,oz+c.z+dz*reach,
+                    size,size,i%4?blast:white,i%5?1:4,fade*.95f,f,azimuth+u*5);
             }
         }
     }
