@@ -2,6 +2,14 @@
 
 C++20 / DirectX 11で動く、Windows向けの軽量なオーラ抽選ゲームです。
 
+## 自分で改造したい方へ
+
+まずは[初心者向け・改造ガイド](docs/development-guide.md)を開いてください。準備、最初の数字変更、画面での確認、失敗したときの戻し方を順番に説明しています。
+
+[改造用ソースZIP（v0.1.9）](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.9-alpha.1.zip)を展開し、`src/tuning`の数字を1つ変更 → 保存 → ゲームを閉じて`Develop.cmd`、で試せます。[調整ファイル一覧](src/tuning/README.md)に「何を変えるならどのファイルか」をまとめています。ゲーム中のF1設定はその場で変更でき、C++の設定変更は再ビルドで反映します。
+
+`Develop.cmd`はコンパイル後、F1パネルを開いて起動します。試作用のセーブはソースフォルダー内の`local-save`へ保存し、通常プレイの進行データと分けます。`build.cmd`は標準値向けの回帰テストも実行し、`Develop.cmd`は見た目や速度を自由に試すためコンパイルのみ行います。
+
 ## Nanallyの試作
 
 ![Star's RNG — Nanallyの巨大な生物と青緑の電撃](docs/nanally-preview.webp)
@@ -55,7 +63,7 @@ Downloadsに`BreakthroughCutsceneV2.mp4.mp4`がある場合は、ローカル動
 
 ## 起動と操作
 
-[Windows用ZIP（v0.1.8）](https://github.com/rx107/aura-rng/releases/tag/v0.1.8-alpha.1)を展開し、**StarRng.exe**を起動してください。`data`をEXEと同じ場所に置きます。Windows 10 / 11 x64向けです。ゲームエンジン、追加DLLのインストール、実行時のネット接続は不要です。
+[Windows用ZIP（v0.1.9）](https://github.com/rx107/aura-rng/releases/tag/v0.1.9-alpha.1)を展開し、**StarRng.exe**を起動してください。`data`をEXEと同じ場所に置きます。Windows 10 / 11 x64向けです。ゲームエンジン、追加DLLのインストール、実行時のネット接続は不要です。
 
 | 操作 | キー / マウス |
 | --- | --- |

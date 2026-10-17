@@ -3,6 +3,7 @@
 #include "render/renderer.hpp"
 #include "platform/audio.hpp"
 #include "platform/discord.hpp"
+#include "tuning/game.hpp"
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -16,6 +17,9 @@
 #include <stdexcept>
 
 namespace {
+// このファイルはゲームの進行役です。
+// 入力 → action/applyDebugActions → update（時間を進める）→ render（描く）の順。
+// 数値の改造は tuning/game.hpp、絵の作り方は render/*.cpp から始めてください。
 using Clock=std::chrono::steady_clock;
 struct Options {
     bool smoke{},warp{},debug{};
@@ -89,6 +93,7 @@ public:
         roller_.setLuck(presentation_.settings.luck);
     }
     aura::Frame frame() const {
+        // Rendererに渡す「今のゲームのスナップショット」。ここでは抽選や装備変更をしません。
         std::string notice=notice_;
         if(presentation_.settings.language==aura::Language::Japanese) {
             if(notice_=="Save could not be read. A backup was kept in the log folder.") notice="セーブを読めませんでした。ログフォルダーにバックアップを保持しています。";
@@ -119,6 +124,7 @@ public:
         last_=Clock::now();
     }
     int run() {
+        // 実行中はこのループを繰り返します。dtは前回から経過した秒数です。
         if(opts_.smoke) return smoke();
         MSG msg{};
         while(!quitting_) {
@@ -164,6 +170,7 @@ private:
         return std::filesystem::is_regular_file(local,error)?local:bundled;
     }
     void startCutscene(aura::CutsceneKind kind=aura::CutsceneKind::Equinox) {
+        // 操作を止め、映像用の時計を0秒から開始。終了時に元のデバッグ表示へ戻します。
         if(!cutsceneActive()) cutsceneDebugWasOpen_=renderer_->debugOpen();
         if(renderer_->debugOpen()) renderer_->toggleDebug();
         cutsceneKind_=kind;
@@ -186,11 +193,15 @@ private:
         catch(const std::exception&) { notice_="Progress could not be saved. Check the log folder / free disk space."; }
     }
     void roll() {
+        // 1. 待ち時間が残っている間とCutScene中はロールしない。
         if(cooldown_>0 || cutsceneActive()) return;
-        const auto result=roller_.roll(); progress_.record(result,roller_.catalog());
+        // 2. 抽選 → 所持数と総回数へ追加。表示中のオーラは変更しない。
+        const auto result=roller_.roll();
+        progress_.record(result,roller_.catalog());
         aura::LogEntry entry{progress_.rolls,aura::utcNow(),result};
         if(log_.size()==200) log_.erase(log_.begin());
         log_.push_back(entry); logScroll_=0; cooldown_=aura::RollCooldown;
+        // 3. CSVへ1行追加し、進行データを保存する。
         try { aura::appendLog(saves_/L"rolls.csv",entry,roller_.catalog()[result]); }
         catch(const std::exception&) { notice_="Roll log could not be written. Check the log folder / free disk space."; }
         persist();
@@ -198,6 +209,7 @@ private:
         if(roller_.catalog()[result].id=="breakthrough") startCutscene(aura::CutsceneKind::Breakthrough);
     }
     void action(aura::Hit hit) {
+        // 画面のボタン・キー入力をゲームの操作へ変換する場所。
         if(cutsceneActive() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Logs) return;
         switch(hit.action) {
         case aura::Action::Roll: roll(); break;
@@ -221,6 +233,7 @@ private:
         }
     }
     void applyDebugActions(const aura::DebugActions& commands) {
+        // F1パネルから届く変更を反映。プレビューと実際の所持・装備は分けて扱います。
         if(commands.stopCutscene) stopCutscene();
         if(!cutsceneActive()) {
         if(commands.preview) presentation_.showPreview(*commands.preview,roller_.catalog().size(),auto_);
@@ -266,6 +279,7 @@ private:
         if(commands.playBreakthroughCutscene) startCutscene(aura::CutsceneKind::Breakthrough);
     }
     void update(float dt) {
+        // 毎フレームの更新。例: dt=.016なら、およそ1/60秒ぶん進めます。
         dt=std::max(0.f,dt);
         time_+=dt; cooldown_=std::max(0.f,cooldown_-dt);
         if(pending_) { action(*pending_); pending_.reset(); }
@@ -322,9 +336,12 @@ private:
                 const float dx=mx*std::cos(yaw_)-mz*std::sin(yaw_);
                 const float dz=mx*std::sin(yaw_)+mz*std::cos(yaw_);
                 const float beforeX=x_,beforeZ=z_;
-                x_=std::clamp(x_+dx*dt*3.f,-aura::StageWalkLimit,aura::StageWalkLimit); z_=std::clamp(z_+dz*dt*3.f,-aura::StageWalkLimit,aura::StageWalkLimit);
+                // 方向×経過秒×速度で移動。clampはステージの端で止める処理です。
+                x_=std::clamp(x_+dx*dt*aura::tuning::game::WalkSpeed,-aura::StageWalkLimit,aura::StageWalkLimit);
+                z_=std::clamp(z_+dz*dt*aura::tuning::game::WalkSpeed,-aura::StageWalkLimit,aura::StageWalkLimit);
                 moving=std::abs(x_-beforeX)+std::abs(z_-beforeZ)>.0001f;
-                facing_=std::atan2(-dx,-dz); walk_+=dt*3;
+                facing_=std::atan2(-dx,-dz);
+                walk_+=dt*aura::tuning::game::WalkPhaseSpeed;
             }
         }
         const float target=moving?1.f:0.f;
@@ -348,6 +365,7 @@ private:
         if(seconds>=.5f) { fps_=fpsFrames_/seconds; fpsFrames_=0; fpsStart_=now; }
     }
     int smoke() {
+        // 開発者用の自動確認。標準値での回帰確認用で、通常プレイでは呼ばれません。
         const auto findAura=[&](const char* id) {
             const auto& catalog=roller_.catalog();
             for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id==id) return i;
@@ -858,7 +876,8 @@ private:
                <<"Adapter: "<<renderer_->adapterName()<<"\nResolution: 1440x900\nBlock world draw calls: 1\nFinal instances: "
                <<renderer_->instanceCount()<<"\nMean frame submission time: "<<seconds/60*1000
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
-            out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: 64 x 64 world units / four times each original dimension\n";
+            out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: "
+               <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
             out<<"Profile: PASS / UTF-8 username and Discord settings save/restore; editable total 0 / 123456789 / original, AutoRoll stop, inventory/history/best unchanged\n"
                <<"Discord integration: disabled during game smoke; transport and payload covered by isolated fake IPC tests\n";
             out<<"Pixelation: PASS / preview-only, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
@@ -916,8 +935,9 @@ private:
         if(message==WM_MOUSEMOVE && app->dragging_) {
             const int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
             app->mouseX_=static_cast<float>(x); app->mouseY_=static_cast<float>(y);
-            app->yaw_+=(x-app->lastMouseX_)*.008f;
-            app->pitch_=std::clamp(app->pitch_+(y-app->lastMouseY_)*.006f,.12f,1.28f);
+            app->yaw_+=(x-app->lastMouseX_)*aura::tuning::game::OrbitHorizontalSensitivity;
+            app->pitch_=std::clamp(app->pitch_+(y-app->lastMouseY_)*aura::tuning::game::OrbitVerticalSensitivity,
+                aura::tuning::game::MinimumCameraPitch,aura::tuning::game::MaximumCameraPitch);
             app->lastMouseX_=x; app->lastMouseY_=y; return 0;
         }
         if(message==WM_RBUTTONUP && app->dragging_) {
@@ -969,7 +989,8 @@ private:
             const int region=app->renderer_?app->renderer_->region(static_cast<float>(p.x),static_cast<float>(p.y)):0;
             if(region==1) app->collectionScroll_=std::clamp(app->collectionScroll_-delta,0,static_cast<int>(app->roller_.catalog().size())-1);
             else if(region==2) app->logScroll_=std::clamp(app->logScroll_-delta,0,std::max(0,static_cast<int>(app->log_.size())-1));
-            else app->distance_=std::clamp(app->distance_-delta*.6f,6.f,34.f);
+            else app->distance_=std::clamp(app->distance_-delta*aura::tuning::game::ZoomStep,
+                aura::tuning::game::MinimumCameraDistance,aura::tuning::game::MaximumCameraDistance);
             return 0;
         }
         default: return DefWindowProcW(window,message,wp,lp);
@@ -991,9 +1012,11 @@ private:
     std::int64_t lastShotCycle_{-1},lastImpactCycle_{-1};
     unsigned pendingWidth_{},pendingHeight_{},fpsFrames_{};
     int collectionScroll_{},logScroll_{},lastMouseX_{},lastMouseY_{};
-    float pitch_{.52f};
+    float pitch_{aura::tuning::game::InitialCameraPitch};
     float movement_{};
-    float time_{},cooldown_{},x_{},z_{},facing_{},walk_{},yaw_{.45f},distance_{11},mouseX_{-1},mouseY_{-1},fps_{};
+    float time_{},cooldown_{},x_{},z_{},facing_{},walk_{};
+    float yaw_{aura::tuning::game::InitialCameraYaw},distance_{aura::tuning::game::InitialCameraDistance};
+    float mouseX_{-1},mouseY_{-1},fps_{};
     std::string notice_;
     Clock::time_point last_{},fpsStart_{Clock::now()},lastBackground_{};
 };

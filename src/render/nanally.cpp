@@ -1,4 +1,6 @@
 #include "render/renderer.hpp"
+#include "tuning/game.hpp"
+#include "tuning/nanally.hpp"
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <cmath>
@@ -8,9 +10,12 @@ namespace aura {
 using namespace DirectX;
 namespace {
 constexpr float Pi=3.14159265359f;
-// Original procedural materials: the reference is never sampled or shipped.
-// A spherical impostor reprojects its face into avatar space, so the creature
-// has a front, sides and a back when the camera or player turns.
+namespace settings = tuning::nanally;
+
+// 見た目の調整はまず tuning/nanally.hpp へ。ここから下の HLSL は上級向けで、普段は編集不要です。
+// GPU が「顔・耳・拳のどこを塗るか」「どこを光らせるか」を各ピクセルごとに計算します。
+// 顔は球の表面に貼るように計算するため、カメラを回すと横顔や後頭部も見えます。
+// 参考画像をテクスチャとして読み込まず、数式だけで形・模様・発光を作っています。
 constexpr char NanallyShader[]=R"(
 cbuffer Camera:register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; };
 struct Input { float4 p:SV_POSITION; float3 n:NORMAL; float4 color:COLOR0; float3 world:TEXCOORD0; float3 local:TEXCOORD1; };
@@ -131,6 +136,7 @@ float random(unsigned i,unsigned salt) {
 }
 
 void Renderer::createNanally() {
+    // 起動時に 1 回だけ実行。上のシェーダー文字列を GPU 用のプログラムに変換します。
     auto compile=[&](const char* entry,ID3D11PixelShader** out) {
         ComPtr<ID3DBlob> shader,errors;
         const auto hr=D3DCompile(NanallyShader,sizeof(NanallyShader)-1,"nanally.hlsl",nullptr,nullptr,entry,"ps_4_0",
@@ -144,91 +150,133 @@ void Renderer::createNanally() {
 }
 
 void Renderer::buildNanally(const Frame& f) {
-    const float t=f.time,hover=std::sin(t*1.45f)*.11f;
-    const auto avatar=XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,0,f.avatarZ);
-    auto point=[&](float x,float y,float z) {return XMVector3TransformCoord(XMVectorSet(x,y,z,1),avatar);};
-    // All creature parts are physically behind the player in avatar space.
-    // An orbiting camera can see the reverse side instead of a front-facing decal.
-    const auto center=point(0,3.52f+hover,2.85f);
-    const float headY=XMVectorGetY(center),headX=XMVectorGetX(center),headZ=XMVectorGetZ(center);
-    const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,
-        2.8f+std::sin(f.cameraPitch)*f.cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*f.cameraDistance,1);
-    const auto delta=XMVectorSubtract(eye,center);
-    const float yaw=std::atan2(XMVectorGetX(delta),-XMVectorGetZ(delta));
-    const float pitch=std::atan2(XMVectorGetY(delta),std::hypot(XMVectorGetX(delta),XMVectorGetZ(delta)));
-    const auto headBasis=XMMatrixRotationX(pitch)*XMMatrixRotationY(-yaw)*XMMatrixTranslation(headX,headY,headZ);
-    const Color faceParameters{yaw+f.facing,pitch,0};
-    auto solid=[&](FXMMATRIX model,unsigned style,Color parameters=Color{}) {
-        Instance v;XMStoreFloat4x4(&v.world,model);v.color={parameters.r,parameters.g,parameters.b,style+.99f};nanallyInstances_.push_back(v);
+    // 毎フレーム、現在のプレイヤー位置・向き・経過秒数から Nanally の部品を配置します。
+    // 1. プレイヤー基準の座標を用意する。x=左右、y=上、z=背後です。
+    const float t = f.time;
+    const float hover = std::sin(t * settings::HoverSpeed) * settings::HoverAmplitude;
+    const auto avatar = XMMatrixRotationY(f.facing) * XMMatrixTranslation(f.avatarX, 0, f.avatarZ);
+    auto point = [&](float x, float y, float z) {
+        return XMVector3TransformCoord(XMVectorSet(x, y, z, 1), avatar);
     };
-    auto billboard=[&](XMVECTOR p,float w,float h,float turn=0.f) {
-        return XMMatrixScaling(w,h,1)*XMMatrixRotationZ(turn)*XMMatrixRotationX(pitch)*XMMatrixRotationY(-yaw)*
-            XMMatrixTranslation(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p));
+    const auto center = point(0, settings::HeadCenterHeight + hover, settings::HeadBehindDistance);
+    const float headY = XMVectorGetY(center), headX = XMVectorGetX(center), headZ = XMVectorGetZ(center);
+
+    // カメラに向ける板の角度を求める部分です。顔の見える向き自体はシェーダー内で補正します。
+    const XMVECTOR eye = XMVectorSet(
+        f.avatarX + std::sin(f.cameraYaw) * std::cos(f.cameraPitch) * f.cameraDistance,
+        tuning::game::CameraFocusNanally + std::sin(f.cameraPitch) * f.cameraDistance,
+        f.avatarZ - std::cos(f.cameraYaw) * std::cos(f.cameraPitch) * f.cameraDistance, 1);
+    const auto delta = XMVectorSubtract(eye, center);
+    const float yaw = std::atan2(XMVectorGetX(delta), -XMVectorGetZ(delta));
+    const float pitch = std::atan2(XMVectorGetY(delta), std::hypot(XMVectorGetX(delta), XMVectorGetZ(delta)));
+    const auto headBasis = XMMatrixRotationX(pitch) * XMMatrixRotationY(-yaw) *
+        XMMatrixTranslation(headX, headY, headZ);
+
+    // 上級向け: body の color 欄は普通の色ではなく、顔の向きと部品番号の受け渡しに使います。
+    // style=0 は頭、1 は耳、2 は拳。glow の 10～14 は対応する発光・炎の種類です。
+    const Color faceParameters{yaw + f.facing, pitch, 0};
+    auto solid = [&](FXMMATRIX model, unsigned style, Color parameters = Color{}) {
+        Instance v;
+        XMStoreFloat4x4(&v.world, model);
+        v.color = {parameters.r, parameters.g, parameters.b, style + .99f};
+        nanallyInstances_.push_back(v);
     };
-    const Color red{1.9f,.018f,.095f},pink{1.7f,.11f,.20f},teal{.025f,1.55f,1.24f};
-    // Horns are composited first, letting the head cover their rounded bases.
-    for(int s:{-1,1}) {
-        const auto p=point(s*2.35f,6.0f+hover,2.87f);
-        const auto model=billboard(p,1.55f,2.0f,s*-.24f);
-        solid(model,1,faceParameters);pixelQuad(model,red,11,.56f);
+    auto billboard = [&](XMVECTOR p, float w, float h, float turn = 0.f) {
+        return XMMatrixScaling(w, h, 1) * XMMatrixRotationZ(turn) *
+            XMMatrixRotationX(pitch) * XMMatrixRotationY(-yaw) *
+            XMMatrixTranslation(XMVectorGetX(p), XMVectorGetY(p), XMVectorGetZ(p));
+    };
+    auto color = [](const std::array<float, 3>& rgb) { return Color{rgb[0], rgb[1], rgb[2]}; };
+    const Color red = color(settings::FlameTongueColor);
+    const Color pink = color(settings::CuffAndEmberColor);
+    const Color teal = color(settings::ElectricColor);
+
+    // 2. 頭と耳。耳を先に描くことで、付け根が頭の後ろに隠れます。
+    for (int s : {-1, 1}) { // -1 は左、+1 は右。同じ処理で左右対称に配置します。
+        const auto p = point(s * settings::EarSideOffset, settings::EarCenterHeight + hover, settings::EarBehindDistance);
+        const auto model = billboard(p, settings::EarWidth, settings::EarHeight, s * -settings::EarTiltRadians);
+        solid(model, 1, faceParameters);
+        pixelQuad(model, red, 11, .56f);
     }
-    const auto head=XMMatrixScaling(6.35f,5.85f,1)*headBasis;
-    solid(head,0,faceParameters);pixelQuad(head,faceParameters,10,.50f);
-    pixelQuad(XMMatrixScaling(8.15f,7.75f,1)*headBasis,red,13,.70f);
-    // Detached, oversized clenched hands hover beside the creature. Their red
-    // cuffs are separate curved bands and retain their shape while it bobs.
-    for(int s:{-1,1}) {
-        const float bob=std::sin(t*1.6f+s*.65f)*.14f;
-        const auto p=point(s*3.45f,1.63f+hover+bob,1.95f);
-        const auto model=billboard(p,2.10f,2.05f,s*-.21f);
-        solid(model,2,faceParameters);pixelQuad(model,red,12,.67f);
-        for(unsigned ring=0;ring<3;++ring)for(unsigned k=0;k<28;++k) {
-            const float a=k*2*Pi/28,b=(k+1)*2*Pi/28,r=.74f+ring*.07f;
-            const auto band=XMMatrixRotationZ(s*-.21f)*XMMatrixRotationY(f.facing)*
-                XMMatrixTranslation(XMVectorGetX(p),XMVectorGetY(p)-.34f-ring*.065f,XMVectorGetZ(p));
-            const auto from=XMVector3TransformCoord(XMVectorSet(std::cos(a)*r,0,std::sin(a)*r*.80f,1),band);
-            const auto to=XMVector3TransformCoord(XMVectorSet(std::cos(b)*r,0,std::sin(b)*r*.80f,1),band);
-            pixelLine(from,to,.045f,pink,.52f,f);
+    const auto head = XMMatrixScaling(settings::HeadWidth, settings::HeadHeight, 1) * headBasis;
+    solid(head, 0, faceParameters);
+    pixelQuad(head, faceParameters, 10, .50f);
+    pixelQuad(XMMatrixScaling(settings::HeadFlameWidth * settings::FlameSizeMultiplier,
+        settings::HeadFlameHeight * settings::FlameSizeMultiplier, 1) * headBasis,
+        red, 13, .70f * settings::FlameOpacityMultiplier);
+
+    // 3. 左右の拳。共通の浮遊に、少しずれた拳専用の揺れを足しています。
+    for (int s : {-1, 1}) {
+        const float bob = std::sin(t * settings::FistHoverSpeed + s * .65f) * settings::FistHoverAmplitude;
+        const auto p = point(s * settings::FistSideOffset, settings::FistCenterHeight + hover + bob, settings::FistBehindDistance);
+        const auto model = billboard(p, settings::FistWidth, settings::FistHeight, s * -settings::FistTiltRadians);
+        solid(model, 2, faceParameters);
+        pixelQuad(model, red, 12, .67f);
+
+        // 手首の 3 本の赤い輪。1 周を 28 個の短い線に分けてつなぎます。
+        for (unsigned ring = 0; ring < 3; ++ring) for (unsigned k = 0; k < 28; ++k) {
+            const float a = k * 2 * Pi / 28, b = (k + 1) * 2 * Pi / 28, r = .74f + ring * .07f;
+            const auto band = XMMatrixRotationZ(s * -settings::FistTiltRadians) * XMMatrixRotationY(f.facing) *
+                XMMatrixTranslation(XMVectorGetX(p), XMVectorGetY(p) - .34f - ring * .065f, XMVectorGetZ(p));
+            const auto from = XMVector3TransformCoord(XMVectorSet(std::cos(a) * r, 0, std::sin(a) * r * .80f, 1), band);
+            const auto to = XMVector3TransformCoord(XMVectorSet(std::cos(b) * r, 0, std::sin(b) * r * .80f, 1), band);
+            pixelLine(from, to, .045f, pink, .52f, f);
         }
-        const auto plume=point(s*3.45f,2.05f+hover+bob,2.20f);
-        pixelQuad(billboard(plume,3.0f,3.25f),red,13,.57f);
+        const auto plume = point(s * settings::FistSideOffset,
+            settings::FistCenterHeight + .42f + hover + bob, settings::FistBehindDistance + .25f);
+        pixelQuad(billboard(plume, settings::FistFlameWidth * settings::FlameSizeMultiplier,
+            settings::FistFlameHeight * settings::FlameSizeMultiplier),
+            red, 13, .57f * settings::FlameOpacityMultiplier);
     }
-    // Fine flame tongues and loose embers make the silhouette breathe instead
-    // of turning it into a static red outline or a full-screen wash.
-    for(unsigned k=0;k<26;++k) {
-        const float a=k*2*Pi/26,phase=std::fmod(t*.57f+random(k,4),1.f);
-        const float r=3.10f+phase*.32f,x=std::cos(a)*r,y=3.52f+std::sin(a)*r*.94f+hover+phase*.30f;
-        const auto p=point(x,y,2.90f);
-        const float size=.36f+random(k,1)*.46f,fade=std::sin(phase*Pi);
-        pixelQuad(billboard(p,size,size*2.6f,.1f*std::sin(k+t)),red,14,.36f*fade);
+
+    // 4. 細い炎と火の粉。phase は 0→1 を繰り返す「この粒子の進み具合」です。
+    // random(k, ...) は同じ番号なら同じ値を返すので、毎フレーム位置が飛びません。
+    for (unsigned k = 0; k < settings::FlameTongueCount; ++k) {
+        const float a = k * 2 * Pi / settings::FlameTongueCount;
+        const float phase = std::fmod(t * settings::FlameTongueSpeed + random(k, 4), 1.f);
+        const float r = 3.10f + phase * .32f, x = std::cos(a) * r;
+        const float y = settings::HeadCenterHeight + std::sin(a) * r * .94f + hover + phase * .30f;
+        const auto p = point(x, y, settings::HeadBehindDistance + .05f);
+        const float size = (.36f + random(k, 1) * .46f) * settings::FlameSizeMultiplier;
+        const float fade = std::sin(phase * Pi);
+        pixelQuad(billboard(p, size, size * 2.6f, .1f * std::sin(k + t)),
+            red, 14, .36f * fade * settings::FlameOpacityMultiplier);
     }
-    for(unsigned k=0;k<52;++k) {
-        const float phase=std::fmod(t*.21f+random(k,5),1.f),angle=random(k,2)*2*Pi;
-        const float radius=2.5f+random(k,3)*1.7f;
-        const auto p=point(std::cos(angle)*radius,.35f+phase*6.4f,2.3f+std::sin(angle)*.7f);
-        const float size=.018f+random(k,6)*.032f;
-        pixelBillboard(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p),size,size,pink,4,std::sin(phase*Pi)*.52f,f);
+    for (unsigned k = 0; k < settings::EmberCount; ++k) {
+        const float phase = std::fmod(t * settings::EmberRiseSpeed + random(k, 5), 1.f);
+        const float angle = random(k, 2) * 2 * Pi;
+        const float radius = 2.5f + random(k, 3) * 1.7f;
+        const auto p = point(std::cos(angle) * radius, .35f + phase * 6.4f, 2.3f + std::sin(angle) * .7f);
+        const float size = .018f + random(k, 6) * .032f;
+        pixelBillboard(XMVectorGetX(p), XMVectorGetY(p), XMVectorGetZ(p), size, size,
+            pink, 4, std::sin(phase * Pi) * .52f, f);
     }
-    // Brief, small teal zigzags cling to the player. Each bolt lives only a
-    // fraction of a second; no permanent electric cage obscures the avatar.
-    for(unsigned k=0;k<18;++k) {
-        const float clock=t*(2.3f+random(k,1)*1.7f)+random(k,3)*11;
-        const auto cycle=static_cast<unsigned>(std::floor(clock));
-        const float phase=clock-std::floor(clock);
-        if(phase>.30f)continue;
-        const float a=random(k+cycle*19,4)*2*Pi;
-        const float radius=.64f+random(k,5)*.24f;
-        const float y=.35f+random(k+cycle*7,6)*2.20f;
-        const float length=.29f+random(k+cycle*11,8)*.32f;
-        const float direction=random(k+cycle*13,2)>.5f?1.f:-1.f;
+
+    // 5. プレイヤー周囲の電撃。短時間だけ表示し、細い折れ線をジグザグにつなぎます。
+    for (unsigned k = 0; k < settings::ElectricBoltCount; ++k) {
+        const float clock = t * (settings::ElectricSpeedMin + random(k, 1) * settings::ElectricSpeedVariation) + random(k, 3) * 11;
+        const auto cycle = static_cast<unsigned>(std::floor(clock));
+        const float phase = clock - std::floor(clock);
+        if (phase > settings::ElectricVisibleFraction) continue;
+        const float a = random(k + cycle * 19, 4) * 2 * Pi;
+        const float radius = settings::ElectricRadiusMin + random(k, 5) * settings::ElectricRadiusVariation;
+        const float y = .35f + random(k + cycle * 7, 6) * 2.20f;
+        const float length = settings::ElectricLengthMin + random(k + cycle * 11, 8) * settings::ElectricLengthVariation;
+        const float direction = random(k + cycle * 13, 2) > .5f ? 1.f : -1.f;
         XMVECTOR previous{};
-        for(unsigned j=0;j<6;++j) {
-            const float u=j/5.f,wave=j>0 && j<5?(j%2?1.f:-1.f)*.075f:0;
-            const auto next=point(std::cos(a)*(radius+wave),y+u*length,std::sin(a)*(radius+wave)+direction*u*.09f);
-            if(j)pixelLine(previous,next,.12f,teal,.84f*std::sin(phase/.30f*Pi),f);
-            previous=next;
+        constexpr unsigned lastPoint = settings::ElectricBoltPointCount - 1;
+        for (unsigned j = 0; j < settings::ElectricBoltPointCount; ++j) {
+            const float u = j / static_cast<float>(lastPoint);
+            const float wave = j > 0 && j < lastPoint ? (j % 2 ? 1.f : -1.f) * settings::ElectricZigzagWidth : 0;
+            const auto next = point(std::cos(a) * (radius + wave), y + u * length,
+                std::sin(a) * (radius + wave) + direction * u * .09f);
+            if (j) pixelLine(previous, next, settings::ElectricWidth, teal,
+                .84f * std::sin(phase / settings::ElectricVisibleFraction * Pi), f);
+            previous = next;
         }
-        if(phase<.11f)pixelBillboard(XMVectorGetX(previous),XMVectorGetY(previous),XMVectorGetZ(previous),.15f,.15f,teal,4,.52f,f);
+        // 電撃が現れた直後だけ、小さな光点を先端に追加します。
+        if (phase < .11f) pixelBillboard(XMVectorGetX(previous), XMVectorGetY(previous), XMVectorGetZ(previous),
+            .15f, .15f, teal, 4, .52f, f);
     }
 }
 } // namespace aura

@@ -90,6 +90,7 @@ std::uint64_t collectedTotal(const Progress& progress) {
 } // namespace
 
 std::vector<Definition> loadCatalog(const std::filesystem::path& path) {
+    // CSVの1行をDefinitionに変換し、色や確率の範囲を検査してからゲームへ渡します。
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::runtime_error("Cannot open aura catalog: " + path.string());
     std::string line;
@@ -135,6 +136,7 @@ Roller::Roller(std::vector<Definition> definitions, std::uint64_t seed)
     weights_[fallback] = remaining;
 }
 std::size_t Roller::selectTicket(std::uint64_t ticket) const {
+    // 当たりくじの番号が、どのオーラに割り当てた区間に入っているかを調べます。
     if (ticket >= TicketPool) throw std::out_of_range("Ticket is outside pool");
     for (std::size_t i = 0; i < weights_.size(); ++i) {
         if (ticket < weights_[i]) return i;
@@ -143,10 +145,12 @@ std::size_t Roller::selectTicket(std::uint64_t ticket) const {
     throw std::logic_error("Invalid ticket distribution");
 }
 std::size_t Roller::roll() {
+    // 0〜TicketPool-1のくじを1枚だけ引きます。複数のオーラの確率を別々に判定しません。
     return selectTicket(std::uniform_int_distribution<std::uint64_t>(0, TicketPool - 1)(random_));
 }
 std::uint64_t Roller::tickets(std::size_t index) const { return weights_.at(index); }
 void Roller::setLuck(double value) {
+    // Luckでレア側の確率を上げます。全体を調整し、合計を常に100%に保ちます。
     if (!std::isfinite(value) || value < 1 || value > 1'000'000) throw std::out_of_range("Luck must be 1..1000000");
     // The rarest result of L independent baseline rolls, evaluated from the CDF.
     // This also supports fractional L without a loop or a probability overflow.
@@ -180,6 +184,7 @@ std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index)
     return out.str();
 }
 void Progress::record(std::size_t index, const std::vector<Definition>& catalog) {
+    // 試作の誤登録を拒否 → 所持数と回数を加算 → bestを更新。equippedは変更しません。
     if (counts.size() != catalog.size() || index >= catalog.size()) throw std::out_of_range("Progress catalog mismatch");
     if (catalog[index].previewOnly) throw std::invalid_argument("Cannot record a preview-only aura as a roll");
     if (rolls == std::numeric_limits<std::uint64_t>::max() || counts[index] == std::numeric_limits<std::uint64_t>::max() ||
@@ -204,6 +209,7 @@ std::size_t Progress::discovered() const {
     return static_cast<std::size_t>(std::count_if(counts.begin(), counts.end(), [](auto n) { return n != 0; }));
 }
 void saveProgress(const std::filesystem::path& path, const Progress& p, const std::vector<Definition>& catalog) {
+    // 進行データを一時ファイルへ書いてから置き換えます。途中の書きかけを本体にしないためです。
     if (p.counts.size() != catalog.size() || p.equipped >= catalog.size() || p.best >= catalog.size())
         throw std::runtime_error("Invalid progress for save");
     if (catalog[p.equipped].previewOnly || catalog[p.best].previewOnly)
@@ -228,6 +234,7 @@ void saveProgress(const std::filesystem::path& path, const Progress& p, const st
 #endif
 }
 Progress loadProgress(const std::filesystem::path& path, const std::vector<Definition>& catalog) {
+    // 並び番号ではなくidで復元。CSVに新しいオーラを追加しても既存の所持数を引き継ぎます。
     Progress p(catalog.size());
     const auto initial=std::find_if(catalog.begin(),catalog.end(),[](const auto& d){return !d.previewOnly;});
     if (initial==catalog.end()) throw std::runtime_error("Catalog has no rollable auras");

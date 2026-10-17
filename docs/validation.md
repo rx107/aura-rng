@@ -1,6 +1,16 @@
-# Star's RNG Alpha 0.1 / v0.1.8 検証記録
+# Star's RNG Alpha 0.1 / v0.1.9 検証記録
 
 検証日: 2026-10-17（日本時間）。Windows x64、Visual C++ 19.39、Windows SDK 10.0.22621.0、Release / C++20 / MT。
+
+## 初心者向けの編集導線
+
+- src/tuning の8ヘッダーへ、ゲーム/ステージ/UI/姿勢/4種類の特殊オーラの設定を抽出。初期値を維持し、コメントに単位・増減時の画面変化・変更例を記載。
+- main/core/render の主要処理に日本語の役割と読み順を追加。初心者向け改造ガイド、ファイル検索表、最初の1行変更・CSVプレビュー追加・復帰手順を用意。
+- Develop.cmdはbuild.cmd --build-onlyからコンパイルし、--debugと独立したlocal-saveで起動。正式なbuild.cmdとCIは従来の標準値向け回帰テストを実行。
+- CSVだけの変更でも、ビルド後にdataを再コピーする導線へ更新。C++を再リンクしないデータ編集も反映する設計。
+- リファクタリング後のGPU/WARP描画と入力・旧セーブ・音楽・VRM・全オーラのsmokeが成功。5種類のオーラの描画領域をv0.1.8と比較し、RGB差の平均はすべて0。
+
+- 別のソースコピーでHeadWidth 6.35→7.0、HalfExtent 32→40、RollCooldownSeconds 1.4→0.7を変更してbuild-onlyとGPU smokeが成功。頭の幅と床の拡張、ワールドinstance数1292→1852を確認。CSVへ試作1行を追加し、EXEのSHAを変えずに出力dataへコピーされることも確認。配布する設定は標準値のまま。
 
 ## 自動テスト
 
@@ -37,18 +47,18 @@ Windowsの独立fake named pipeサーバーで、HANDSHAKE v1 → READY → SET_
 
 ## ローカル測定
 
-EXE: 1,639,424バイト。追加のゲームエンジン、Discord SDK DLLは使用しません。
+EXE: 1,760,768バイト。追加のゲームエンジン、Discord SDK DLLは使用しません。
 
 | 1440×900の送信時間 | NVIDIA RTX 3050 Laptop | WARP |
 | --- | --- | --- |
-| 通常ブロック | 1.16668ms | 1.9996ms |
-| Pixelation | 2.09951ms | 2.93003ms |
-| Equinox | 2.38919ms | 2.3272ms |
-| BreakThrough | 3.6495ms | 2.49415ms |
-| Equinox CutScene | 0.49208ms | 0.84714ms |
-| Nanally | 1.98365ms | 2.36024ms |
+| 通常ブロック | 2.72484ms | 6.29331ms |
+| Pixelation | 4.64191ms | 9.44533ms |
+| Equinox | 7.89638ms | 5.99491ms |
+| BreakThrough | 10.4357ms | 5.56567ms |
+| Equinox CutScene | 1.92612ms | 4.64742ms |
+| Nanally | 4.8392ms | 5.54292ms |
 
-デバッグを閉じ、表示せずVSyncなしで送信した測定です。通常/オーラは60フレーム、Equinox CutSceneは時刻1.5秒固定の20フレーム。GPUタイマー値や実プレイFPSの保証ではありません。VRMモデルや電源・他プロセスなどで変動します。
+複数のビルドと並行して、デバッグを閉じ、表示せずVSyncなしで送信した測定です。この数値を過去版との性能比較には使用しません。通常/オーラは60フレーム、Equinox CutSceneは時刻1.5秒固定の20フレーム。GPUタイマー値や実プレイFPSの保証ではありません。VRMモデルや電源・他プロセスなどで変動します。
 
 Pixelation基礎1213、Equinox1026、BreakThrough1225、Nanally303の演出インスタンスを確認。BreakThroughの暗い塔は共有キューブの同一バッチへ追加します。ブルームは全解像度1枚と半解像度2枚を共有し、1440×900で約7.4MiBを初回に確保して再使用。通常オーラでは実行しません。カットシーンは全画面三角形1枚と字幕です。
 

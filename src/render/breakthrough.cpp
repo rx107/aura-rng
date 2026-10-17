@@ -1,4 +1,5 @@
 #include "render/renderer.hpp"
+#include "tuning/breakthrough.hpp"
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <array>
@@ -6,10 +7,15 @@
 #include <stdexcept>
 #include <string_view>
 
+// 読む順番: buildBreakthrough()が通常表示、drawBreakthroughCutscene()が入手演出、
+// breakthroughCutsceneUi()が演出の字幕。サイズ・量・浮遊はtuning/breakthrough.hppで調整。
+// 下のHLSLはGPUに渡す専用コード。模様や映画のカメラ演出を変える時だけ読む部分です。
+
 namespace aura {
 using namespace DirectX;
 namespace {
 constexpr float Pi=3.14159265359f;
+namespace settings=tuning::breakthrough;
 constexpr char MaterialShader[]=R"(
 cbuffer Camera:register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; };
 Texture2D lettering:register(t0); SamplerState linearClamp:register(s0);
@@ -48,8 +54,9 @@ float4 main(Input i):SV_TARGET {
     return float4(i.color.rgb*mask,opacity);
 })";
 
-// Analytic box intersections and a few noise octaves replace the reference movie.
-// The six camera shots, captions, blackout and final closing aperture share its timing.
+// CutScene専用: 動画を再生する代わりに、画面の各点で柱との交差を計算して描く。
+// 通常表示と描き方を分けているため、設定ヘッダーの柱の浮遊はこの演出に影響しない。
+// ここで柱のcenter.yに時間tを足さないことが「CutSceneの柱は静止」の要点。
 constexpr char CinematicShader[]=R"(
 cbuffer Cinematic:register(b0) { float4 screenAndTime; };
 struct Input { float4 p:SV_POSITION; float2 uv:TEXCOORD0; };
@@ -95,7 +102,7 @@ float4 main(Input i):SV_TARGET {
             else if(n<3){center=float3(side*2.15,1.95,.35);bounds=float3(.35,1.95,.32);tilt=-side*.42;}
             else if(n<5){center=float3(side*1.35,3.35,1.25);bounds=float3(.24,1.75,.25);tilt=-side*.10;}
             else {center=float3(side*.96,2.2,-.20);bounds=float3(.22,1.15,.25);tilt=side*.13;}
-            // The cinematic holds the monoliths still while the camera and mist move.
+            // CutSceneの柱の位置は固定。カメラ・霧・光だけを動かす。
             float3 localEye=eye-center,localRay=rd;
             localEye.xy=rot(localEye.xy,-tilt);localRay.xy=rot(localRay.xy,-tilt);
             float hit=hitBox(localEye,localRay,bounds);
@@ -125,7 +132,7 @@ float4 main(Input i):SV_TARGET {
     color+=float3(.66,.70,1)*(flare+glow)*strength;
     float litSmoke=pow(saturate(cloud(p*7+warp*1.8+float2(t*.043,-t*.031))-.22),1.5);
     color+=float3(.19,.20,.38)*litSmoke*exp(-r*r*1.7)*strength;
-    // Slender winding filaments sweep in from the corners and coil around the flare.
+    // 画面の端から細い光を巻き込み、中心の強い光へつなげる。
     [unroll]for(int j=0;j<9;++j) {
         float offset=j*.6981;
         float turbulence=cloud(p*6+j*8+t*.025);
@@ -135,7 +142,7 @@ float4 main(Input i):SV_TARGET {
         float variation=.4+.6*turbulence;
         color+=float3(.28,.31,.70)*filament*variation*(j<3?1.2:.48);
     }
-    // Tiny drifting motes and Roman fragments occupy the same luminous volume.
+    // 小さな光の粒を漂わせ、柱と霧が同じ空間にあるように見せる。
     float2 cells=floor(q*38),particle=frac(q*38)-.5;
     float seed=hash(cells);
     float dots=exp(-dot(particle,particle)*850)*step(.965,seed);
@@ -165,6 +172,7 @@ float random(unsigned i,unsigned salt=0) {
 }
 
 void Renderer::createBreakthrough() {
+    // 起動時に一度だけ行う準備。HLSLをコンパイルし、文字画像とGPU用バッファを作る。
     auto shader=[&](const char* source,std::size_t size,ID3D11PixelShader** output,const char* name) {
         ComPtr<ID3DBlob> code,errors;
         const HRESULT hr=D3DCompile(source,size,name,nullptr,nullptr,"main","ps_4_0",
@@ -196,7 +204,7 @@ void Renderer::createBreakthrough() {
     font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     constexpr wchar_t name[]=L"BREAKTHROUGH";
     canvas->DrawText(name,static_cast<UINT32>(std::size(name)-1),font.Get(),D2D1::RectF(0,0,1024,128),brush.Get());
-    // A smaller echo of the name floats above the plate, as in the reference.
+    // 小さな副題用の文字画像。通常表示時に主タイトルの下へ配置する。
     ComPtr<IDWriteTextFormat> subtitleFormat;
     checked(write_->CreateTextFormat(L"Times New Roman",nullptr,DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_EXPANDED,38,L"en-us",&subtitleFormat),"BreakThrough small lettering font");
@@ -207,8 +215,10 @@ void Renderer::createBreakthrough() {
 }
 
 void Renderer::buildBreakthrough(const Frame& f) {
+    // 毎フレーム、柱 → 光の軌跡 → 光源 → 足元と霧 → 頭上の名前、の順に部品を作る。
     const float t=f.time,ox=f.avatarX,oz=f.avatarZ;
-    const Color blue{.39f,.46f,1.f},silver{.83f,.88f,1.2f},white{1.6f,1.6f,1.75f};
+    const Color blue=settings::blue,silver=settings::silver,white=settings::white;
+    // pointはアバターからの相対座標、lineは発光する線、blockは暗い立体の部品を追加する。
     auto point=[&](float x,float y,float z){return XMVectorSet(ox+x,y,oz+z,1);};
     auto line=[&](XMVECTOR a,XMVECTOR b,float width,float energy){pixelLine(a,b,width,silver,energy,f);};
     auto block=[&](FXMMATRIX transform,Color color) {
@@ -216,21 +226,16 @@ void Renderer::buildBreakthrough(const Frame& f) {
         Instance instance;XMStoreFloat4x4(&instance.world,transform);instance.color={color.r,color.g,color.b,.08f};
         instances_.push_back(instance);
     };
-    // Seven broken glass monoliths. The tall central spine is surrounded by
-    // staggered rear pillars and a pair that lean away from the floating avatar.
-    struct Tower {float x,y,z,width,height,depth,tilt,turn;};
-    const Tower towers[]={{0,4.05f,.65f,.86f,7.3f,.74f,0,.10f},
-        {-2.15f,1.95f,.25f,.70f,3.9f,.64f,.42f,-.12f},{2.15f,1.95f,.25f,.70f,3.9f,.64f,-.42f,.12f},
-        {-1.35f,3.35f,1.25f,.48f,3.5f,.50f,.10f,-.10f},{1.35f,3.35f,1.25f,.48f,3.5f,.50f,-.10f,.10f},
-        {-.96f,2.2f,-.20f,.44f,2.3f,.50f,-.13f,.10f},{.96f,2.2f,-.20f,.44f,2.3f,.50f,.13f,-.10f}};
+    // 柱: 一番高い中央、傾いた左右、後ろの柱、前の柱。配列の各行が1本に対応する。
+    const auto& towers=settings::towers;
     for(unsigned n=0;n<std::size(towers);++n) {
         const auto c=towers[n];
-        const float amplitude=.14f+.02f*static_cast<float>(n%3);
-        const float period=3.6f+.35f*static_cast<float>(n%4);
-        const float drift=amplitude*std::sin(t*(2*Pi/period)+static_cast<float>(n)*.91f);
-        // Glass, core, attached fragments and cap glow all share this moving model.
+        const float amplitude=settings::floatAmplitude+settings::floatAmplitudeStep*static_cast<float>(n%3);
+        const float period=settings::floatPeriodSeconds+settings::floatPeriodStepSeconds*static_cast<float>(n%4);
+        const float drift=amplitude*std::sin(t*(2*Pi/period)+static_cast<float>(n)*settings::floatPhaseStep);
+        // 同じmodelにガラス・芯・破片・上端の光を結び、柱が一体で上下するようにする。
         const auto model=XMMatrixRotationY(c.turn)*XMMatrixRotationZ(c.tilt)*XMMatrixTranslation(ox+c.x,c.y+drift,oz+c.z);
-        // The opaque core supplies the dark negative space between glass details.
+        // 不透明な暗い芯。ガラスの隙間を背景が透けすぎないようにする。
         block(XMMatrixScaling(c.width*.73f,c.height*.96f,c.depth*.72f)*model,{.018f,.022f,.052f});
         for(unsigned face=0;face<4;++face) {
             const float angle=face*Pi*.5f,w=face%2?c.depth:c.width,d=face%2?c.width:c.depth;
@@ -242,7 +247,7 @@ void Renderer::buildBreakthrough(const Frame& f) {
             line(XMVector3TransformCoord(XMVectorSet(sx*c.width*.51f,-c.height*.50f,sz*c.depth*.51f,1),model),
                  XMVector3TransformCoord(XMVectorSet(sx*c.width*.51f,c.height*.50f,sz*c.depth*.51f,1),model),.035f,.48f);
         }
-        for(unsigned i=0;i<24;++i) {
+        for(unsigned i=0;i<settings::fragmentsPerTower;++i) {
             const unsigned seed=n*43+i;
             const float s=.10f+random(seed,3)*.22f,y=(random(seed,8)-.5f)*c.height;
             const float x=(random(seed,1)-.5f)*c.width*1.1f,z=(random(seed,5)>.5f?-1:1)*c.depth*.52f;
@@ -257,20 +262,21 @@ void Renderer::buildBreakthrough(const Frame& f) {
         pixelBillboard(XMVectorGetX(top),XMVectorGetY(top),XMVectorGetZ(top),1.4f,.16f,white,4,.65f,f);
         pixelBillboard(XMVectorGetX(top),XMVectorGetY(top),XMVectorGetZ(top),1.0f,1.0f,blue,0,.47f,f);
     }
-    // Two interacting light sources and thin winding trails, rather than a solid cage.
-    for(unsigned strand=0;strand<7;++strand) {
+    // 細い光の軌跡: 短い線をつなぎ、上昇するらせんを作る。
+    for(unsigned strand=0;strand<settings::strandCount;++strand) {
         XMVECTOR previous{};
-        for(unsigned i=0;i<=84;++i) {
-            const float u=i/84.f,a=u*Pi*2.2f+strand*.9f+t*(strand%2?.22f:-.27f);
-            const float radius=2.1f+.40f*std::sin(u*Pi*2+strand*.8f+t*.3f);
-            const float y=.18f+u*5.8f;
+        for(unsigned i=0;i<=settings::strandSegments;++i) {
+            const float u=i/static_cast<float>(settings::strandSegments),a=u*Pi*2.2f+strand*.9f+t*(strand%2?settings::strandForwardRotation:settings::strandReverseRotation);
+            const float radius=settings::strandRadius+settings::strandRadiusWave*std::sin(u*Pi*2+strand*.8f+t*.3f);
+            const float y=.18f+u*settings::strandHeight;
             const auto next=point(std::cos(a)*radius,y,std::sin(a)*radius);
             if(i)line(previous,next,.035f+strand*.003f,.17f+strand*.018f);
             previous=next;
         }
     }
+    // 上下の強い光源。柔らかい光、十字の輝き、横長のフレアを重ねる。
     for(unsigned source=0;source<2;++source) {
-        const float y=source?3.90f:.25f;
+        const float y=source?settings::upperLightHeight:settings::lowerLightHeight;
         pixelBillboard(ox,y,oz,3.4f,3.4f,blue,0,.75f,f);
         pixelBillboard(ox,y,oz,1.6f,1.6f,white,4,.94f,f,t*.035f);
         pixelBillboard(ox,y,oz,8.6f,.24f,white,4,source?.88f:.55f,f);
@@ -282,40 +288,41 @@ void Renderer::buildBreakthrough(const Frame& f) {
                  XMVector3TransformCoord(XMVectorSet(std::cos(a)*length,std::sin(a)*length,0,1),orientation),.045f,.21f);
         }
     }
-    // A loosely wound floor vortex and cold, thin clouds travelling inward.
-    for(unsigned ring=0;ring<2;++ring)for(unsigned i=0;i<96;++i) {
-        const float a=i*2*Pi/96+t*(ring?-.3f:.22f),b=a+2*Pi/96,r=2.45f-ring*.30f;
+    // 足元の渦。線分で円を作り、内側と外側で逆向きに回転させる。
+    for(unsigned ring=0;ring<2;++ring)for(unsigned i=0;i<settings::floorSegments;++i) {
+        const float a=i*2*Pi/settings::floorSegments+t*(ring?settings::floorInnerRotation:settings::floorOuterRotation),b=a+2*Pi/settings::floorSegments,r=settings::floorOuterRadius-ring*settings::floorRingSpacing;
         line(point(std::cos(a)*r,.15f+.04f*std::sin(a*3+t),std::sin(a)*r),
              point(std::cos(b)*r,.15f+.04f*std::sin(b*3+t),std::sin(b)*r),.06f,.27f);
     }
-    for(unsigned i=0;i<52;++i) {
-        const float age=std::fmod(t*.075f+random(i,4),1.f),a=i*2.399963f+t*.05f,r=3.4f*(1-age)+.25f;
+    // 霧は外から中心へ。ageは0→1を繰り返し、sinで出現・消失を滑らかにする。
+    for(unsigned i=0;i<settings::mistCount;++i) {
+        const float age=std::fmod(t*settings::mistTravelSpeed+random(i,4),1.f),a=i*2.399963f+t*.05f,r=3.4f*(1-age)+.25f;
         const float y=.25f+random(i,6)*4.8f,size=1.25f+random(i,7)*1.5f;
         const float fade=std::sin(age*Pi);
-        pixelBillboard(ox+std::cos(a)*r,y,oz+std::sin(a)*r,size,size,blue,0,.36f*fade,f,i*.7f);
+        pixelBillboard(ox+std::cos(a)*r,y,oz+std::sin(a)*r,size,size,blue,0,settings::mistBrightness*fade,f,i*.7f);
     }
-    for(unsigned i=0;i<220;++i) {
+    // 小さな粒子は番号iで位置を散らし、時間で上昇させる。
+    for(unsigned i=0;i<settings::dustCount;++i) {
         const float a=i*2.399963f+t*.10f,r=.65f+random(i,3)*2.5f;
-        const float phase=std::fmod(i*.127f+t*.28f,7.4f),fade=std::min(1.f,phase*2)*std::min(1.f,(7.4f-phase)*2);
+        const float phase=std::fmod(i*.127f+t*settings::dustRiseSpeed,7.4f),fade=std::min(1.f,phase*2)*std::min(1.f,(7.4f-phase)*2);
         const float size=.018f+random(i,7)*.045f;
         const float x=ox+std::cos(a)*r,z=oz+std::sin(a)*r;
-        pixelBillboard(x,.16f+phase,z,size,size,silver,1,fade*.63f,f,t*.1f+i);
+        pixelBillboard(x,.16f+phase,z,size,size,silver,1,fade*settings::dustBrightness,f,t*.1f+i);
         if(i%21==0)pixelBillboard(x,.16f+phase,z,.30f,.30f,silver,4,fade*.46f,f);
     }
     const auto plate=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw)*
-        XMMatrixTranslation(ox+std::sin(f.cameraYaw)*1.8f,3.55f,oz-std::cos(f.cameraYaw)*1.8f);
-    // Keep the narrow serif plate ahead of the avatar and darken only its backing.
-    // A tiny opaque card preserves readable negative space under the shared bloom.
+        XMMatrixTranslation(ox+std::sin(f.cameraYaw)*settings::titleForward,settings::titleHeight,oz-std::cos(f.cameraYaw)*settings::titleForward);
+    // 名前: カメラを向く板に文字を描き、暗い下地で発光中も読みやすくする。
     block(XMMatrixScaling(3.55f,.40f,.025f)*XMMatrixTranslation(0,0,.035f)*plate,{.002f,.003f,.008f});
-    const Color plateInk{.62f,.66f,.83f};
-    pixelQuad(XMMatrixScaling(3.30f,.35f,1)*plate,plateInk,8,.78f);
-    // The small echo sits below the title, leaving the upper star at y=3.9 clear.
-    pixelQuad(XMMatrixScaling(1.8f,.14f,1)*XMMatrixTranslation(0,-.26f,0)*plate,silver,9,.67f);
+    pixelQuad(XMMatrixScaling(settings::titleWidth,settings::titleTextHeight,1)*plate,settings::plateInk,8,.78f);
+    // 小さい副題を下へ置き、上の強い光と重ならないようにする。
+    pixelQuad(XMMatrixScaling(settings::subtitleWidth,settings::subtitleTextHeight,1)*XMMatrixTranslation(0,settings::subtitleOffsetY,0)*plate,silver,9,.67f);
     for(float y:{-.17f,.17f})line(XMVector3TransformCoord(XMVectorSet(-1.7f,y,0,1),plate),
         XMVector3TransformCoord(XMVectorSet(1.7f,y,0,1),plate),.021f,.65f);
 }
 
 void Renderer::drawBreakthroughCutscene(const Frame& frame) {
+    // 全画面の三角形1枚で専用HLSLを実行する。通常の柱モデルを再利用しないため浮遊しない。
     if(frame.cutsceneTime<0 || frame.cutsceneTime>BreakthroughCutsceneDuration)return;
     const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,static_cast<float>(width_),static_cast<float>(height_)};
     context_->UpdateSubresource(breakthroughConstants_.Get(),0,nullptr,constants,0,0);
@@ -329,6 +336,7 @@ void Renderer::drawBreakthroughCutscene(const Frame& frame) {
 }
 
 void Renderer::breakthroughCutsceneUi(const Frame& frame) {
+    // CutSceneの経過秒tで字幕を表示。位置は480ピクセル高を基準に、画面に合わせて拡大する。
     const float t=frame.cutsceneTime;
     if(t<0 || t>BreakthroughCutsceneDuration)return;
     const float factor=static_cast<float>(height_)/480,referenceWidth=static_cast<float>(width_)*480/height_;

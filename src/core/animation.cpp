@@ -1,39 +1,49 @@
 #include "core/animation.hpp"
+#include "tuning/avatar.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace aura {
+// コード地図: 通常/固定姿勢 → Pixelation の 2 時計 → 弾の軌道 → 吸い込まれる星。
+// ここは描画 API を使わない計算部分です。日常の見た目調整は src/tuning/ へ。
 AvatarPose avatarPose(float time,float walkPhase,float movement,bool singularity) {
+    namespace pose=tuning::avatar;
     AvatarPose p;
     if(singularity) {
+        // 先に return するので、このポーズには下の歩行アニメーションが混ざりません。
         p.fixed=true;
-        p.lift=.55f+.12f*std::sin(time*.8f);
-        p.bodyPitch=-.22f; p.bodyRoll=.08f*std::sin(time*.6f);
-        p.armPitch={-.3f,-.3f}; p.armOut={.90f,.95f};
-        p.legPitch={-.35f,.50f}; p.legOut={.13f,.18f};
-        p.knee={-.12f,-.25f};
+        p.lift=pose::singularity::Lift+pose::singularity::BobAmplitude*std::sin(time*pose::singularity::BobFrequency);
+        p.bodyPitch=pose::singularity::BodyPitch;
+        p.bodyRoll=pose::singularity::RollAmplitude*std::sin(time*pose::singularity::RollFrequency);
+        p.armPitch=pose::singularity::ArmPitch; p.armOut=pose::singularity::ArmOut;
+        p.legPitch=pose::singularity::LegPitch; p.legOut=pose::singularity::LegOut;
+        p.knee=pose::singularity::Knee;
         return p;
     }
-    const float blend=std::clamp(movement,0.f,1.f),swing=std::sin(walkPhase*3.f)*blend;
-    p.lift=.018f*std::sin(time*2)+.035f*std::abs(swing);
-    p.armPitch={-.50f*swing,.50f*swing}; p.armOut={.06f,.06f};
-    p.legPitch={.55f*swing,-.55f*swing};
-    p.knee={-.70f*std::max(0.f,-swing),-.70f*std::max(0.f,swing)};
-    p.bodyRoll=.025f*swing;
+    // movement=0 で停止、1 で通常歩行。左右の符号を逆にして交互に振ります。
+    const float blend=std::clamp(movement,0.f,1.f),swing=std::sin(walkPhase*pose::walking::GaitFrequency)*blend;
+    p.lift=pose::walking::IdleLift*std::sin(time*pose::walking::IdleFrequency)+pose::walking::StepLift*std::abs(swing);
+    p.armPitch={-pose::walking::ArmSwing*swing,pose::walking::ArmSwing*swing};
+    p.armOut={pose::walking::ArmOut,pose::walking::ArmOut};
+    p.legPitch={pose::walking::LegSwing*swing,-pose::walking::LegSwing*swing};
+    p.knee={-pose::walking::KneeBend*std::max(0.f,-swing),-pose::walking::KneeBend*std::max(0.f,swing)};
+    p.bodyRoll=pose::walking::BodyRoll*swing;
     return p;
 }
 AvatarPose pixelationPose(float time) {
+    namespace pose=tuning::avatar::pixelation;
     AvatarPose p;
     p.fixed=true;
-    p.lift=.38f+.07f*std::sin(time*2.f);
-    p.bodyRoll=.025f*std::sin(time*1.5f);
-    p.armOut={.55f,.55f}; p.armPitch={-.35f,-.35f};
-    p.legPitch={-.07f,.10f}; p.legOut={.04f,.04f}; p.knee={-.04f,-.09f};
+    p.lift=pose::Lift+pose::BobAmplitude*std::sin(time*pose::BobFrequency);
+    p.bodyRoll=pose::RollAmplitude*std::sin(time*pose::RollFrequency);
+    p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch;
+    p.legPitch=pose::LegPitch; p.legOut=pose::LegOut; p.knee=pose::Knee;
     return p;
 }
 float pixelationMotionSpeed(unsigned level) {
-    return level>=3?3.f:(level>=1?1.6f:1.f);
+    namespace effect=tuning::pixelation;
+    return level>=3?effect::FinalMotionSpeed:(level>=1?effect::BoostedSpeed:effect::BaseSpeed);
 }
 float pixelationMotionTime(float elapsed,unsigned level) {
     if (!std::isfinite(elapsed) || elapsed<=0) return 0;
@@ -41,7 +51,8 @@ float pixelationMotionTime(float elapsed,unsigned level) {
         static_cast<double>(std::numeric_limits<float>::max())));
 }
 float pixelationActionSpeed(unsigned level) {
-    return level>=1?1.6f:1.f;
+    // Lv3 でも FinalMotionSpeed を使いません。弾・爆発・浮遊は Lv2 と同じです。
+    return level>=1?tuning::pixelation::BoostedSpeed:tuning::pixelation::BaseSpeed;
 }
 float pixelationActionTime(float elapsed,unsigned level) {
     if (!std::isfinite(elapsed) || elapsed<=0) return 0;
@@ -49,11 +60,12 @@ float pixelationActionTime(float elapsed,unsigned level) {
         static_cast<double>(std::numeric_limits<float>::max())));
 }
 AvatarPose equinoxPose(float time) {
+    namespace pose=tuning::avatar::equinox;
     AvatarPose p;
     p.fixed=true;
-    p.lift=.28f+.04f*std::sin(time*1.3f);
-    p.bodyRoll=.015f*std::sin(time*.8f);
-    p.armOut={.35f,.35f}; p.armPitch={-.15f,-.15f}; p.legOut={.03f,.03f};
+    p.lift=pose::Lift+pose::BobAmplitude*std::sin(time*pose::BobFrequency);
+    p.bodyRoll=pose::RollAmplitude*std::sin(time*pose::RollFrequency);
+    p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch; p.legOut=pose::LegOut;
     return p;
 }
 PixelationVolley pixelationVolley(float effectTime) {
@@ -63,7 +75,7 @@ PixelationVolley pixelationVolley(float effectTime) {
 }
 PixelationVolley pixelationVolley(float actionTime,float orbitTime,float shotOrbitTime) {
     constexpr float Pi=3.14159265359f;
-    // Bound exceptional clocks before converting a cycle index to an integer.
+    // 壊れた時計値を先に制限し、サイクル番号の整数変換を安全にします。
     const double time=std::isfinite(actionTime)?std::clamp(static_cast<double>(actionTime),0.,1.e12):0.;
     const double orbit=std::isfinite(orbitTime)?std::clamp(static_cast<double>(orbitTime),0.,1.e12):0.;
     const double launchOrbit=std::isfinite(shotOrbitTime)?std::clamp(static_cast<double>(shotOrbitTime),0.,1.e12):0.;
@@ -78,17 +90,19 @@ PixelationVolley pixelationVolley(float actionTime,float orbitTime,float shotOrb
     if (volley.impactCycle>=0) volley.impactAge=static_cast<float>(time-
         (static_cast<double>(volley.impactCycle)*PixelationVolleyPeriod+PixelationVolleyFlight));
     auto player=[](double clock,unsigned i) {
+        namespace effect=tuning::pixelation;
         constexpr double Pi=3.14159265358979323846;
-        const double angle=clock*.95+i*Pi+.3;
-        return EffectPoint{static_cast<float>(std::cos(angle)*2.45),
-            static_cast<float>(2.5+.36*std::sin(angle*1.4)),static_cast<float>(std::sin(angle)*2.45)};
+        const double angle=clock*effect::PlayerOrbitSpeed+i*Pi+effect::PlayerOrbitPhase;
+        return EffectPoint{static_cast<float>(std::cos(angle)*effect::PlayerOrbitRadius),
+            static_cast<float>(effect::PlayerHeight+effect::PlayerBobAmplitude*std::sin(angle*effect::PlayerBobFrequency)),
+            static_cast<float>(std::sin(angle)*effect::PlayerOrbitRadius)};
     };
     for (unsigned i=0;i<2;++i) {
         volley.players[i]=player(orbit,i);
         volley.launches[i]=player(launchOrbit,i);
         if (volley.flightProgress>=1) volley.balls[i]=volley.meeting;
         else {
-            const float u=volley.flightProgress,arc=.35f*std::sin(Pi*u);
+            const float u=volley.flightProgress,arc=tuning::pixelation::ProjectileArc*std::sin(Pi*u);
             const auto& from=volley.launches[i];
             volley.balls[i]={from.x+(volley.meeting.x-from.x)*u,
                 from.y+(volley.meeting.y-from.y)*u+arc,from.z+(volley.meeting.z-from.z)*u};

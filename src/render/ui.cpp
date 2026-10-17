@@ -1,4 +1,5 @@
 #include "render/renderer.hpp"
+#include "tuning/ui.hpp"
 #include "imgui.h"
 #include "backends/imgui_impl_dx11.h"
 #include "backends/imgui_impl_win32.h"
@@ -15,9 +16,11 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 namespace aura {
 namespace {
 constexpr float Pi = 3.14159265359f;
-const D2D1_COLOR_F White = D2D1::ColorF(.91f,.95f,.98f), Muted = D2D1::ColorF(.48f,.57f,.65f);
-const D2D1_COLOR_F Mint = D2D1::ColorF(.55f,.96f,.82f), Panel = D2D1::ColorF(.047f,.070f,.094f);
-const D2D1_COLOR_F Border = D2D1::ColorF(.13f,.19f,.23f);
+const D2D1_COLOR_F White = D2D1::ColorF(tuning::ui::Text[0],tuning::ui::Text[1],tuning::ui::Text[2]);
+const D2D1_COLOR_F Muted = D2D1::ColorF(tuning::ui::MutedText[0],tuning::ui::MutedText[1],tuning::ui::MutedText[2]);
+const D2D1_COLOR_F Mint = D2D1::ColorF(tuning::ui::Accent[0],tuning::ui::Accent[1],tuning::ui::Accent[2]);
+const D2D1_COLOR_F Panel = D2D1::ColorF(tuning::ui::Panel[0],tuning::ui::Panel[1],tuning::ui::Panel[2]);
+const D2D1_COLOR_F Border = D2D1::ColorF(tuning::ui::Border[0],tuning::ui::Border[1],tuning::ui::Border[2]);
 D2D1_COLOR_F tint(Color c, float alpha=1) { return {c.r,c.g,c.b,alpha}; }
 bool inside(float x,float y,float rx,float ry,float w,float h) { return x>=rx && x<rx+w && y>=ry && y<ry+h; }
 std::optional<std::string> chooseAsset(HWND owner,bool vrm) {
@@ -83,6 +86,8 @@ bool Renderer::wantsKeyboard() const {
 }
 DebugActions Renderer::takeDebugActions() { return std::exchange(debugActions_,{}); }
 void Renderer::debugUi(const Frame& f) {
+    // F1の開発パネル。ImGuiのボタンを押すとdebugActions_へ命令を積みます。
+    // 実際の抽選・保存はmain.cppのapplyDebugActions()が担当します。
     ImGui::SetCurrentContext(imguiContext_);
     ImGui_ImplDX11_NewFrame(); ImGui_ImplWin32_NewFrame(); ImGui::NewFrame();
     if (debugOpen_) {

@@ -1,13 +1,21 @@
 #include "render/renderer.hpp"
+#include "tuning/equinox.hpp"
 #include <d3dcompiler.h>
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
+
+// 読む順番: buildEquinox()で部品の配置 → createEquinox()で描画準備。
+// 普段の見た目調整はtuning/equinox.hppへ。下のHLSLは「各ピクセルを何色にするか」
+// をGPUで計算する専門部分なので、サイズ・位置・量の変更には触る必要がありません。
 
 namespace aura {
 using namespace DirectX;
 namespace {
 constexpr float Pi=3.14159265359f;
+namespace settings=tuning::equinox;
 constexpr char OrbShader[]=R"(
 cbuffer Camera:register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; };
 Texture2D lettering:register(t0); SamplerState linearClamp:register(s0);
@@ -24,8 +32,7 @@ float volumeNoise(float3 p) {
                 lerp(lerp(b.x,b.y,u.x),lerp(b.z,b.w,u.x),u.y),u.z);
 }
 float stormDensity(float3 p,float time) {
-    // Broad, softly interpolated volumes only. There are no ridged, absolute
-    // noise contours or fixed veins: the whole density field billows and moves.
+    // 雷雲の密度。細い筋模様を使わず、柔らかい立体ノイズ全体を時間で流動させる。
     p=p*2.35-float3(time*.17,time*.24,-time*.11);
     p+=float3(sin(p.y*.81+time*.43),cos(p.z*.73-time*.39),sin(p.x*.89+time*.31))*.38;
     float n=volumeNoise(p)*.68+volumeNoise(p*1.83+float3(13,7,19))*.32;
@@ -51,7 +58,7 @@ float4 main(Input i):SV_TARGET {
                              lettering.Sample(linearClamp,uv-float2(texel.x,0)).a),
                          max(lettering.Sample(linearClamp,uv+float2(0,texel.y)).a,
                              lettering.Sample(linearClamp,uv-float2(0,texel.y)).a));
-        bool black=((int)floor(time/.7825)&1)!=0;
+        bool black=((int)floor(time/EQUINOX_POLARITY_SECONDS)&1)!=0;
         float c=black?.009:.99,edge=black?.60:.025;
         float outAlpha=saturate(alpha+max(0,border-alpha)*.48);
         return float4(lerp(edge.xxx,c.xxx,alpha/max(.0001,outAlpha)),outAlpha);
@@ -67,8 +74,7 @@ float4 main(Input i):SV_TARGET {
         return float4(shade.xxx,alpha);
     }
     float z=sqrt(saturate(1-r*r));
-    // Integrate five layers through the sphere, with soft front-to-back
-    // absorption. Lighting belongs to moving cloud masses, not surface lines.
+    // 球の奥行きを5層に分け、手前の雲による光の吸収を重ねて煙の厚みを作る。
     float transmission=1,cloudLight=0,stepLength=2*z/5;
     [unroll]for(int layer=0;layer<5;++layer) {
         float3 p=float3(q,z-(layer+.5)*stepLength);
@@ -78,8 +84,7 @@ float4 main(Input i):SV_TARGET {
         cloudLight+=transmission*opacity*lighting;
         transmission*=1-opacity;
     }
-    // Brief, irregular double flashes illuminate the cloud from behind. The
-    // diffuse light is attenuated by the cloud, with only a fleeting fork inside.
+    // 不規則な二連フラッシュ。雲の背後の光と短い稲妻を組み合わせる。
     float clock=time*.71+style*.37,cycle=floor(clock),phase=frac(clock);
     float flash=(exp(-phase*65)+.65*exp(-abs(phase-.075)*100))*step(phase,.17);
     float2 flashPoint=float2(hash(float2(cycle,style+3)),hash(float2(cycle,style+11)))*.75-.375;
@@ -103,13 +108,21 @@ float4 main(Input i):SV_TARGET {
 })";
 }
 void Renderer::createEquinox() {
+    // 玉と名前の白黒切り替えは同じ半周期を使う。設定を変えてもずれないようGPUへ渡す。
+    // 小数を丸めて周期がずれないよう、floatを元に戻せる桁数で文字列にする。
+    std::array<char,32> polaritySeconds{};
+    const auto encoded=std::to_chars(polaritySeconds.data(),polaritySeconds.data()+polaritySeconds.size()-1,
+        settings::orbOrbitSeconds*.5f,std::chars_format::general,std::numeric_limits<float>::max_digits10);
+    if(encoded.ec!=std::errc{}) throw std::runtime_error("Equinox polarity number conversion");
+    const D3D_SHADER_MACRO definitions[]={{"EQUINOX_POLARITY_SECONDS",polaritySeconds.data()},{nullptr,nullptr}};
     ComPtr<ID3DBlob> shader,errors;
-    const HRESULT hr=D3DCompile(OrbShader,sizeof(OrbShader)-1,"equinox-orbs.hlsl",nullptr,nullptr,"main","ps_4_0",
+    const HRESULT hr=D3DCompile(OrbShader,sizeof(OrbShader)-1,"equinox-orbs.hlsl",definitions,nullptr,"main","ps_4_0",
         D3DCOMPILE_OPTIMIZATION_LEVEL3|D3DCOMPILE_ENABLE_STRICTNESS,0,&shader,&errors);
     if(FAILED(hr) && errors) throw std::runtime_error(static_cast<const char*>(errors->GetBufferPointer()));
     checked(hr,"Compile Equinox material");
     checked(device_->CreatePixelShader(shader->GetBufferPointer(),shader->GetBufferSize(),nullptr,&equinoxOrbPs_),"Equinox orb shader");
-    // Render system-font lettering into a small atlas at runtime; no font files are shipped.
+    // OSのフォントで文字を小さな画像（アトラス）へ描き、一枚の画像としてGPUに渡す。
+    // ここは文字の解像度の準備。画面に見える大きさは設定ヘッダー側で変更する。
     D3D11_TEXTURE2D_DESC desc{}; desc.Width=1024;desc.Height=512;desc.MipLevels=desc.ArraySize=1;
     desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;desc.Usage=D3D11_USAGE_DEFAULT;
     desc.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
@@ -138,56 +151,56 @@ void Renderer::createEquinox() {
     createCutscene();
 }
 void Renderer::buildEquinox(const Frame& source) {
+    // 毎フレーム、足元 → 霧 → 玉と軌跡 → 名前 → 粒子の順に描画部品を並べる。
     const auto& f=source;
     const float t=f.time,ox=f.avatarX,oz=f.avatarZ;
-    const Color silver{.83f,.88f,.98f},white{1.1f,1.1f,1.1f};
+    const Color silver=settings::silver,white=settings::white;
+    // pointはアバター中心の相対座標をワールド座標へ変換する小さな補助関数。
     auto point=[&](float x,float y,float z){return XMVectorSet(ox+x,y,oz+z,1);};
     auto line=[&](XMVECTOR a,XMVECTOR b,float width,float power){pixelLine(a,b,width,silver,power,f);};
     auto material=[&](FXMMATRIX model,unsigned style) {Instance v;XMStoreFloat4x4(&v.world,model);v.color={1,1,1,style+.95f};equinoxOrbs_.push_back(v);};
-    material(XMMatrixScaling(8.2f,8.2f,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,.19f,oz),2);
+    material(XMMatrixScaling(settings::floorDiameter,settings::floorDiameter,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorHeight,oz),2);
     const auto billboard=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw);
-    // The complete cropped glyph, including its diagonal, fits with a margin
-    // inside the innermost circle (radius 2.1), rather than filling the outer rim.
-    material(XMMatrixScaling(3.2f,3.2f,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,.240f,oz),3);
-    // Thick, softly glowing spiral bands with independently moving dark/bright filaments.
-    for(unsigned ring=0;ring<3;++ring) {
-        const float radius=2.1f+ring*.63f,height=.28f+ring*.07f;
-        for(unsigned i=0;i<128;++i) {
-            const float a=i*2*Pi/128+t*(ring%2?-.50f:.32f),b=a+2*Pi/128;
-            const float wave=.04f*std::sin(a*3+t);
+    // 床の「衡」は横長の文字画像から切り出し、内側の輪へ収まる正方形の面に置く。
+    material(XMMatrixScaling(settings::floorGlyphSize,settings::floorGlyphSize,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorGlyphHeight,oz),3);
+    // 足元の輪: 短い線分をつなぎ、少しずつ上下へ揺らして柔らかい輪にする。
+    for(unsigned ring=0;ring<settings::floorRingCount;++ring) {
+        const float radius=settings::floorInnerRadius+ring*settings::floorRingSpacing,height=settings::floorRingHeight+ring*settings::floorRingHeightStep;
+        for(unsigned i=0;i<settings::floorRingSegments;++i) {
+            const float a=i*2*Pi/settings::floorRingSegments+t*(ring%2?settings::floorOddRotation:settings::floorEvenRotation),b=a+2*Pi/settings::floorRingSegments;
+            const float wave=settings::floorWaveHeight*std::sin(a*3+t);
             line(point(std::cos(a)*radius,height+wave,std::sin(a)*radius),
                  point(std::cos(b)*radius,height+wave,std::sin(b)*radius),.17f+ring*.025f,.31f+ring*.12f);
         }
     }
-    for(unsigned i=0;i<22;++i) {
-        const float u=std::fmod(i*.618034f+t*.16f,1.f);
-        const float a=i*2.399963f+t*.22f+u*1.25f,r=4.1f*(1-u)+.15f;
+    // 霧: uが0→1へ進むほど外側から中心へ近づき、前後を薄くして自然に出入りさせる。
+    for(unsigned i=0;i<settings::mistCount;++i) {
+        const float u=std::fmod(i*.618034f+t*settings::mistTravelSpeed,1.f);
+        const float a=i*2.399963f+t*.22f+u*1.25f,r=settings::mistOuterRadius*(1-u)+.15f;
         const float size=.60f+.45f*(1-u),fade=std::sin(u*Pi);
-        pixelBillboard(ox+std::cos(a)*r,.30f+.52f*u,oz+std::sin(a)*r,size,size*.60f,silver,0,.24f*fade,f,a);
+        pixelBillboard(ox+std::cos(a)*r,.30f+.52f*u,oz+std::sin(a)*r,size,size*.60f,silver,0,settings::mistBrightness*fade,f,a);
     }
     struct Orb {float x,y,z;unsigned style;}; Orb orbs[2];
-    // Swap the two polarities together every half revolution: there is always
-    // exactly one white orb and one black orb, including the exchange frame.
-    const unsigned polarity=static_cast<unsigned>(std::floor(t/(1.565f*.5f)))&1u;
+    // 玉: 半周ごとに白黒を同時交換するので、必ず白1個・黒1個になる。
+    const unsigned polarity=static_cast<unsigned>(std::floor(t/(settings::orbOrbitSeconds*.5f)))&1u;
     for(unsigned side=0;side<2;++side) {
-        const float a=t*2*Pi/1.565f+side*Pi;
-        orbs[side]={std::cos(a)*2.25f,3.1f+.20f*std::sin(a),std::sin(a)*2.25f,side^polarity};
+        const float a=t*2*Pi/settings::orbOrbitSeconds+side*Pi;
+        orbs[side]={std::cos(a)*settings::orbOrbitRadius,settings::orbHeight+settings::orbBobHeight*std::sin(a),std::sin(a)*settings::orbOrbitRadius,side^polarity};
     }
-    // Each center light leaves its own short, gently waving wake along the past
-    // orbit. No segment connects the two orbs; each trail fades independently.
-    const float orbit=t*2*Pi/1.565f;
+    // 軌跡: 玉それぞれの過去の軌道を描く。玉同士を結ぶ糸は作らない。
+    const float orbit=t*2*Pi/settings::orbOrbitSeconds;
     for(unsigned side=0;side<2;++side) {
         auto wake=[&](float u) {
-            const float a=orbit+side*Pi-u*.30f*2*Pi/1.565f;
-            const float wave=std::sin(u*Pi*3)*std::sin(u*Pi),radius=2.25f+wave*.10f;
-            return point(std::cos(a)*radius,3.1f+.20f*std::sin(a)+wave*.24f,std::sin(a)*radius);
+            const float a=orbit+side*Pi-u*settings::wakeSeconds*2*Pi/settings::orbOrbitSeconds;
+            const float wave=std::sin(u*Pi*3)*std::sin(u*Pi),radius=settings::orbOrbitRadius+wave*settings::wakeRadialWave;
+            return point(std::cos(a)*radius,settings::orbHeight+settings::orbBobHeight*std::sin(a)+wave*settings::wakeVerticalWave,std::sin(a)*radius);
         };
-        for(unsigned j=0;j<32;++j) {
-            const float u=j/32.f,v=(j+1)/32.f,fade=std::pow(1-u,.65f);
-            line(wake(u),wake(v),.12f*(1-u*.45f),.68f*fade);
+        for(unsigned j=0;j<settings::wakeSegments;++j) {
+            const float u=j/static_cast<float>(settings::wakeSegments),v=(j+1)/static_cast<float>(settings::wakeSegments),fade=std::pow(1-u,.65f);
+            line(wake(u),wake(v),settings::wakeWidth*(1-u*.45f),settings::wakeBrightness*fade);
         }
-        for(unsigned dot=1;dot<=6;++dot) {
-            const float u=dot/7.f,fade=std::pow(1-u,.65f);
+        for(unsigned dot=1;dot<=settings::wakeDotCount;++dot) {
+            const float u=dot/static_cast<float>(settings::wakeDotCount+1),fade=std::pow(1-u,.65f);
             const auto p=wake(u);
             const float size=.065f+.035f*(1-u);
             pixelBillboard(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p),size,size,white,5,.80f*fade,f);
@@ -197,35 +210,33 @@ void Renderer::buildEquinox(const Frame& source) {
     const float eyeX=std::sin(f.cameraYaw),eyeZ=-std::cos(f.cameraYaw);
     if(orbs[0].x*eyeX+orbs[0].z*eyeZ>orbs[1].x*eyeX+orbs[1].z*eyeZ) std::swap(orbs[0],orbs[1]);
     for(const auto& orb:orbs) {
-        constexpr float radius=1.35f;
-        material(XMMatrixScaling(radius*2,radius*2,1)*XMMatrixRotationZ(-t*.14f)*billboard*XMMatrixTranslation(ox+orb.x,orb.y,oz+orb.z),orb.style);
+        constexpr float radius=settings::orbRadius;
+        material(XMMatrixScaling(radius*2,radius*2,1)*XMMatrixRotationZ(t*settings::orbFaceRotation)*billboard*XMMatrixTranslation(ox+orb.x,orb.y,oz+orb.z),orb.style);
         const auto face=billboard*XMMatrixTranslation(ox+orb.x,orb.y,oz+orb.z);
-        for(unsigned layer=0;layer<2;++layer) for(unsigned i=0;i<96;++i) {
-            const float a=i*2*Pi/96,b=(i+1)*2*Pi/96,r=radius*(layer?1.12f:1.025f);
+        for(unsigned layer=0;layer<2;++layer) for(unsigned i=0;i<settings::orbRimSegments;++i) {
+            const float a=i*2*Pi/settings::orbRimSegments,b=(i+1)*2*Pi/settings::orbRimSegments,r=radius*(layer?1.12f:1.025f);
             line(XMVector3TransformCoord(XMVectorSet(std::cos(a)*r,std::sin(a)*r,0,1),face),
                  XMVector3TransformCoord(XMVectorSet(std::cos(b)*r,std::sin(b)*r,0,1),face),.065f,orb.style?.25f:.40f);
         }
-        // Keep the outer halo weak enough to reveal the moving cloud density;
-        // excessive additive light here otherwise washes the white interior out.
-        pixelBillboard(ox+orb.x,orb.y,oz+orb.z,3.6f,3.6f,silver,0,orb.style?.16f:.20f,f);
+        // 外側の光は控えめにし、内部の雷雲の明暗が白飛びしないようにする。
+        pixelBillboard(ox+orb.x,orb.y,oz+orb.z,3.6f,3.6f,silver,0,orb.style?settings::blackHaloBrightness:settings::whiteHaloBrightness,f);
         if(orb.style) {
             pixelBillboard(ox+orb.x,orb.y,oz+orb.z,2.2f,2.2f,white,4,.90f,f);
             pixelBillboard(ox+orb.x,orb.y,oz+orb.z,5.2f,.55f,white,4,.65f,f);
         } else pixelBillboard(ox+orb.x,orb.y,oz+orb.z,4.3f,.25f,white,4,.16f,f);
     }
-    // These alpha materials are composited after bloom by drawEffects, so black
-    // lettering remains black instead of disappearing in an additive pass.
+    // 名前: 光をにじませる処理の後で重ねる。黒い文字を黒いまま読めるようにするため。
     auto title=[&](float y,float width,float height,unsigned style) {
         Instance v; XMStoreFloat4x4(&v.world,XMMatrixScaling(width,height,1)*billboard*XMMatrixTranslation(ox,y,oz));
         v.color={1,1,1,style+.95f}; equinoxTitles_.push_back(v);
     };
-    title(5.15f,4.0f,.54f,4);
-    title(5.52f,5.0f,.25f,5);
-    // Volumetric silver dust, irregular triangles and occasional four-point stars.
-    for(unsigned i=0;i<140;++i) {
-        const float a=i*2.399963f+t*.15f,r=2.f+2.f*(.5f+.5f*std::sin(i*4.3f));
-        const float y=.15f+std::fmod(i*.137f+t*.22f,5.5f),s=.03f+.07f*std::abs(std::sin(i*3.1f));
-        pixelBillboard(ox+std::cos(a)*r,y,oz+std::sin(a)*r,s,s,white,i%4?1:6,.40f,f,t*.35f+i);
+    title(settings::titleHeight,settings::titleWidth,settings::titleTextHeight,4);
+    title(settings::subtitleHeight,settings::subtitleWidth,settings::subtitleTextHeight,5);
+    // 粒子: 番号iから位置をばらけさせ、同じ配置が毎フレーム安定して再現されるようにする。
+    for(unsigned i=0;i<settings::dustCount;++i) {
+        const float a=i*2.399963f+t*settings::dustRotation,r=2.f+2.f*(.5f+.5f*std::sin(i*4.3f));
+        const float y=.15f+std::fmod(i*.137f+t*settings::dustRiseSpeed,5.5f),s=.03f+.07f*std::abs(std::sin(i*3.1f));
+        pixelBillboard(ox+std::cos(a)*r,y,oz+std::sin(a)*r,s,s,white,i%4?1:6,settings::dustBrightness,f,t*.35f+i);
         if(i%17==0) pixelBillboard(ox+std::cos(a)*r,y,oz+std::sin(a)*r,.4f,.4f,white,4,.45f,f);
     }
 }

@@ -1,4 +1,7 @@
 #include "render/renderer.hpp"
+#include "tuning/game.hpp"
+#include "tuning/world.hpp"
+#include "tuning/ui.hpp"
 #include "imgui.h"
 #include "backends/imgui_impl_dx11.h"
 #include <d3dcompiler.h>
@@ -13,13 +16,15 @@
 namespace aura {
 using namespace DirectX;
 namespace {
+// GPU初期化はこのファイル前半。画面の絵は world()、UIは ui.cpp を見てください。
+// 普段変えたい数値は src/tuning に集約し、DirectX用の頂点・バッファ設定と分けています。
 constexpr unsigned MaxInstances = 4096;
 constexpr float Pi = 3.14159265359f;
-const D2D1_COLOR_F White = D2D1::ColorF(.91f, .95f, .98f);
-const D2D1_COLOR_F Muted = D2D1::ColorF(.48f, .57f, .65f);
-const D2D1_COLOR_F Mint = D2D1::ColorF(.55f, .96f, .82f);
-const D2D1_COLOR_F Panel = D2D1::ColorF(.047f, .070f, .094f);
-const D2D1_COLOR_F Border = D2D1::ColorF(.13f, .19f, .23f);
+const D2D1_COLOR_F White = D2D1::ColorF(tuning::ui::Text[0],tuning::ui::Text[1],tuning::ui::Text[2]);
+const D2D1_COLOR_F Muted = D2D1::ColorF(tuning::ui::MutedText[0],tuning::ui::MutedText[1],tuning::ui::MutedText[2]);
+const D2D1_COLOR_F Mint = D2D1::ColorF(tuning::ui::Accent[0],tuning::ui::Accent[1],tuning::ui::Accent[2]);
+const D2D1_COLOR_F Panel = D2D1::ColorF(tuning::ui::Panel[0],tuning::ui::Panel[1],tuning::ui::Panel[2]);
+const D2D1_COLOR_F Border = D2D1::ColorF(tuning::ui::Border[0],tuning::ui::Border[1],tuning::ui::Border[2]);
 D2D1_COLOR_F tint(Color c, float alpha = 1) { return D2D1::ColorF(c.r, c.g, c.b, alpha); }
 bool inside(float x, float y, float rx, float ry, float w, float h) { return x >= rx && x < rx+w && y >= ry && y < ry+h; }
 constexpr char Shader[] = R"(
@@ -196,18 +201,23 @@ void Renderer::updateVrm(const Frame& f) {
     });
 }
 void Renderer::world(const Frame& f) {
+    // 1. 前フレームの絵を消す → 2. ステージ → 3. アバター → 4. 表示オーラ → 5. GPUへ送る。
+    // この関数は描画専用です。所持数・ロール回数を書き換えません。
     instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const bool desert=f.presentation.settings.biome==Biome::Desert;
     box(0,-.6f,0,StageHalfExtent*2,1.0f,StageHalfExtent*2,desert?Color{.38f,.23f,.13f}:Color{.095f,.15f,.18f});
-    box(0,-.12f,0,63.7f,.10f,63.7f,desert?Color{.68f,.46f,.24f}:Color{.17f,.28f,.29f});
-    for (int x=-15;x<=15;++x) for (int z=-15;z<=15;++z) {
-        const bool path=std::abs(x)<=1 || std::abs(z)<=1;
+    box(0,-.12f,0,StageHalfExtent*2-.3f,.10f,StageHalfExtent*2-.3f,desert?Color{.68f,.46f,.24f}:Color{.17f,.28f,.29f});
+    // 半径から枚数を計算するため、HalfExtentだけで床全体の広さを変更できます。
+    for (int x=-tuning::world::TileHalfCount;x<=tuning::world::TileHalfCount;++x)
+    for (int z=-tuning::world::TileHalfCount;z<=tuning::world::TileHalfCount;++z) {
+        const bool path=std::abs(x)<=tuning::world::PathHalfTiles || std::abs(z)<=tuning::world::PathHalfTiles;
         const float checker=((x+z)%2==0)?.035f:0;
         const Color c=desert?(path?Color{.72f+checker,.52f+checker,.31f+checker}:Color{.83f+checker,.64f+checker,.39f+checker}):
             (path?Color{.27f+checker,.34f+checker,.37f+checker}:Color{.14f+checker,.30f+checker,.26f+checker});
-        box(static_cast<float>(x)*2,-.03f,static_cast<float>(z)*2,1.98f,.12f,1.98f,c);
+        box(static_cast<float>(x)*tuning::world::TileSize,-.03f,static_cast<float>(z)*tuning::world::TileSize,
+            tuning::world::TileSize-.02f,.12f,tuning::world::TileSize-.02f,c);
     }
     // A low central plinth and its emissive frame are built from the same cube mesh.
     box(0,.07f,0,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:Color{.20f,.29f,.32f});
@@ -217,19 +227,22 @@ void Renderer::world(const Frame& f) {
     const float trees[][2]={{-6,-5},{6,5},{-6,6},{6,-6},{-8,1},{8,0},
         {-18,-18},{18,18},{-18,18},{18,-18},{-26,-8},{26,8},{-8,26},{8,-26},{-26,25},{26,-25},{-12,-24},{12,24}};
     for (const auto& p:trees) {
+        // 外周の木/サボテンもステージの広さに合わせて配置だけ拡大します。
+        const float treeX=p[0]*tuning::world::PropLayoutScale;
+        const float treeZ=p[1]*tuning::world::PropLayoutScale;
         if(desert) {
             const float tall=2.2f+.35f*std::sin(p[0]);
-            box(p[0],tall*.5f,p[1],.52f,tall,.50f,{.22f,.40f,.25f});
-            box(p[0]-.52f,1.15f,p[1],.62f,.30f,.32f,{.27f,.46f,.29f});
-            box(p[0]-.75f,1.45f,p[1],.30f,.85f,.32f,{.27f,.46f,.29f});
-            box(p[0]+.50f,.85f,p[1],.62f,.28f,.32f,{.25f,.43f,.27f});
-            box(p[0]+.74f,1.03f,p[1],.30f,.62f,.32f,{.25f,.43f,.27f});
-            box(p[0]+.8f,.15f,p[1]+.6f,.65f,.3f,.55f,{.55f,.37f,.24f},.3f);
+            box(treeX,tall*.5f,treeZ,.52f,tall,.50f,{.22f,.40f,.25f});
+            box(treeX-.52f,1.15f,treeZ,.62f,.30f,.32f,{.27f,.46f,.29f});
+            box(treeX-.75f,1.45f,treeZ,.30f,.85f,.32f,{.27f,.46f,.29f});
+            box(treeX+.50f,.85f,treeZ,.62f,.28f,.32f,{.25f,.43f,.27f});
+            box(treeX+.74f,1.03f,treeZ,.30f,.62f,.32f,{.25f,.43f,.27f});
+            box(treeX+.8f,.15f,treeZ+.6f,.65f,.3f,.55f,{.55f,.37f,.24f},.3f);
             continue;
         }
-        box(p[0],.85f,p[1],.4f,1.7f,.4f,{.21f,.20f,.18f});
-        box(p[0],2.2f,p[1],1.9f,1.4f,1.9f,{.13f,.35f,.29f});
-        box(p[0]-.1f,3.05f,p[1],1.3f,.6f,1.3f,{.21f,.45f,.34f});
+        box(treeX,.85f,treeZ,.4f,1.7f,.4f,{.21f,.20f,.18f});
+        box(treeX,2.2f,treeZ,1.9f,1.4f,1.9f,{.13f,.35f,.29f});
+        box(treeX-.1f,3.05f,treeZ,1.3f,.6f,1.3f,{.21f,.45f,.34f});
     }
     for (float x : {-4.f,4.f}) for (float z : {-3.f,3.f}) {
         box(x,.55f,z,.5f,1.1f,.5f,{.31f,.37f,.39f});
@@ -276,14 +289,14 @@ void Renderer::world(const Frame& f) {
     part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
     part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},identity);
     const float t=f.time*d.speed;
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && i<48;++i) {
-        const float a=i*2*Pi/48+t*.5f;
-        if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
-        else box(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && i<tuning::world::StandardRingSegments;++i) {
+        const float a=i*2*Pi/tuning::world::StandardRingSegments+t*tuning::world::StandardRingAngularSpeed;
+        if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
+        else box(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
     for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
-        const float y=.4f+std::fmod(u*3.3f+f.time*.38f,3.3f);
+        const float y=.4f+std::fmod(u*3.3f+f.time*tuning::world::StandardParticleRiseSpeed,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
         const float s=.045f+.045f*(.5f+.5f*std::sin(i*1.7f));
         if(floating && level>0) {
@@ -295,9 +308,9 @@ void Renderer::world(const Frame& f) {
         } else box(f.avatarX+std::cos(a)*r,y,f.avatarZ+std::sin(a)*r,s,s*1.8f,s,d.color,a,1);
     }
     if(floating && level>=2) {
-        const float radius=level==3?1.65f:.72f;
+        const float radius=level==3?tuning::world::LargeBlackHoleRadius:tuning::world::SmallBlackHoleRadius;
         XMStoreFloat4x4(&blackHole_.world,XMMatrixScaling(radius*2,radius*2,1)*XMMatrixRotationZ(.10f)*
-            XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw)*XMMatrixTranslation(f.avatarX,5.7f,f.avatarZ));
+            XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw)*XMMatrixTranslation(f.avatarX,tuning::world::BlackHoleHeight,f.avatarZ));
         blackHole_.color={1,1,1,1}; holeVisible_=true;
     }
     if(pixelated) buildPixelation(f);
@@ -306,12 +319,14 @@ void Renderer::world(const Frame& f) {
     if(nanally) buildNanally(f);
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
-    const float focus=breakthrough?3.3f:nanally?2.8f:holeVisible_?2.5f:(equinox?2.3f:(floating || pixelated?2.f:1.4f));
+    const float focus=breakthrough?tuning::game::CameraFocusBreakthrough:nanally?tuning::game::CameraFocusNanally:
+        holeVisible_?tuning::game::CameraFocusBlackHole:equinox?tuning::game::CameraFocusEquinox:
+        (floating || pixelated)?tuning::game::CameraFocusFloating:tuning::game::CameraFocusNormal;
     const float cameraDistance=f.cameraDistance;
     const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,
         focus+std::sin(f.cameraPitch)*cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,1);
     const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,focus,f.avatarZ,1),XMVectorSet(0,1,0,0));
-    const auto projection=XMMatrixPerspectiveFovLH(.80f,worldW/worldH,.1f,160);
+    const auto projection=XMMatrixPerspectiveFovLH(tuning::game::FieldOfView,worldW/worldH,.1f,160);
     const float tagHeight=nanally?6.8f:breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
     XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,tagHeight,f.avatarZ,1),
         viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));

@@ -86,3 +86,7 @@ Windows標準のDirect3D 11デバイスをBGRA対応で作成し、DXGIサーフ
 - [Microsoft: Direct2D / Direct3D interoperability](https://learn.microsoft.com/en-us/windows/win32/direct2d/direct2d-and-direct3d-interoperation-overview)
 - [Microsoft: Direct3D 11 instanced rendering](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-drawindexedinstanced)
 - [VRM公式: 座標系の変換](https://vrm.dev/api/coordinate/)
+
+## 改造用の設定と起動
+
+よく触る数値は`src/tuning`の8ヘッダーで共有します。C++を再ビルドして反映し、F1の保存設定とは区別します。各オーラのCPU描画処理から設定を参照し、Equinoxの白黒周期は同じ値をGPUにも渡します。`Develop.cmd`は試作用の`local-save`を使用し、コンパイル後にF1を開きます。標準値向けテストは通常の`build.cmd`とCIで維持します。詳しい編集手順は[改造ガイド](development-guide.md)を参照してください。
