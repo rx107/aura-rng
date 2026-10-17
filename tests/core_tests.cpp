@@ -373,6 +373,11 @@ int main(int argc, char** argv) {
             aura::pixelationMotionSpeed(3)==3 && aura::pixelationMotionSpeed(3)>aura::pixelationMotionSpeed(2),
             "Pixelation levels one and two run at 1.6x and level three accelerates the shared motion clock to 3x");
         check(aura::pixelationMotionTime(-1,1)==0 && aura::pixelationMotionTime(NAN,1)==0,"Invalid motion times do not propagate");
+        check(aura::pixelationActionTime(3,0)==3 && std::abs(aura::pixelationActionTime(3,2)-4.8f)<.00001f &&
+            aura::pixelationActionTime(3,2)==aura::pixelationActionTime(3,3) && aura::pixelationActionSpeed(2)==aura::pixelationActionSpeed(3) &&
+            aura::pixelationActionSpeed(3)<aura::pixelationMotionSpeed(3),
+            "Level three keeps volley and floating action at level two speed while the surrounding aura runs faster");
+        check(aura::pixelationActionTime(-1,3)==0 && aura::pixelationActionTime(NAN,3)==0,"Invalid action times do not propagate");
         auto pointDistance=[](const aura::EffectPoint& a,const aura::EffectPoint& b) {
             return std::sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z));
         };
@@ -394,6 +399,37 @@ int main(int argc, char** argv) {
         check(initialVolley.shotCycle==0 && initialVolley.impactCycle==-1 && initialVolley.impactAge==-1 &&
             lateVolley.shotCycle==1 && lateVolley.impactCycle==0 && lateVolley.impactAge>1,
             "Volley shot and impact cycle IDs support synchronized one-shot audio events");
+        for(unsigned cycle=0;cycle<12;++cycle) {
+            const float actionLaunch=cycle*aura::PixelationVolleyPeriod;
+            const float elapsedLaunch=actionLaunch/aura::pixelationActionSpeed(3);
+            const float orbitLaunch=aura::pixelationMotionTime(elapsedLaunch,3);
+            const float actionNow=actionLaunch+.0001f;
+            const auto fastLaunch=aura::pixelationVolley(actionNow,aura::pixelationMotionTime(actionNow/aura::pixelationActionSpeed(3),3),orbitLaunch);
+            check(fastLaunch.flightVisible && fastLaunch.shotCycle==cycle &&
+                pointDistance(fastLaunch.players[0],fastLaunch.launches[0])<.001f &&
+                pointDistance(fastLaunch.players[1],fastLaunch.launches[1])<.001f,
+                "Slow volley launches coincide with the actual fast-orbiting players");
+            const float actionImpact=actionLaunch+aura::PixelationVolleyFlight+.0001f;
+            const float elapsedImpact=actionImpact/aura::pixelationActionSpeed(3);
+            const auto levelThree=aura::pixelationVolley(actionImpact,aura::pixelationMotionTime(elapsedImpact,3),orbitLaunch);
+            const auto levelTwo=aura::pixelationVolley(actionImpact);
+            check(levelThree.shotCycle==levelTwo.shotCycle && levelThree.impactCycle==levelTwo.impactCycle &&
+                levelThree.flightProgress==levelTwo.flightProgress && levelThree.impactAge==levelTwo.impactAge &&
+                pointDistance(levelThree.balls[0],levelThree.meeting)==0 && pointDistance(levelThree.balls[1],levelThree.meeting)==0,
+                "Both levels collide simultaneously and share the same explosion age despite different orbit clocks");
+        }
+        const float launchClock=aura::PixelationVolleyPeriod*2;
+        const auto beforeSpeedSwitch=aura::pixelationVolley(launchClock+.24f,launchClock+.24f,launchClock);
+        const auto afterSpeedSwitch=aura::pixelationVolley(launchClock+.40f,launchClock+.54f,launchClock);
+        check(pointDistance(beforeSpeedSwitch.launches[0],afterSpeedSwitch.launches[0])==0 &&
+            pointDistance(beforeSpeedSwitch.launches[1],afterSpeedSwitch.launches[1])==0 &&
+            afterSpeedSwitch.flightProgress>beforeSpeedSwitch.flightProgress &&
+            pointDistance(beforeSpeedSwitch.players[0],afterSpeedSwitch.players[0])>.1f,
+            "Keeping the shot orbit anchor fixed preserves both projectile origins across a mid-flight level switch");
+        const auto slowPose=aura::pixelationPose(aura::pixelationActionTime(2.4f,2));
+        const auto fastAuraPose=aura::pixelationPose(aura::pixelationActionTime(2.4f,3));
+        check(slowPose.lift==fastAuraPose.lift && slowPose.bodyRoll==fastAuraPose.bodyRoll && slowPose.armPitch==fastAuraPose.armPitch,
+            "Avatar floating has exactly the same phase at levels two and three");
         check(aura::StageHalfExtent==32 && aura::StageWalkLimit>30,"Stage width is four times the original 16 units");
         const auto starA=aura::singularityStar(.5f,0,160),starB=aura::singularityStar(2.5f,0,160),starC=aura::singularityStar(4.5f,0,160);
         auto distance=[](const aura::AbsorbedStar& s){return std::sqrt(s.x*s.x+s.z*s.z+(s.y-5.7f)*(s.y-5.7f));};

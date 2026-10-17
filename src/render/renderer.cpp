@@ -196,7 +196,7 @@ void Renderer::updateVrm(const Frame& f) {
     });
 }
 void Renderer::world(const Frame& f) {
-    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); holeVisible_=false;
+    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const bool desert=f.presentation.settings.biome==Biome::Desert;
@@ -243,7 +243,8 @@ void Renderer::world(const Frame& f) {
     const bool breakthrough=d.id=="breakthrough";
     pixelationVisible_=pixelated; equinoxVisible_=equinox; breakthroughVisible_=breakthrough;
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
-    const auto pose=pixelated?pixelationPose(effectTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
+    const float actionTime=f.actionTime>=0?f.actionTime:pixelationActionTime(f.time,pixelated?level:0);
+    const auto pose=pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
     auto base=XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift,f.avatarZ);
     auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,FXMMATRIX transform) {
@@ -360,7 +361,7 @@ void Renderer::draw(const Frame& frame,bool present) {
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     if(frame.cutsceneTime>=0) {
-        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear();
+        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear();
         pixelationVisible_=equinoxVisible_=breakthroughVisible_=holeVisible_=false;
         if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame); else drawCutscene(frame);
     } else world(frame);

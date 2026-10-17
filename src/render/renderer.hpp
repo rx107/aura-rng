@@ -31,6 +31,7 @@ struct Frame {
     float effectTime{-1},cutsceneTime{-1};
     CutsceneKind cutsceneKind{CutsceneKind::Equinox};
     std::string discordStatus;
+    float actionTime{-1},shotOrbitTime{-1};
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
@@ -47,7 +48,7 @@ public:
     std::size_t instanceCount() const { return instances_.size()+starInstances_.size(); }
     std::size_t starCount() const { return starInstances_.size(); }
     std::size_t pixelationCount() const { return pixelationVisible_?pixelationInstances_.size():0; }
-    std::size_t equinoxCount() const { return equinoxVisible_?pixelationInstances_.size()+equinoxOrbs_.size():0; }
+    std::size_t equinoxCount() const { return equinoxVisible_?pixelationInstances_.size()+equinoxOrbs_.size()+equinoxTitles_.size():0; }
     std::size_t breakthroughCount() const { return breakthroughVisible_?pixelationInstances_.size():0; }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
@@ -147,6 +148,7 @@ private:
     std::vector<Instance> starInstances_;
     std::vector<Instance> pixelationInstances_;
     std::vector<Instance> equinoxOrbs_;
+    std::vector<Instance> equinoxTitles_;
     ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
     ComPtr<ID3D11BlendState> effectBlend_;
     ComPtr<ID3D11BlendState> additiveBlend_;

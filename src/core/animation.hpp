@@ -14,6 +14,8 @@ AvatarPose pixelationPose(float time);
 AvatarPose equinoxPose(float time);
 float pixelationMotionSpeed(unsigned level);
 float pixelationMotionTime(float elapsed,unsigned level);
+float pixelationActionSpeed(unsigned level);
+float pixelationActionTime(float elapsed,unsigned level);
 struct EffectPoint { float x{},y{},z{}; };
 inline constexpr float PixelationVolleyPeriod=1.6f;
 inline constexpr float PixelationVolleyFlight=.64f;
@@ -26,6 +28,9 @@ struct PixelationVolley {
 };
 // Coordinates are relative to the avatar. Both projectiles share one flight phase.
 PixelationVolley pixelationVolley(float effectTime);
+// Orbit and action clocks can run independently. Keep shotOrbitTime fixed for
+// the current volley so changing level during flight never moves its origin.
+PixelationVolley pixelationVolley(float actionTime,float orbitTime,float shotOrbitTime);
 struct AbsorbedStar { float x{},y{},z{},size{}; };
 AbsorbedStar singularityStar(float time,unsigned index,unsigned count);
 }

@@ -57,7 +57,7 @@ void Renderer::particleStar(float x,float y,float z,float size,Color color,float
     star.color={color.r,color.g,color.b,1.1f}; starInstances_.push_back(star);
 }
 void Renderer::drawEffects(const Frame&) {
-    if(starInstances_.empty() && !holeVisible_ && pixelationInstances_.empty() && equinoxOrbs_.empty()) return;
+    if(starInstances_.empty() && !holeVisible_ && pixelationInstances_.empty() && equinoxOrbs_.empty() && equinoxTitles_.empty()) return;
     context_->IASetInputLayout(layout_.Get()); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context_->VSSetShader(vs_.Get(),nullptr,0); context_->PSSetShader(ps_.Get(),nullptr,0);
     ID3D11Buffer* cb=constants_.Get(); context_->VSSetConstantBuffers(0,1,&cb); context_->PSSetConstantBuffers(0,1,&cb);
@@ -93,6 +93,17 @@ void Renderer::drawEffects(const Frame&) {
         context_->OMSetDepthStencilState(effectDepth_.Get(),0);
         draw(holeVertices_.Get(),holeIndices_.Get(),6,pixelationInstances_.data(),pixelationInstances_.size());
         compositePixelation();
+    }
+    // Composite alpha lettering after bloom so a black Equinox title stays black.
+    if(!equinoxTitles_.empty()) {
+        ID3D11RenderTargetView* target=target_.Get(); context_->OMSetRenderTargets(1,&target,depth_.Get());
+        context_->IASetInputLayout(layout_.Get()); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context_->VSSetShader(vs_.Get(),nullptr,0); context_->PSSetShader(equinoxOrbPs_.Get(),nullptr,0);
+        ID3D11Buffer* camera=constants_.Get(); context_->VSSetConstantBuffers(0,1,&camera); context_->PSSetConstantBuffers(0,1,&camera);
+        ID3D11ShaderResourceView* letters=equinoxLettering_.Get(); context_->PSSetShaderResources(0,1,&letters);
+        ID3D11SamplerState* sampler=bloomSampler_.Get(); context_->PSSetSamplers(0,1,&sampler);
+        context_->OMSetDepthStencilState(effectDepth_.Get(),0); context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
+        draw(holeVertices_.Get(),holeIndices_.Get(),6,equinoxTitles_.data(),equinoxTitles_.size());
     }
 }
 }

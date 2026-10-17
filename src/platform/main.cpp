@@ -101,7 +101,7 @@ public:
         const auto audioStatus=cutsceneActive()?(cutsceneAudioAvailable_?std::string("Cutscene: ")+cutsceneMusic_.status():std::string("Cutscene / visual only"))+
             " / Aura BGM: "+music_.status():music_.status();
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
-            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status()};
+            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime()};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -145,6 +145,15 @@ private:
     bool cutsceneActive() const { return cutsceneTime_>=0; }
     float effectTime() const {
         return opts_.smoke?aura::pixelationMotionTime(time_,presentation_.level(progress_,roller_.catalog())):effectClock_;
+    }
+    float actionTime() const {
+        return opts_.smoke?aura::pixelationActionTime(time_,presentation_.level(progress_,roller_.catalog())):actionClock_;
+    }
+    float shotOrbitTime() const {
+        if(!opts_.smoke) return shotOrbitClock_;
+        const auto level=presentation_.level(progress_,roller_.catalog());
+        const float cycleStart=std::floor(actionTime()/aura::PixelationVolleyPeriod)*aura::PixelationVolleyPeriod;
+        return cycleStart*aura::pixelationMotionSpeed(level)/aura::pixelationActionSpeed(level);
     }
     std::filesystem::path audioFile(const std::string& custom,const wchar_t* filename) const {
         if(!custom.empty()) return std::filesystem::path(aura::widen(custom));
@@ -270,8 +279,17 @@ private:
         discord_.update(!opts_.smoke && s.discordEnabled,s.discordApplicationId,s.username,progress_.rolls,dt);
         const auto shown=presentation_.shown(progress_); const auto& id=roller_.catalog()[shown].id;
         const auto level=presentation_.level(progress_,roller_.catalog());
-        if(shown!=effectAura_) {effectAura_=shown; effectClock_=0; sfxBaseline_=false;}
+        if(shown!=effectAura_) {effectAura_=shown; effectClock_=actionClock_=shotOrbitClock_=0; shotOrbitCycle_=-1; sfxBaseline_=false;}
         effectClock_+=dt*(id=="pixelation"?aura::pixelationMotionSpeed(level):1.f);
+        actionClock_+=dt*(id=="pixelation"?aura::pixelationActionSpeed(level):1.f);
+        if(id=="pixelation") {
+            const auto cycle=static_cast<std::int64_t>(std::floor(actionClock_/aura::PixelationVolleyPeriod));
+            if(cycle!=shotOrbitCycle_) {
+                const float age=actionClock_-static_cast<float>(cycle)*aura::PixelationVolleyPeriod;
+                shotOrbitClock_=effectClock_-age*aura::pixelationMotionSpeed(level)/aura::pixelationActionSpeed(level);
+                shotOrbitCycle_=cycle;
+            }
+        }
         bool musicActive=false;
         if(!cutsceneActive() && id=="singularity") {audioPath_=audioFile(s.bgmPath,L"Tides_of_the_Outer_Reach.mp3"); musicActive=true;}
         if(!cutsceneActive() && id=="pixelation" && level>=1) {
@@ -285,7 +303,7 @@ private:
             cutsceneKind_==aura::CutsceneKind::Breakthrough?aura::BreakthroughAudioStart:0.f,
             cutsceneKind_==aura::CutsceneKind::Breakthrough?aura::BreakthroughCutsceneDuration:0.f);
         if(!cutsceneActive() && id=="pixelation" && level>=2) {
-            const auto volley=aura::pixelationVolley(effectTime());
+            const auto volley=aura::pixelationVolley(actionTime());
             if(sfxBaseline_) {
                 if(volley.shotCycle>lastShotCycle_) sfx_.playShot(s.volume);
                 if(volley.impactCycle>=0 && volley.impactCycle>lastImpactCycle_) sfx_.playImpact(s.volume);
@@ -464,9 +482,11 @@ private:
         if(std::abs(effectClock_-switchingClock)>.0001f) throw std::runtime_error("Pixelation level switch reset its motion clock");
         update(.1f);
         if(std::abs(effectClock_-switchingClock-.16f)>.0001f) throw std::runtime_error("Pixelation accelerated motion clock failed");
-        speed.pixelationLevel=3; applyDebugActions(speed); const float finalClock=effectClock_; update(.1f);
+        speed.pixelationLevel=3; applyDebugActions(speed); const float finalClock=effectClock_,finalAction=actionClock_,shotBeforeSwitch=shotOrbitClock_; update(.1f);
         if(std::abs(effectClock_-finalClock-.1f*aura::pixelationMotionSpeed(3))>.0001f || aura::pixelationMotionSpeed(3)<=aura::pixelationMotionSpeed(2))
             throw std::runtime_error("Pixelation final level did not accelerate further");
+        if(std::abs(actionClock_-finalAction-.16f)>.0001f || std::abs(shotOrbitClock_-shotBeforeSwitch)>.0001f)
+            throw std::runtime_error("Pixelation final action speed / launch anchor changed");
         for(unsigned level=0;level<=3;++level) {
             aura::DebugActions effect; effect.pixelationLevel=level; auto_=true; applyDebugActions(effect);
             time_=.25f; update(.4f); render(false);
@@ -511,6 +531,15 @@ private:
             time_=i/30.f;
             const auto suffix=L"-volley3-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
         }
+        volleyLevel.pixelationLevel=2; applyDebugActions(volleyLevel); time_=.46f; render(false); captureExtra(L"-pixelation-matched-level2");
+        const auto matchedPose2=aura::pixelationPose(frame().actionTime);
+        const auto matchedVolley2=aura::pixelationVolley(frame().actionTime,frame().effectTime,frame().shotOrbitTime);
+        volleyLevel.pixelationLevel=3; applyDebugActions(volleyLevel); render(false); captureExtra(L"-pixelation-matched-level3");
+        const auto matchedPose3=aura::pixelationPose(frame().actionTime);
+        const auto matchedVolley3=aura::pixelationVolley(frame().actionTime,frame().effectTime,frame().shotOrbitTime);
+        if(matchedPose2.lift!=matchedPose3.lift || matchedPose2.bodyRoll!=matchedPose3.bodyRoll ||
+            matchedVolley2.impactAge!=matchedVolley3.impactAge || matchedVolley2.flightProgress!=matchedVolley3.flightProgress)
+            throw std::runtime_error("Pixelation Lv2 / Lv3 action timing diverged");
         aura::DebugActions commonAudio; commonAudio.preview=0; applyDebugActions(commonAudio); update(.6f);
         if(music_.playing()) throw std::runtime_error("Pixelation music did not stop on another aura");
         volleyLevel.pixelationLevel=0; applyDebugActions(volleyLevel); update(.6f);
@@ -557,6 +586,10 @@ private:
             const auto suffix=L"-equinox-polarity-"+std::to_wstring(static_cast<int>(second*100)); captureExtra(suffix.c_str());
         }
         pitch_=.75f; render(false); captureExtra(L"-equinox-floor"); pitch_=.27f;
+        if(!opts_.warp && !opts_.capture.empty()) for(int i=0;i<40;++i) {
+            time_=i*.10f;
+            const auto suffix=L"-equinox-cloud-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+        }
         if(!opts_.warp && !opts_.capture.empty()) {
             for(int i=0;i<36;++i) {
                 time_=i*(1.565f/36);
@@ -629,6 +662,10 @@ private:
         if(auto_ || roller_.tickets(breakthrough) || !renderer_->breakthroughCount() || renderer_->pixelationCount() || renderer_->equinoxCount())
             throw std::runtime_error("BreakThrough preview / effect isolation failed");
         const auto breakthroughInstances=renderer_->breakthroughCount();
+        for(float second:{.8f,2.6f}) {
+            time_=second; render(false);
+            const auto suffix=L"-breakthrough-float-"+std::to_wstring(static_cast<int>(second*10)); captureExtra(suffix.c_str());
+        }
         const auto breakthroughBegin=Clock::now();
         for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
         const double meanBreakthroughMs=std::chrono::duration<double,std::milli>(Clock::now()-breakthroughBegin).count()/60;
@@ -788,7 +825,7 @@ private:
             out<<"Pixelation: PASS / preview-only, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
                <<"Pixelation instances: "<<pixelationInstances<<"\nMean Pixelation frame submission time: "<<meanPixelationMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
-            out<<"Pixelation levels: PASS / 0..3, motion speed, synchronized collision, one sound event per cycle, preview/level baseline reset\n"
+            out<<"Pixelation levels: PASS / 0..3, split motion/action clocks; Lv2/Lv3 matching collision/explosion/float timing, fixed launch anchor during level switch; synchronized collision, one sound event per cycle\n"
                <<"Pixelation level instances: "<<pixelationLevelInstances[0]<<", "<<pixelationLevelInstances[1]<<", "<<pixelationLevelInstances[2]<<", "<<pixelationLevelInstances[3]
                <<"\nSFX: "<<sfx_.shotCount()<<" shots / "<<sfx_.impactCount()<<" impacts / "<<sfx_.status()<<"\n"
                <<"Equinox: PASS / preview, clean switching, no progress/history mutation\n"
@@ -906,7 +943,8 @@ private:
     bool cutsceneDebugWasOpen_{},stopCutsceneRequested_{},sfxBaseline_{};
     bool cutsceneAudioAvailable_{};
     aura::CutsceneKind cutsceneKind_{aura::CutsceneKind::Equinox};
-    float effectClock_{},cutsceneTime_{-1};
+    float effectClock_{},actionClock_{},shotOrbitClock_{},cutsceneTime_{-1};
+    std::int64_t shotOrbitCycle_{-1};
     std::size_t effectAura_{std::numeric_limits<std::size_t>::max()};
     std::int64_t lastShotCycle_{-1},lastImpactCycle_{-1};
     unsigned pendingWidth_{},pendingHeight_{},fpsFrames_{};

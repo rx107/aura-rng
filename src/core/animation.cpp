@@ -40,6 +40,14 @@ float pixelationMotionTime(float elapsed,unsigned level) {
     return static_cast<float>(std::min(static_cast<double>(elapsed)*pixelationMotionSpeed(level),
         static_cast<double>(std::numeric_limits<float>::max())));
 }
+float pixelationActionSpeed(unsigned level) {
+    return level>=1?1.6f:1.f;
+}
+float pixelationActionTime(float elapsed,unsigned level) {
+    if (!std::isfinite(elapsed) || elapsed<=0) return 0;
+    return static_cast<float>(std::min(static_cast<double>(elapsed)*pixelationActionSpeed(level),
+        static_cast<double>(std::numeric_limits<float>::max())));
+}
 AvatarPose equinoxPose(float time) {
     AvatarPose p;
     p.fixed=true;
@@ -49,9 +57,16 @@ AvatarPose equinoxPose(float time) {
     return p;
 }
 PixelationVolley pixelationVolley(float effectTime) {
+    const double time=std::isfinite(effectTime)?std::clamp(static_cast<double>(effectTime),0.,1.e12):0.;
+    const auto cycle=std::floor(time/PixelationVolleyPeriod);
+    return pixelationVolley(static_cast<float>(time),static_cast<float>(time),static_cast<float>(cycle*PixelationVolleyPeriod));
+}
+PixelationVolley pixelationVolley(float actionTime,float orbitTime,float shotOrbitTime) {
     constexpr float Pi=3.14159265359f;
     // Bound exceptional clocks before converting a cycle index to an integer.
-    const double time=std::isfinite(effectTime)?std::clamp(static_cast<double>(effectTime),0.,1.e12):0.;
+    const double time=std::isfinite(actionTime)?std::clamp(static_cast<double>(actionTime),0.,1.e12):0.;
+    const double orbit=std::isfinite(orbitTime)?std::clamp(static_cast<double>(orbitTime),0.,1.e12):0.;
+    const double launchOrbit=std::isfinite(shotOrbitTime)?std::clamp(static_cast<double>(shotOrbitTime),0.,1.e12):0.;
     const auto cycle=static_cast<std::int64_t>(std::floor(time/PixelationVolleyPeriod));
     const double shotTime=static_cast<double>(cycle)*PixelationVolleyPeriod;
     PixelationVolley volley;
@@ -69,8 +84,8 @@ PixelationVolley pixelationVolley(float effectTime) {
             static_cast<float>(2.5+.36*std::sin(angle*1.4)),static_cast<float>(std::sin(angle)*2.45)};
     };
     for (unsigned i=0;i<2;++i) {
-        volley.players[i]=player(time,i);
-        volley.launches[i]=player(shotTime,i);
+        volley.players[i]=player(orbit,i);
+        volley.launches[i]=player(launchOrbit,i);
         if (volley.flightProgress>=1) volley.balls[i]=volley.meeting;
         else {
             const float u=volley.flightProgress,arc=.35f*std::sin(Pi*u);

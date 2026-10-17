@@ -95,6 +95,8 @@ float4 main(Input i):SV_TARGET {
             else if(n<3){center=float3(side*2.15,1.95,.35);bounds=float3(.35,1.95,.32);tilt=-side*.42;}
             else if(n<5){center=float3(side*1.35,3.35,1.25);bounds=float3(.24,1.75,.25);tilt=-side*.10;}
             else {center=float3(side*.96,2.2,-.20);bounds=float3(.22,1.15,.25);tilt=side*.13;}
+            // Match the independently phased, 3.6-4.65 second world monolith drift.
+            center.y+=(.14+.02*(n%3))*sin(t*(6.28318530718/(3.6+.35*(n%4)))+n*.91);
             float3 localEye=eye-center,localRay=rd;
             localEye.xy=rot(localEye.xy,-tilt);localRay.xy=rot(localRay.xy,-tilt);
             float hit=hitBox(localEye,localRay,bounds);
@@ -224,7 +226,11 @@ void Renderer::buildBreakthrough(const Frame& f) {
         {-.96f,2.2f,-.20f,.44f,2.3f,.50f,-.13f,.10f},{.96f,2.2f,-.20f,.44f,2.3f,.50f,.13f,-.10f}};
     for(unsigned n=0;n<std::size(towers);++n) {
         const auto c=towers[n];
-        const auto model=XMMatrixRotationY(c.turn)*XMMatrixRotationZ(c.tilt)*XMMatrixTranslation(ox+c.x,c.y,oz+c.z);
+        const float amplitude=.14f+.02f*static_cast<float>(n%3);
+        const float period=3.6f+.35f*static_cast<float>(n%4);
+        const float drift=amplitude*std::sin(t*(2*Pi/period)+static_cast<float>(n)*.91f);
+        // Glass, core, attached fragments and cap glow all share this moving model.
+        const auto model=XMMatrixRotationY(c.turn)*XMMatrixRotationZ(c.tilt)*XMMatrixTranslation(ox+c.x,c.y+drift,oz+c.z);
         // The opaque core supplies the dark negative space between glass details.
         block(XMMatrixScaling(c.width*.73f,c.height*.96f,c.depth*.72f)*model,{.018f,.022f,.052f});
         for(unsigned face=0;face<4;++face) {
@@ -298,13 +304,14 @@ void Renderer::buildBreakthrough(const Frame& f) {
         if(i%21==0)pixelBillboard(x,.16f+phase,z,.30f,.30f,silver,4,fade*.46f,f);
     }
     const auto plate=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw)*
-        XMMatrixTranslation(ox+std::sin(f.cameraYaw)*1.8f,2.85f,oz-std::cos(f.cameraYaw)*1.8f);
+        XMMatrixTranslation(ox+std::sin(f.cameraYaw)*1.8f,3.55f,oz-std::cos(f.cameraYaw)*1.8f);
     // Keep the narrow serif plate ahead of the avatar and darken only its backing.
     // A tiny opaque card preserves readable negative space under the shared bloom.
     block(XMMatrixScaling(3.55f,.40f,.025f)*XMMatrixTranslation(0,0,.035f)*plate,{.002f,.003f,.008f});
     const Color plateInk{.62f,.66f,.83f};
     pixelQuad(XMMatrixScaling(3.30f,.35f,1)*plate,plateInk,8,.78f);
-    pixelQuad(XMMatrixScaling(1.8f,.18f,1)*XMMatrixTranslation(0,.28f,0)*plate,silver,9,.67f);
+    // The small echo sits below the title, leaving the upper star at y=3.9 clear.
+    pixelQuad(XMMatrixScaling(1.8f,.14f,1)*XMMatrixTranslation(0,-.26f,0)*plate,silver,9,.67f);
     for(float y:{-.17f,.17f})line(XMVector3TransformCoord(XMVectorSet(-1.7f,y,0,1),plate),
         XMVector3TransformCoord(XMVectorSet(1.7f,y,0,1),plate),.021f,.65f);
 }

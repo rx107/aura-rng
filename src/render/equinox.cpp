@@ -15,6 +15,25 @@ struct Input { float4 p:SV_POSITION; float3 n:NORMAL; float4 color:COLOR0; float
 float hash(float2 p) { return frac(sin(dot(p,float2(127.1,311.7)))*43758.5453); }
 float noise(float2 p) { float2 v=floor(p),u=frac(p); u=u*u*(3-2*u); return lerp(lerp(hash(v),hash(v+float2(1,0)),u.x),lerp(hash(v+float2(0,1)),hash(v+1),u.x),u.y); }
 float cloud(float2 p) { return noise(p)*.53+noise(p*2.07+7)*.28+noise(p*4.1-9)*.13+noise(p*8.3)*.06; }
+float volumeHash(float3 p) { return frac(sin(dot(p,float3(127.1,311.7,74.7)))*43758.5453); }
+float volumeNoise(float3 p) {
+    float3 v=floor(p),u=frac(p);u=u*u*(3-2*u);
+    float4 a=float4(volumeHash(v),volumeHash(v+float3(1,0,0)),volumeHash(v+float3(0,1,0)),volumeHash(v+float3(1,1,0)));
+    float4 b=float4(volumeHash(v+float3(0,0,1)),volumeHash(v+float3(1,0,1)),volumeHash(v+float3(0,1,1)),volumeHash(v+1));
+    return lerp(lerp(lerp(a.x,a.y,u.x),lerp(a.z,a.w,u.x),u.y),
+                lerp(lerp(b.x,b.y,u.x),lerp(b.z,b.w,u.x),u.y),u.z);
+}
+float stormDensity(float3 p,float time) {
+    // Broad, softly interpolated volumes only. There are no ridged, absolute
+    // noise contours or fixed veins: the whole density field billows and moves.
+    p=p*2.35-float3(time*.17,time*.24,-time*.11);
+    p+=float3(sin(p.y*.81+time*.43),cos(p.z*.73-time*.39),sin(p.x*.89+time*.31))*.38;
+    float n=volumeNoise(p)*.68+volumeNoise(p*1.83+float3(13,7,19))*.32;
+    return smoothstep(.29,.74,n);
+}
+float segmentDistance(float2 p,float2 a,float2 b) {
+    float2 d=b-a;return length(p-a-d*saturate(dot(p-a,d)/dot(d,d)));
+}
 float4 main(Input i):SV_TARGET {
     float2 q=i.local.xy*2; float r=length(q),a=atan2(q.y,q.x),time=eyeAndTime.w;
     int style=(int)floor(i.color.a);
@@ -23,6 +42,19 @@ float4 main(Input i):SV_TARGET {
         float alpha=lettering.Sample(linearClamp,uv).a;
         float c=.82+.10*sin(time*.8);
         return float4(c,c,c,alpha);
+    }
+    if(style==4 || style==5) {
+        float2 uv=float2(q.x*.5+.5,(.5-q.y*.5+(style==5?2:0))*.25);
+        float alpha=lettering.Sample(linearClamp,uv).a;
+        float2 texel=float2(1.5/1024.,1.5/512.);
+        float border=max(max(lettering.Sample(linearClamp,uv+float2(texel.x,0)).a,
+                             lettering.Sample(linearClamp,uv-float2(texel.x,0)).a),
+                         max(lettering.Sample(linearClamp,uv+float2(0,texel.y)).a,
+                             lettering.Sample(linearClamp,uv-float2(0,texel.y)).a));
+        bool black=((int)floor(time/.7825)&1)!=0;
+        float c=black?.009:.99,edge=black?.60:.025;
+        float outAlpha=saturate(alpha+max(0,border-alpha)*.48);
+        return float4(lerp(edge.xxx,c.xxx,alpha/max(.0001,outAlpha)),outAlpha);
     }
     clip(1-r);
     if(style==2) {
@@ -35,27 +67,36 @@ float4 main(Input i):SV_TARGET {
         return float4(shade.xxx,alpha);
     }
     float z=sqrt(saturate(1-r*r));
-    // Domain-warped layers drift at different rates, so the interiors curl and
-    // billow like smoke rather than reading as a textured solid moon.
-    float2 flow=float2(noise(q*2.3+float2(time*.17,-time*.11)),
-                       noise(q*2.3+float2(13-time*.13,7+time*.15)))-.5;
-    float angle=.7*z+time*.16,cs=cos(angle),sn=sin(angle);
-    float2 p=float2(q.x*cs-q.y*sn,q.x*sn+q.y*cs)*3.4+flow*1.8;
-    float surface=cloud(p+float2(time*.08,-time*.19));
-    float wisps=1-abs(noise(p*2.8+float2(-time*.16,time*.09))*2-1);
-    wisps=pow(saturate(wisps),5);
-    float light=.25+.65*saturate(dot(float3(q,z),normalize(float3(-.6,.65,1))));
+    // Integrate five layers through the sphere, with soft front-to-back
+    // absorption. Lighting belongs to moving cloud masses, not surface lines.
+    float transmission=1,cloudLight=0,stepLength=2*z/5;
+    [unroll]for(int layer=0;layer<5;++layer) {
+        float3 p=float3(q,z-(layer+.5)*stepLength);
+        float density=stormDensity(p,time);
+        float opacity=1-exp(-density*stepLength*1.9);
+        float lighting=.41+.55*saturate(.5+p.y*.34+p.z*.27);
+        cloudLight+=transmission*opacity*lighting;
+        transmission*=1-opacity;
+    }
+    // Brief, irregular double flashes illuminate the cloud from behind. The
+    // diffuse light is attenuated by the cloud, with only a fleeting fork inside.
+    float clock=time*.71+style*.37,cycle=floor(clock),phase=frac(clock);
+    float flash=(exp(-phase*65)+.65*exp(-abs(phase-.075)*100))*step(phase,.17);
+    float2 flashPoint=float2(hash(float2(cycle,style+3)),hash(float2(cycle,style+11)))*.75-.375;
+    float diffuse=exp(-dot(q-flashPoint,q-flashPoint)*5.5)*flash*(.24+.76*transmission);
+    float bolt=min(segmentDistance(q,flashPoint+float2(-.10,.35),flashPoint+float2(.08,.10)),
+                   min(segmentDistance(q,flashPoint+float2(.08,.10),flashPoint+float2(-.08,-.07)),
+                       segmentDistance(q,flashPoint+float2(-.08,-.07),flashPoint+float2(.13,-.32))));
+    float lightning=exp(-bolt*115)*flash*(.12+.32*transmission);
     float rings=exp(-abs(r-.95)*180)+exp(-abs(r-.87)*180)*.28;
     float star=1-smoothstep(.43,.47,pow(abs(q.x),.55)+pow(abs(q.y),.55));
     float3 color;
     if(style==0) {
-        float density=smoothstep(.24,.76,surface);
-        float gray=saturate((.25+density*.71+wisps*.16)*(.66+light*.34));
+        float gray=saturate(.10+cloudLight*.90+z*.055+diffuse*.31+lightning*.26);
         color=lerp(gray.xxx,float3(.012,.015,.022),star);
         color+=rings*.48;
     } else {
-        float smoke=smoothstep(.31,.79,surface);
-        color=float3(.005,.007,.012)+smoke*.18+wisps*.055+smoke*wisps*.12+ rings*.36;
+        color=float3(.005,.007,.012)+cloudLight*.38+diffuse*.85+lightning*.9+rings*.36;
         color+=star*2.2;
     }
     return float4(color,1-smoothstep(.985,1,r));
@@ -93,6 +134,7 @@ void Renderer::createEquinox() {
     checked(canvas->EndDraw(),"Render Equinox lettering");
     checked(device_->CreateShaderResourceView(texture.Get(),nullptr,&equinoxLettering_),"Equinox lettering source");
     equinoxOrbs_.reserve(4);
+    equinoxTitles_.reserve(2);
     createCutscene();
 }
 void Renderer::buildEquinox(const Frame& source) {
@@ -104,9 +146,9 @@ void Renderer::buildEquinox(const Frame& source) {
     auto material=[&](FXMMATRIX model,unsigned style) {Instance v;XMStoreFloat4x4(&v.world,model);v.color={1,1,1,style+.95f};equinoxOrbs_.push_back(v);};
     material(XMMatrixScaling(8.2f,8.2f,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,.19f,oz),2);
     const auto billboard=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw);
-    // A large inscription lies on the floor inside the outer silver circle.
-    // The atlas already crops the character to a square, preserving its shape.
-    material(XMMatrixScaling(5.6f,5.6f,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,.225f,oz),3);
+    // The complete cropped glyph, including its diagonal, fits with a margin
+    // inside the innermost circle (radius 2.1), rather than filling the outer rim.
+    material(XMMatrixScaling(3.2f,3.2f,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,.240f,oz),3);
     // Thick, softly glowing spiral bands with independently moving dark/bright filaments.
     for(unsigned ring=0;ring<3;++ring) {
         const float radius=2.1f+ring*.63f,height=.28f+ring*.07f;
@@ -131,53 +173,54 @@ void Renderer::buildEquinox(const Frame& source) {
         const float a=t*2*Pi/1.565f+side*Pi;
         orbs[side]={std::cos(a)*2.25f,3.1f+.20f*std::sin(a),std::sin(a)*2.25f,side^polarity};
     }
-    // Two narrow, gently twisting filaments connect the pair through the middle.
-    // A short arc behind each moving orb makes their light leave a visible wake.
+    // Each center light leaves its own short, gently waving wake along the past
+    // orbit. No segment connects the two orbs; each trail fades independently.
     const float orbit=t*2*Pi/1.565f;
-    for(unsigned strand=0;strand<2;++strand) for(unsigned j=0;j<40;++j) {
-        auto bridge=[&](float u) {
-            const float envelope=std::sin(u*Pi),wave=(strand?1.f:-1.f)*envelope;
-            const float offset=wave*(.22f+.06f*std::sin(t*2.4f+u*2*Pi));
-            return point(orbs[0].x+(orbs[1].x-orbs[0].x)*u-std::sin(orbit)*offset,
-                orbs[0].y+(orbs[1].y-orbs[0].y)*u+wave*.22f,
-                orbs[0].z+(orbs[1].z-orbs[0].z)*u+std::cos(orbit)*offset);
+    for(unsigned side=0;side<2;++side) {
+        auto wake=[&](float u) {
+            const float a=orbit+side*Pi-u*.30f*2*Pi/1.565f;
+            const float wave=std::sin(u*Pi*3)*std::sin(u*Pi),radius=2.25f+wave*.10f;
+            return point(std::cos(a)*radius,3.1f+.20f*std::sin(a)+wave*.24f,std::sin(a)*radius);
         };
-        const float u=j/40.f,v=(j+1)/40.f,energy=.12f+.30f*std::sin(u*Pi);
-        line(bridge(u),bridge(v),.10f,energy);
-    }
-    for(unsigned side=0;side<2;++side) for(unsigned j=0;j<24;++j) {
-        const float a=orbit+side*Pi-j*.023f,b=a-.023f,fade=1-j/24.f;
-        line(point(std::cos(a)*2.25f,3.1f+.20f*std::sin(a),std::sin(a)*2.25f),
-            point(std::cos(b)*2.25f,3.1f+.20f*std::sin(b),std::sin(b)*2.25f),.11f,.20f*fade);
+        for(unsigned j=0;j<32;++j) {
+            const float u=j/32.f,v=(j+1)/32.f,fade=std::pow(1-u,.65f);
+            line(wake(u),wake(v),.12f*(1-u*.45f),.68f*fade);
+        }
+        for(unsigned dot=1;dot<=6;++dot) {
+            const float u=dot/7.f,fade=std::pow(1-u,.65f);
+            const auto p=wake(u);
+            const float size=.065f+.035f*(1-u);
+            pixelBillboard(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p),size,size,white,5,.80f*fade,f);
+            if(dot==4 || dot==6) particleStar(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p),.10f*(1-u*.25f),silver,t*.35f+side,f);
+        }
     }
     const float eyeX=std::sin(f.cameraYaw),eyeZ=-std::cos(f.cameraYaw);
     if(orbs[0].x*eyeX+orbs[0].z*eyeZ>orbs[1].x*eyeX+orbs[1].z*eyeZ) std::swap(orbs[0],orbs[1]);
     for(const auto& orb:orbs) {
         constexpr float radius=1.35f;
         material(XMMatrixScaling(radius*2,radius*2,1)*XMMatrixRotationZ(-t*.14f)*billboard*XMMatrixTranslation(ox+orb.x,orb.y,oz+orb.z),orb.style);
-        const auto center=point(orb.x,orb.y,orb.z);
         const auto face=billboard*XMMatrixTranslation(ox+orb.x,orb.y,oz+orb.z);
         for(unsigned layer=0;layer<2;++layer) for(unsigned i=0;i<96;++i) {
             const float a=i*2*Pi/96,b=(i+1)*2*Pi/96,r=radius*(layer?1.12f:1.025f);
             line(XMVector3TransformCoord(XMVectorSet(std::cos(a)*r,std::sin(a)*r,0,1),face),
                  XMVector3TransformCoord(XMVectorSet(std::cos(b)*r,std::sin(b)*r,0,1),face),.065f,orb.style?.25f:.40f);
         }
-        pixelBillboard(ox+orb.x,orb.y,oz+orb.z,3.6f,3.6f,silver,0,orb.style?.22f:.40f,f);
+        // Keep the outer halo weak enough to reveal the moving cloud density;
+        // excessive additive light here otherwise washes the white interior out.
+        pixelBillboard(ox+orb.x,orb.y,oz+orb.z,3.6f,3.6f,silver,0,orb.style?.16f:.20f,f);
         if(orb.style) {
             pixelBillboard(ox+orb.x,orb.y,oz+orb.z,2.2f,2.2f,white,4,.90f,f);
             pixelBillboard(ox+orb.x,orb.y,oz+orb.z,5.2f,.55f,white,4,.65f,f);
-            for(unsigned bolt=0;bolt<5;++bolt) {
-                XMVECTOR previous=center;
-                for(unsigned j=1;j<=6;++j) {
-                    const float a=bolt*2*Pi/5+.10f*std::sin(j*7+std::floor(t*12)),r=j/6.f*radius*.87f;
-                    const auto next=XMVector3TransformCoord(XMVectorSet(std::cos(a)*r,std::sin(a)*r,0,1),face);
-                    line(previous,next,.050f,.35f); previous=next;
-                }
-            }
         } else pixelBillboard(ox+orb.x,orb.y,oz+orb.z,4.3f,.25f,white,4,.16f,f);
     }
-    pixelBillboard(ox,5.15f,oz,4.0f,.54f,white,8,.72f,f);
-    pixelBillboard(ox,5.52f,oz,5.0f,.25f,silver,10,.60f,f);
+    // These alpha materials are composited after bloom by drawEffects, so black
+    // lettering remains black instead of disappearing in an additive pass.
+    auto title=[&](float y,float width,float height,unsigned style) {
+        Instance v; XMStoreFloat4x4(&v.world,XMMatrixScaling(width,height,1)*billboard*XMMatrixTranslation(ox,y,oz));
+        v.color={1,1,1,style+.95f}; equinoxTitles_.push_back(v);
+    };
+    title(5.15f,4.0f,.54f,4);
+    title(5.52f,5.0f,.25f,5);
     // Volumetric silver dust, irregular triangles and occasional four-point stars.
     for(unsigned i=0;i<140;++i) {
         const float a=i*2.399963f+t*.15f,r=2.f+2.f*(.5f+.5f*std::sin(i*4.3f));

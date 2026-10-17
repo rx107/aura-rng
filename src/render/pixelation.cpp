@@ -224,7 +224,10 @@ void Renderer::buildPixelation(const Frame& source) {
     f.time=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,level);
     const auto color=pixelationColor(f.time),hot=bright(color,1.65f,.15f);
     const float t=f.time,ox=f.avatarX,oz=f.avatarZ;
-    const auto volley=pixelationVolley(t);
+    const float actionTime=source.actionTime>=0?source.actionTime:pixelationActionTime(source.time,level);
+    const float shotOrbitTime=source.shotOrbitTime>=0?source.shotOrbitTime:
+        std::max(0.f,t-pixelationVolley(actionTime).shotAge*pixelationMotionSpeed(level)/pixelationActionSpeed(level));
+    const auto volley=pixelationVolley(actionTime,t,shotOrbitTime);
     auto point=[&](float x,float y,float z) {return XMVectorSet(ox+x,y,oz+z,1);};
     auto line=[&](XMVECTOR a,XMVECTOR b,float width=.10f,float energy=.8f) {pixelLine(a,b,width,hot,energy,f);};
     auto ring=[&](float radius,float y,float tilt,float turn,float energy) {
@@ -292,14 +295,14 @@ void Renderer::buildPixelation(const Frame& source) {
             pixelBillboard(ox+ball.x,ball.y,oz+ball.z,.30f,.30f,hot,5,.98f,f);
             pixelBillboard(ox+ball.x,ball.y,oz+ball.z,.18f,.18f,white,5,.85f,f);
             for(unsigned trail=1;trail<=6;++trail) {
-                const auto past=pixelationVolley(std::max(0.f,t-trail*.025f));
+                const auto past=pixelationVolley(std::max(0.f,actionTime-trail*.025f),t,shotOrbitTime);
                 if(past.shotCycle!=volley.shotCycle) continue;
                 const auto p=past.balls[player];
                 const float size=.15f-trail*.015f;
                 pixelBillboard(ox+p.x,p.y,oz+p.z,size,size,hot,5,.42f*(1-trail/7.f),f);
             }
         }
-        const float impactDuration=level>=3?.78f:.65f;
+        constexpr float impactDuration=.65f;
         if(volley.impactAge>=0 && volley.impactAge<impactDuration) {
             // The event still uses the exact shared meeting point. The opening white flash
             // is immediate; pressure rings and pixel shards carry the energy outward.
