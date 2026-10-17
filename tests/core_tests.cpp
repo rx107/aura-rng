@@ -16,15 +16,15 @@ int main(int argc, char** argv) {
     try {
         check(argc == 2, "Catalog path required");
         const auto defs = aura::loadCatalog(argv[1]);
-        check(defs.size() == 16, "Expected 13 rollable auras and three previews");
+        check(defs.size() == 17, "Expected 13 rollable auras and four previews");
         const auto findAura=[&](const std::string& id) {
             const auto found=std::find_if(defs.begin(),defs.end(),[&](const auto& d){return d.id==id;});
             check(found!=defs.end(),"Required aura ID"); return static_cast<std::size_t>(found-defs.begin());
         };
-        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough");
-        const auto previewIndices={pixelation,equinox,breakthrough};
-        check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==3 &&
-            defs[breakthrough].previewOnly && defs[breakthrough].denominator==0,"BreakThrough is the third unpriced preview");
+        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough"),nanally=findAura("nanally");
+        const auto previewIndices={pixelation,equinox,breakthrough,nanally};
+        check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==4 &&
+            defs[nanally].previewOnly && defs[nanally].denominator==0,"Nanally is the fourth unpriced preview");
         aura::Roller roller(defs, 42), same(defs, 42);
         std::uint64_t start = 0;
         for (std::size_t i = 0; i < defs.size(); ++i) {
@@ -224,6 +224,9 @@ int main(int argc, char** argv) {
         autoRoll=true; presentation.showPreview(breakthrough,defs.size(),autoRoll);
         check(!autoRoll && presentation.shown(p)==breakthrough && p.equipped==3 && p.rolls==prototypeRolls && p.counts==prototypeCounts,
             "BreakThrough preview stops AutoRoll and leaves equipment, roll history, and inventory untouched");
+        autoRoll=true; presentation.showPreview(nanally,defs.size(),autoRoll);
+        check(!autoRoll && presentation.shown(p)==nanally && p.equipped==3 && p.rolls==prototypeRolls && p.counts==prototypeCounts,
+            "Nanally preview stops AutoRoll and leaves equipment, roll history, and inventory untouched");
         const auto settingsPath=dir/"settings.txt";
         check(aura::loadSettings(settingsPath).language==aura::Language::English,"Settings default");
         aura::Settings settings; settings.language=aura::Language::Japanese; settings.shirt={.95f,.2f,.3f};
@@ -276,6 +279,7 @@ int main(int argc, char** argv) {
         check(aura::displayName(defs[pixelation],aura::Language::Japanese)=="ピクセレーション","Japanese Pixelation name");
         check(aura::displayName(defs[equinox],aura::Language::Japanese)=="エキノックス","Japanese Equinox name");
         check(aura::displayName(defs[breakthrough],aura::Language::Japanese)=="ブレイクスルー","Japanese BreakThrough name");
+        check(aura::displayName(defs[nanally],aura::Language::Japanese)=="ナナリー" && aura::displayName(defs[nanally],aura::Language::English)=="Nanally","Bilingual Nanally name");
         check(!aura::cooldownVisual(0).visible && !aura::cooldownVisual(-1).visible,"Cooldown bar disappears at completion");
         check(aura::cooldownVisual(aura::RollCooldown).opacity==0,"Cooldown fades in");
         check(aura::cooldownVisual(.001f).opacity<.01f,"Cooldown fades out");
@@ -305,19 +309,19 @@ int main(int argc, char** argv) {
         v013Progress.equipped=previousDefinitions.size()-1; aura::saveProgress(save,v013Progress,previousDefinitions);
         const auto v014Progress=aura::loadProgress(save,defs);
         check(v014Progress.rolls==4 && v014Progress.equipped==singularity && v014Progress.auraLevel(singularity,defs)==3 &&
-            v014Progress.counts[pixelation]==0 && v014Progress.counts[equinox]==0 && v014Progress.counts[breakthrough]==0,
+            v014Progress.counts[pixelation]==0 && v014Progress.counts[equinox]==0 && v014Progress.counts[breakthrough]==0 && v014Progress.counts[nanally]==0,
             "Previous 13-aura saves retain counts, equipment, and Singularity level");
         auto previousV014=defs;
-        std::erase_if(previousV014,[](const auto& d){return d.id=="equinox" || d.id=="breakthrough";});
+        std::erase_if(previousV014,[](const auto& d){return d.id=="equinox" || d.id=="breakthrough" || d.id=="nanally";});
         check(previousV014.size()==14,"The v0.1.4 catalog contains 13 rollable auras and Pixelation");
         aura::Progress v014Saved(previousV014.size());
         const auto v014Singularity=static_cast<std::size_t>(std::find_if(previousV014.begin(),previousV014.end(),[](const auto& d){return d.id=="singularity";})-previousV014.begin());
         v014Saved.record(v014Singularity,previousV014); v014Saved.equipped=v014Singularity;
         aura::saveProgress(save,v014Saved,previousV014); const auto v015Progress=aura::loadProgress(save,defs);
         check(v015Progress.equipped==singularity && v015Progress.counts[singularity]==1 && v015Progress.counts[equinox]==0 &&
-            v015Progress.counts[pixelation]==0 && v015Progress.counts[breakthrough]==0,
-            "Previous 14-entry saves add Equinox and BreakThrough with zero preview inventory");
-        auto previousV015=defs; std::erase_if(previousV015,[](const auto& d){return d.id=="breakthrough";});
+            v015Progress.counts[pixelation]==0 && v015Progress.counts[breakthrough]==0 && v015Progress.counts[nanally]==0,
+            "Previous 14-entry saves add Equinox, BreakThrough, and Nanally with zero preview inventory");
+        auto previousV015=defs; std::erase_if(previousV015,[](const auto& d){return d.id=="breakthrough" || d.id=="nanally";});
         check(previousV015.size()==15,"The v0.1.5 catalog contains 13 rollable auras and two previews");
         aura::Progress v015Saved(previousV015.size());
         const auto v015Singularity=static_cast<std::size_t>(std::find_if(previousV015.begin(),previousV015.end(),[](const auto& d){return d.id=="singularity";})-previousV015.begin());
@@ -326,8 +330,19 @@ int main(int argc, char** argv) {
         aura::saveProgress(save,v015Saved,previousV015); const auto v016Progress=aura::loadProgress(save,defs);
         check(v016Progress.rolls==5 && v016Progress.equipped==singularity && v016Progress.best==singularity &&
             v016Progress.counts[0]==1 && v016Progress.counts[singularity]==4 && v016Progress.auraLevel(singularity,defs)==3 &&
-            v016Progress.counts[pixelation]==0 && v016Progress.counts[equinox]==0 && v016Progress.counts[breakthrough]==0,
-            "Previous 15-entry saves preserve all discoveries and equipment while adding BreakThrough with zero inventory");
+            v016Progress.counts[pixelation]==0 && v016Progress.counts[equinox]==0 && v016Progress.counts[breakthrough]==0 && v016Progress.counts[nanally]==0,
+            "Previous 15-entry saves preserve all discoveries and equipment while adding BreakThrough and Nanally with zero inventory");
+        auto previousV017=defs; std::erase_if(previousV017,[](const auto& d){return d.id=="nanally";});
+        check(previousV017.size()==16,"The v0.1.7 catalog contains 13 rollable auras and three previews");
+        aura::Progress v017Saved(previousV017.size());
+        const auto v017Singularity=static_cast<std::size_t>(std::find_if(previousV017.begin(),previousV017.end(),[](const auto& d){return d.id=="singularity";})-previousV017.begin());
+        for(unsigned i=0;i<3;++i) v017Saved.record(v017Singularity,previousV017);
+        v017Saved.record(1,previousV017); v017Saved.equipped=v017Singularity; v017Saved.setRollCount(123456);
+        aura::saveProgress(save,v017Saved,previousV017); const auto v018Progress=aura::loadProgress(save,defs);
+        check(v018Progress.rolls==123456 && v018Progress.equipped==singularity && v018Progress.best==singularity &&
+            v018Progress.counts[1]==1 && v018Progress.counts[singularity]==3 && v018Progress.auraLevel(singularity,defs)==2 &&
+            v018Progress.counts[pixelation]==0 && v018Progress.counts[equinox]==0 && v018Progress.counts[breakthrough]==0 && v018Progress.counts[nanally]==0,
+            "Previous 16-entry saves preserve the edited roll counter, discoveries, equipment, and levels while adding Nanally with zero inventory");
         const auto levelCounts=levels.counts;
         presentation.preview=singularity; presentation.singularityLevel=1;
         check(presentation.level(levels,defs)==1 && levels.counts==levelCounts,"Debug Aura Level leaves inventory untouched");
@@ -344,6 +359,7 @@ int main(int argc, char** argv) {
         presentation.singularityLevel=9; check(presentation.level(levels,defs)==3,"Singularity preview level remains capped");
         presentation.preview=equinox; check(presentation.level(levels,defs)==0,"Equinox has no borrowed Aura Level");
         presentation.preview=breakthrough; check(presentation.level(levels,defs)==0,"BreakThrough has no borrowed Aura Level");
+        presentation.preview=nanally; check(presentation.level(levels,defs)==0,"Nanally has no borrowed Aura Level");
         presentation.pixelationLevel.reset(); presentation.preview=pixelation;
         check(presentation.level(levels,defs)==0,"Restoring Pixelation's owned level returns to zero");
         auto futurePixelation=defs; futurePixelation[pixelation].previewOnly=false; futurePixelation[pixelation].denominator=2'000'000;

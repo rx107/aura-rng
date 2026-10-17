@@ -196,7 +196,7 @@ void Renderer::updateVrm(const Frame& f) {
     });
 }
 void Renderer::world(const Frame& f) {
-    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); holeVisible_=false;
+    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const bool desert=f.presentation.settings.biome==Biome::Desert;
@@ -241,7 +241,9 @@ void Renderer::world(const Frame& f) {
     const bool pixelated=d.id=="pixelation";
     const bool equinox=d.id=="equinox";
     const bool breakthrough=d.id=="breakthrough";
+    const bool nanally=d.id=="nanally";
     pixelationVisible_=pixelated; equinoxVisible_=equinox; breakthroughVisible_=breakthrough;
+    nanallyVisible_=nanally;
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
     const float actionTime=f.actionTime>=0?f.actionTime:pixelationActionTime(f.time,pixelated?level:0);
     const auto pose=pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
@@ -274,12 +276,12 @@ void Renderer::world(const Frame& f) {
     part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
     part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},identity);
     const float t=f.time*d.speed;
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && i<48;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && i<48;++i) {
         const float a=i*2*Pi/48+t*.5f;
         if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
         else box(f.avatarX+std::cos(a)*d.radius,.25f,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && i<d.particles;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
         const float y=.4f+std::fmod(u*3.3f+f.time*.38f,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
@@ -301,15 +303,16 @@ void Renderer::world(const Frame& f) {
     if(pixelated) buildPixelation(f);
     if(equinox) buildEquinox(f);
     if(breakthrough) buildBreakthrough(f);
+    if(nanally) buildNanally(f);
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
-    const float focus=breakthrough?3.3f:holeVisible_?2.5f:(equinox?2.3f:(floating || pixelated?2.f:1.4f));
+    const float focus=breakthrough?3.3f:nanally?2.8f:holeVisible_?2.5f:(equinox?2.3f:(floating || pixelated?2.f:1.4f));
     const float cameraDistance=f.cameraDistance;
     const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,
         focus+std::sin(f.cameraPitch)*cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,1);
     const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,focus,f.avatarZ,1),XMVectorSet(0,1,0,0));
     const auto projection=XMMatrixPerspectiveFovLH(.80f,worldW/worldH,.1f,160);
-    const float tagHeight=breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
+    const float tagHeight=nanally?6.8f:breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
     XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,tagHeight,f.avatarZ,1),
         viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));
     nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=!breakthrough && tag.z>0 && tag.z<1;
@@ -361,8 +364,9 @@ void Renderer::draw(const Frame& frame,bool present) {
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     if(frame.cutsceneTime>=0) {
-        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear();
+        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear();
         pixelationVisible_=equinoxVisible_=breakthroughVisible_=holeVisible_=false;
+        nanallyVisible_=false;
         if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame); else drawCutscene(frame);
     } else world(frame);
     context_->OMSetRenderTargets(0,nullptr,nullptr);

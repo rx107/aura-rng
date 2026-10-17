@@ -214,6 +214,13 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::TextUnformatted(t("AURA PREVIEW / ALL AURAS","オーラプレビュー / 全種類"));
             ImGui::TextWrapped("%s",t("Includes unowned auras. Preview stops AutoRoll and does not add inventory or history.",
                 "未所持のオーラも表示できます。選択時に自動ロールを停止し、所持数や履歴には追加しません。"));
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="nanally") {
+                ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.06f,.32f,.30f,1));
+                if(ImGui::Button(t("Preview Nanally / prototype","Nanally を表示 / 試作"),{-1,36})) debugActions_.preview=i;
+                ImGui::PopStyleColor();
+                ImGui::TextWrapped("%s",t("A giant dark companion and fists behind you, red flames, and tiny teal electrical sparks. Preview only; excluded from rolls.",
+                    "背後に大きな黒い生物と左右の拳、赤い炎。プレイヤーの周囲に小さな青緑の電撃。試作のためロール抽選の対象外です。"));
+            }
             for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="pixelation") {
                 ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.04f,.35f,.27f,1));
                 if(ImGui::Button(t("Preview Pixelation / prototype","Pixelation を表示 / 試作"),{-1,36})) debugActions_.preview=i;

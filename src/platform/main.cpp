@@ -353,7 +353,7 @@ private:
             for(std::size_t i=0;i<catalog.size();++i) if(catalog[i].id==id) return i;
             throw std::runtime_error(std::string("Smoke aura is missing: ")+id);
         };
-        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough");
+        const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough"),nanally=findAura("nanally");
         const auto startingRolls=progress_.rolls;
         const auto initialEquipped=progress_.equipped;
         // Exercise the actual window input path, cooldown, auto toggle and resizing.
@@ -732,6 +732,42 @@ private:
             throw std::runtime_error("BreakThrough preview / cinematic changed inventory or history");
         applyDebugActions(previewCommand); render(false);
         if(renderer_->breakthroughCount()) throw std::runtime_error("BreakThrough remained after aura switching");
+        aura::DebugActions nanallyPreview; nanallyPreview.preview=nanally;
+        auto_=true; applyDebugActions(nanallyPreview);
+        time_=.35f; movement_=0; walk_=0; facing_=0; distance_=12; pitch_=.23f; yaw_=.15f;
+        world.biome=aura::Biome::Normal; applyDebugActions(world); render(false); captureExtra(L"-nanally");
+        if(auto_ || roller_.tickets(nanally) || !renderer_->nanallyCount() || renderer_->breakthroughCount() || renderer_->equinoxCount() || renderer_->pixelationCount())
+            throw std::runtime_error("Nanally preview / isolation failed");
+        const auto nanallyInstances=renderer_->nanallyCount();
+        const auto nanallyBegin=Clock::now();
+        for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
+        const double meanNanallyMs=std::chrono::duration<double,std::milli>(Clock::now()-nanallyBegin).count()/60;
+        for(float camera:{-.8f,.8f,2.8f}) {
+            yaw_=camera; render(false);
+            const auto suffix=L"-nanally-angle-"+std::to_wstring(static_cast<int>(camera*10)); captureExtra(suffix.c_str());
+        }
+        yaw_=.15f;
+        if(!opts_.warp && !opts_.capture.empty()) for(int i=0;i<48;++i) {
+            time_=i/24.f;
+            const auto suffix=L"-nanally-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
+        }
+        const float nanallyX=x_,nanallyZ=z_;
+        x_+=2; z_-=1; facing_=.65f; movement_=1; walk_=1; render(false); captureExtra(L"-nanally-moving");
+        if(!renderer_->nanallyCount()) throw std::runtime_error("Nanally lost geometry while moving");
+        x_=nanallyX; z_=nanallyZ; facing_=0; movement_=0; walk_=0;
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false);
+        if(!renderer_->nanallyCount()) throw std::runtime_error("Nanally resize failed");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        applyDebugActions(playBreakthrough); render(false);
+        if(renderer_->nanallyCount()) throw std::runtime_error("Nanally remained during cutscene");
+        applyDebugActions(stop); render(false);
+        if(presentation_.shown(progress_)!=nanally || !renderer_->nanallyCount()) throw std::runtime_error("Cutscene did not restore Nanally");
+        if(progress_.counts!=cutCounts || progress_.rolls!=cutRolls || log_.size()!=cutLogs ||
+            std::filesystem::file_size(saves_/L"rolls.csv")!=cutLogBytes || progress_.equipped!=chosen)
+            throw std::runtime_error("Nanally changed inventory or history");
+        applyDebugActions(previewCommand); render(false);
+        if(renderer_->nanallyCount()) throw std::runtime_error("Nanally remained after switching aura");
+        world.biome=aura::Biome::Desert; applyDebugActions(world);
         if(!opts_.vrm.empty()) {
             aura::DebugActions avatar; avatar.avatar=aura::Avatar::Vrm; applyDebugActions(avatar);
             const auto deadline=Clock::now()+std::chrono::seconds(45);
@@ -754,10 +790,13 @@ private:
             movement_=1; walk_=2; render(false); const auto breakthroughFixedB=renderer_->vrmBone(4);
             if(!renderer_->breakthroughCount() || std::abs(breakthroughFixedA.x-breakthroughFixedB.x)+std::abs(breakthroughFixedA.y-breakthroughFixedB.y)+
                 std::abs(breakthroughFixedA.z-breakthroughFixedB.z)>.00001f) throw std::runtime_error("Moving changed the fixed BreakThrough VRM pose");
+            applyDebugActions(nanallyPreview); movement_=0; walk_=0; facing_=0; distance_=12; pitch_=.23f; yaw_=.15f;
+            render(false); captureExtra(L"-vrm-nanally");
+            if(!renderer_->nanallyCount() || !renderer_->vrmReady()) throw std::runtime_error("Nanally VRM preview failed");
             aura::DebugActions common; common.preview=0; applyDebugActions(common);
             movement_=0; walk_=0; distance_=7; pitch_=.20f; yaw_=.15f;
             render(false); captureExtra(L"-vrm");
-            if(renderer_->pixelationCount()) throw std::runtime_error("Pixelation remained after VRM aura switch");
+            if(renderer_->pixelationCount() || renderer_->nanallyCount()) throw std::runtime_error("Custom effect remained after VRM aura switch");
             movement_=1; walk_=.5f; render(false); const auto kneeA=renderer_->vrmBone(4); captureExtra(L"-vrm-walk-a");
             walk_=1.5f; render(false); const auto kneeB=renderer_->vrmBone(4); captureExtra(L"-vrm-walk-b");
             if(!opts_.capture.empty() && renderer_->vrmVertices()>4) {
@@ -837,7 +876,10 @@ private:
             out<<"BreakThrough: PASS / preview-only, AutoRoll stop, clean switching, resize, inventory/history unchanged\n"
                <<"BreakThrough instances: "<<breakthroughInstances<<"\nMean BreakThrough frame submission time: "<<meanBreakthroughMs
                <<" ms/frame (60 offscreen frames, no vsync)\n"
-               <<"BreakThrough cutscene: PASS / 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
+               <<"BreakThrough cutscene: PASS / static pillar positions, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
+            out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
+               <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
+               <<" ms/frame (60 offscreen frames, no vsync)\n";
             if(breakthroughAudioBytes) out<<"BreakThrough local audio: PASS / "<<breakthroughAudioBytes<<" PCM bytes / 4.5s offset, 30s non-looping clip, restart and immediate stop\n";
             else out<<"BreakThrough local audio: visual-only / reference MP4 unavailable\n";
             if(cutsceneDecoded) out<<"Local cutscene audio: PASS / "<<cutsceneDecoded<<" decoded PCM bytes / MP4 audio stream, restart from beginning, immediate stop before Collection footage\n";

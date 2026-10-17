@@ -50,6 +50,7 @@ public:
     std::size_t pixelationCount() const { return pixelationVisible_?pixelationInstances_.size():0; }
     std::size_t equinoxCount() const { return equinoxVisible_?pixelationInstances_.size()+equinoxOrbs_.size()+equinoxTitles_.size():0; }
     std::size_t breakthroughCount() const { return breakthroughVisible_?pixelationInstances_.size():0; }
+    std::size_t nanallyCount() const { return nanallyVisible_?nanallyInstances_.size()+pixelationInstances_.size():0; }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
     float scale() const { return scale_; }
@@ -82,6 +83,8 @@ private:
     void buildBreakthrough(const Frame& frame);
     void drawBreakthroughCutscene(const Frame& frame);
     void breakthroughCutsceneUi(const Frame& frame);
+    void createNanally();
+    void buildNanally(const Frame& frame);
     void createPixelationTargets();
     void compositePixelation();
     void pixelQuad(DirectX::FXMMATRIX transform,Color color,unsigned style,float opacity);
@@ -120,6 +123,7 @@ private:
     ComPtr<ID3D11PixelShader> equinoxOrbPs_,cutscenePs_;
     ComPtr<ID3D11PixelShader> breakthroughCutscenePs_;
     ComPtr<ID3D11PixelShader> breakthroughPs_;
+    ComPtr<ID3D11PixelShader> nanallyPs_,nanallyGlowPs_;
     ComPtr<ID3D11ShaderResourceView> breakthroughLettering_;
     ComPtr<ID3D11Buffer> breakthroughConstants_;
     ComPtr<ID3D11Buffer> cutsceneConstants_;
@@ -149,12 +153,14 @@ private:
     std::vector<Instance> pixelationInstances_;
     std::vector<Instance> equinoxOrbs_;
     std::vector<Instance> equinoxTitles_;
+    std::vector<Instance> nanallyInstances_;
     ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
     ComPtr<ID3D11BlendState> effectBlend_;
     ComPtr<ID3D11BlendState> additiveBlend_;
     ComPtr<ID3D11DepthStencilState> effectDepth_;
     UINT starIndexCount_{};
     bool holeVisible_{},nameplateVisible_{},pixelationVisible_{},equinoxVisible_{},breakthroughVisible_{};
+    bool nanallyVisible_{};
     Instance blackHole_;
     DirectX::XMFLOAT2 nameplate_{};
     ImGuiContext* imguiContext_{};

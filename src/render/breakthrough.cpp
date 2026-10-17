@@ -95,8 +95,7 @@ float4 main(Input i):SV_TARGET {
             else if(n<3){center=float3(side*2.15,1.95,.35);bounds=float3(.35,1.95,.32);tilt=-side*.42;}
             else if(n<5){center=float3(side*1.35,3.35,1.25);bounds=float3(.24,1.75,.25);tilt=-side*.10;}
             else {center=float3(side*.96,2.2,-.20);bounds=float3(.22,1.15,.25);tilt=side*.13;}
-            // Match the independently phased, 3.6-4.65 second world monolith drift.
-            center.y+=(.14+.02*(n%3))*sin(t*(6.28318530718/(3.6+.35*(n%4)))+n*.91);
+            // The cinematic holds the monoliths still while the camera and mist move.
             float3 localEye=eye-center,localRay=rd;
             localEye.xy=rot(localEye.xy,-tilt);localRay.xy=rot(localRay.xy,-tilt);
             float hit=hitBox(localEye,localRay,bounds);

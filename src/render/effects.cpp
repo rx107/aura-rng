@@ -48,6 +48,7 @@ void Renderer::createEffects() {
     createPixelation();
     createEquinox();
     createBreakthrough();
+    createNanally();
 }
 void Renderer::particleStar(float x,float y,float z,float size,Color color,float rotation,const Frame& f) {
     if(starInstances_.size()>=512 || size<=.001f) return;
@@ -57,7 +58,7 @@ void Renderer::particleStar(float x,float y,float z,float size,Color color,float
     star.color={color.r,color.g,color.b,1.1f}; starInstances_.push_back(star);
 }
 void Renderer::drawEffects(const Frame&) {
-    if(starInstances_.empty() && !holeVisible_ && pixelationInstances_.empty() && equinoxOrbs_.empty() && equinoxTitles_.empty()) return;
+    if(starInstances_.empty() && !holeVisible_ && pixelationInstances_.empty() && equinoxOrbs_.empty() && equinoxTitles_.empty() && nanallyInstances_.empty()) return;
     context_->IASetInputLayout(layout_.Get()); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context_->VSSetShader(vs_.Get(),nullptr,0); context_->PSSetShader(ps_.Get(),nullptr,0);
     ID3D11Buffer* cb=constants_.Get(); context_->VSSetConstantBuffers(0,1,&cb); context_->PSSetConstantBuffers(0,1,&cb);
@@ -82,11 +83,17 @@ void Renderer::drawEffects(const Frame&) {
         context_->OMSetDepthStencilState(effectDepth_.Get(),0);
         draw(holeVertices_.Get(),holeIndices_.Get(),6,equinoxOrbs_.data(),equinoxOrbs_.size());
     }
+    if(!nanallyInstances_.empty()) {
+        context_->PSSetShader(nanallyPs_.Get(),nullptr,0);
+        context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
+        context_->OMSetDepthStencilState(effectDepth_.Get(),0);
+        draw(holeVertices_.Get(),holeIndices_.Get(),6,nanallyInstances_.data(),nanallyInstances_.size());
+    }
     if(!pixelationInstances_.empty()) {
         createPixelationTargets();
         const float black[]={0,0,0,0}; context_->ClearRenderTargetView(bloomTargets_[0].Get(),black);
         ID3D11RenderTargetView* emission=bloomTargets_[0].Get(); context_->OMSetRenderTargets(1,&emission,depth_.Get());
-        context_->PSSetShader(breakthroughVisible_?breakthroughPs_.Get():pixelationPs_.Get(),nullptr,0);
+        context_->PSSetShader(nanallyVisible_?nanallyGlowPs_.Get():breakthroughVisible_?breakthroughPs_.Get():pixelationPs_.Get(),nullptr,0);
         ID3D11ShaderResourceView* letters=breakthroughVisible_?breakthroughLettering_.Get():equinoxLettering_.Get(); context_->PSSetShaderResources(0,1,&letters);
         ID3D11SamplerState* sampler=bloomSampler_.Get(); context_->PSSetSamplers(0,1,&sampler);
         context_->OMSetBlendState(additiveBlend_.Get(),nullptr,0xffffffff);
