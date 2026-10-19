@@ -244,6 +244,48 @@ int main(int argc, char** argv) {
             "Extended settings / UTF-8 audio paths / quoted names round trip");
         check(loadedSettings.username==settings.username && !loadedSettings.discordEnabled && loadedSettings.discordApplicationId==settings.discordApplicationId,
             "Schema 4 preserves Unicode/quoted usernames and Discord preferences");
+        settings.breakthroughCaptionOffset=-.18f;
+        settings.breakthroughWordTimes={21.f,21.19f,21.4f,21.72f,22.11f,22.24f,22.6f,23.2f};
+        for(unsigned i=0;i<aura::StageCount;++i) {
+            settings.biome=static_cast<aura::Biome>(i); aura::saveSettings(settingsPath,settings);
+            const auto planetSettings=aura::loadSettings(settingsPath);
+            check(planetSettings.biome==settings.biome && planetSettings.breakthroughCaptionOffset==-.18f &&
+                planetSettings.breakthroughWordTimes==settings.breakthroughWordTimes,
+                "All five planets and custom per-word caption times survive save/reload");
+            check(!aura::stageDisplayName(settings.biome,aura::Language::English).empty() &&
+                !aura::stageDisplayName(settings.biome,aura::Language::Japanese).empty(),"All planets have bilingual names");
+        }
+        settings.biome=static_cast<aura::Biome>(5); rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.biome=aura::Biome::Desert;
+        settings.breakthroughCaptionOffset=NAN; rejects([&]{aura::saveSettings(settingsPath,settings);});
+        settings.breakthroughCaptionOffset=5.1f; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.breakthroughCaptionOffset=0;
+        settings.breakthroughWordTimes[1]=settings.breakthroughWordTimes[0]; rejects([&]{aura::saveSettings(settingsPath,settings);});
+        settings.breakthroughWordTimes=aura::tuning::cutscene::BreakthroughWordTimes;
+        {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 4\nlanguage ja\nshirt 0.5 0.7 0.9\nluck 2.5\navatar 0\nbiome 1\nvolume 0.25\nvrm \"\"\nbgm \"space.mp3\"\npixelation_bgm \"base.mp3\"\npixelation_final_bgm \"final.mp3\"\nusername \"Existing Player\"\ndiscord_enabled 0\ndiscord_application_id \"12345\"\n";}
+        const auto migratedV4=aura::loadSettings(settingsPath);
+        check(migratedV4.biome==aura::Biome::Desert && migratedV4.username=="Existing Player" && !migratedV4.discordEnabled &&
+            migratedV4.breakthroughCaptionOffset==0 && migratedV4.breakthroughWordTimes==aura::tuning::cutscene::BreakthroughWordTimes,
+            "Schema 4 preserves current users and adds the corrected caption defaults");
+        aura::StageTravel flight;
+        check(!flight.active() && !flight.start(aura::Biome::Normal,aura::Biome::Normal) &&
+            !flight.start(static_cast<aura::Biome>(99),aura::Biome::Normal),"Current/invalid planets cannot start a flight");
+        check(flight.start(aura::Biome::Ocean,aura::Biome::Normal) && !flight.start(aura::Biome::Forest,aura::Biome::Normal),
+            "A flight locks its destination while underway");
+        check(!flight.update(.49f,1.f) && flight.progress()<.5f,"A planet does not switch before the covered midpoint");
+        check(flight.update(.02f,1.f)==aura::Biome::Ocean && !flight.update(.02f,1.f),"Destination is applied exactly once at the midpoint");
+        check(!flight.update(3.f,1.f) && flight.arrived(),"Long frames complete a flight without applying the destination twice");
+        flight.finish();
+        check(!flight.active() && flight.start(aura::Biome::Volcano,aura::Biome::Ocean),"Arrival unlocks a new flight");
+        check(!flight.update(NAN,1.f) && flight.progress()==0,"Invalid time cannot poison the travel clock");
+        check(flight.update(2.f,1.f)==aura::Biome::Volcano && flight.arrived(),"A single long frame still applies its planet and arrives");
+        const auto& words=aura::tuning::cutscene::BreakthroughWordTimes;
+        check(!aura::tuning::cutscene::breakthroughWordVisible(words[0]-.001f,0,words) &&
+            aura::tuning::cutscene::breakthroughWordVisible(words[0],0,words) &&
+            !aura::tuning::cutscene::breakthroughWordVisible(words[0],1,words),"Caption words use their individual measured onsets");
+        check(aura::tuning::cutscene::breakthroughWordVisible(words[4]-.1f,4,words,-.1f) &&
+            !aura::tuning::cutscene::breakthroughWordVisible(words[4],4,words,.1f),"Caption offset advances or delays without changing audio");
+        auto lateWords=words; lateWords.back()=28.5f;
+        check(aura::tuning::cutscene::breakthroughWordVisible(29.f,7,lateWords) &&
+            !aura::tuning::cutscene::breakthroughWordVisible(30.f,7,lateWords,4.f),"Late customized words keep their hold time within cutscene boundary");
         {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 1\nlanguage ja\nshirt 0.5 0.7 0.9\n";}
         const auto migrated=aura::loadSettings(settingsPath);
         check(migrated.language==aura::Language::Japanese && migrated.luck==1 && migrated.avatar==aura::Avatar::Block &&

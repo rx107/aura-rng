@@ -12,7 +12,18 @@ namespace aura {
 using Microsoft::WRL::ComPtr;
 void Music::clear() {
     if(voice_) { voice_->DestroyVoice(); voice_=nullptr; }
-    pcm_.clear(); playing_=false; gain_=0;
+    pcm_.clear(); playing_=false; gain_=0; sampleRate_=0; playbackEndSeconds_=0;
+}
+std::optional<float> Music::playbackSeconds() const noexcept {
+    if(!voice_ || !playing_ || !sampleRate_)return std::nullopt;
+    XAUDIO2_VOICE_STATE state{};
+    // XAUDIO2_VOICE_NOSAMPLESPLAYED を付けると SamplesPlayed が取れないので、ここは 0。
+    voice_->GetState(&state,0);
+    // XAUDIO2_END_OF_STREAM に到達すると SamplesPlayed は 0 に戻ります。
+    // この 0 を映像へ返すと CutScene が最初へ戻って終われなくなるため、
+    // 1 回再生のバッファが空なら「終了した時刻」を保持して返します。
+    if(clipDuration_>0 && state.BuffersQueued==0)return playbackEndSeconds_;
+    return static_cast<float>(static_cast<double>(state.SamplesPlayed)/sampleRate_);
 }
 Music::~Music() {
     clear(); if(master_) master_->DestroyVoice(); engine_.Reset(); if(mf_) MFShutdown();
@@ -68,6 +79,9 @@ void Music::load(const std::filesystem::path& path,float startSeconds,float dura
     XAUDIO2_BUFFER buffer{}; buffer.AudioBytes=static_cast<UINT32>(pcm_.size()); buffer.pAudioData=pcm_.data();
     buffer.Flags=XAUDIO2_END_OF_STREAM; buffer.LoopCount=durationSeconds>0?0:XAUDIO2_LOOP_INFINITE;
     checked(voice_->SubmitSourceBuffer(&buffer),"BGM loop buffer");
+    sampleRate_=wave->nSamplesPerSec;
+    const float decodedSeconds=static_cast<float>(static_cast<double>(pcm_.size())/wave->nBlockAlign/sampleRate_);
+    playbackEndSeconds_=std::max(durationSeconds,decodedSeconds);
 }
 void Music::update(const std::filesystem::path& path,bool active,float volume,float dt,float startSeconds,float durationSeconds) {
     if(path!=attempted_ || startSeconds!=clipStart_ || durationSeconds!=clipDuration_) {

@@ -4,7 +4,7 @@
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.9-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.10-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -48,6 +48,9 @@ inline constexpr float HeadWidth = 7.0f;
 | 移動を速くする | 同上 → `WalkSpeed` | `3.f` → `4.5f` で1.5倍の移動速度 |
 | 遠くから見る | 同上 → `InitialCameraDistance` | `11.f` → `14.f`。起動時のカメラが遠くなる |
 | ステージを広げる | `src/tuning/world.hpp` → `HalfExtent` | `32.f` → `40.f`。床が64×64から80×80へ。木の配置と歩ける範囲も広がる |
+| 惑星移動をゆっくりにする | `src/tuning/stages.hpp` → `TravelDurationSeconds` | `3.6f` → `5.f`。ロケット演出が長くなる |
+| 森の木を高くする | 同上 → `ForestTreeHeight` | `4.6f` → `6.f`。森を大きな木々が囲む |
+| サックスと字幕を合わせる | F1 → オーラ → BreakThrough → 字幕タイミング / 秒 | 全体の時差 `-.10f` で0.1秒早く。再ビルド不要。[操作手順](stage-and-cutscene-guide.md) |
 | UIの色を変える | `src/tuning/ui.hpp` → `Accent` | `{1.f,.55f,.20f}` で共通のミント色をオレンジへ |
 | 無重力ポーズを高くする | `src/tuning/avatar.hpp` → `singularity` の `Lift` | `.55f` → `.85f`。ブロックとVRMが少し高く浮く |
 | Pixelation Lv3の周囲だけ速くする | `src/tuning/pixelation.hpp` → `FinalMotionSpeed` | `3.f` → `4.f`。弾と浮遊の速さは変えない |

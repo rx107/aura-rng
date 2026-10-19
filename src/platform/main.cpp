@@ -4,6 +4,7 @@
 #include "platform/audio.hpp"
 #include "platform/discord.hpp"
 #include "tuning/game.hpp"
+#include "tuning/stages.hpp"
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -106,7 +107,8 @@ public:
         const auto audioStatus=cutsceneActive()?(cutsceneAudioAvailable_?std::string("Cutscene: ")+cutsceneMusic_.status():std::string("Cutscene / visual only"))+
             " / Aura BGM: "+music_.status():music_.status();
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
-            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime()};
+            mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime(),
+            stageSelectOpen_,stageTravel_.progress(),stageTravel_.target()};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -149,6 +151,23 @@ public:
     ~App() { renderer_.reset(); if(window_ && IsWindow(window_)) DestroyWindow(window_); }
 private:
     bool cutsceneActive() const { return cutsceneTime_>=0; }
+    bool worldInputBlocked() const { return cutsceneActive() || stageSelectOpen_ || stageTravel_.active(); }
+    void savePlayerSettings() {
+        try {aura::saveSettings(saves_/L"settings.txt",presentation_.settings);}
+        catch(const std::exception&) {notice_="Settings could not be saved.";}
+    }
+    void clearWorldInput() {
+        auto_=false; keys_.fill(false); movement_=0; dragging_=false;
+        ReleaseCapture(); pending_.reset(); sfxBaseline_=false;
+    }
+    void selectStages() {
+        if(cutsceneActive() || stageTravel_.active()) return;
+        stageSelectOpen_=!stageSelectOpen_; clearWorldInput();
+    }
+    void travelTo(aura::Biome destination) {
+        if(cutsceneActive() || !stageTravel_.start(destination,presentation_.settings.biome)) return;
+        stageSelectOpen_=false; clearWorldInput();
+    }
     float effectTime() const {
         return opts_.smoke?aura::pixelationMotionTime(time_,presentation_.level(progress_,roller_.catalog())):effectClock_;
     }
@@ -171,6 +190,7 @@ private:
     }
     void startCutscene(aura::CutsceneKind kind=aura::CutsceneKind::Equinox) {
         // 操作を止め、映像用の時計を0秒から開始。終了時に元のデバッグ表示へ戻します。
+        stageSelectOpen_=false; stageTravel_.finish();
         if(!cutsceneActive()) cutsceneDebugWasOpen_=renderer_->debugOpen();
         if(renderer_->debugOpen()) renderer_->toggleDebug();
         cutsceneKind_=kind;
@@ -194,7 +214,7 @@ private:
     }
     void roll() {
         // 1. 待ち時間が残っている間とCutScene中はロールしない。
-        if(cooldown_>0 || cutsceneActive()) return;
+        if(cooldown_>0 || worldInputBlocked()) return;
         // 2. 抽選 → 所持数と総回数へ追加。表示中のオーラは変更しない。
         const auto result=roller_.roll();
         progress_.record(result,roller_.catalog());
@@ -211,7 +231,15 @@ private:
     void action(aura::Hit hit) {
         // 画面のボタン・キー入力をゲームの操作へ変換する場所。
         if(cutsceneActive() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Logs) return;
+        if(stageTravel_.active() && hit.action!=aura::Action::Debug) return;
+        if(stageSelectOpen_ && hit.action!=aura::Action::Stages && hit.action!=aura::Action::Travel &&
+            hit.action!=aura::Action::CloseStages && hit.action!=aura::Action::Debug) return;
         switch(hit.action) {
+        case aura::Action::Stages: selectStages(); break;
+        case aura::Action::CloseStages: stageSelectOpen_=false; clearWorldInput(); break;
+        case aura::Action::Travel:
+            if(hit.index<aura::StageCount) travelTo(static_cast<aura::Biome>(hit.index));
+            break;
         case aura::Action::Roll: roll(); break;
         case aura::Action::Auto: auto_=!auto_; break;
         case aura::Action::Logs: {
@@ -235,7 +263,7 @@ private:
     void applyDebugActions(const aura::DebugActions& commands) {
         // F1パネルから届く変更を反映。プレビューと実際の所持・装備は分けて扱います。
         if(commands.stopCutscene) stopCutscene();
-        if(!cutsceneActive()) {
+        if(!worldInputBlocked()) {
         if(commands.preview) presentation_.showPreview(*commands.preview,roller_.catalog().size(),auto_);
         if(commands.restore) {presentation_.preview.reset(); presentation_.singularityLevel.reset(); presentation_.pixelationLevel.reset();}
         if(commands.auraLevel) {
@@ -264,16 +292,28 @@ private:
         if(commands.shirt) presentation_.settings.shirt=*commands.shirt;
         if(commands.luck) {roller_.setLuck(*commands.luck); presentation_.settings.luck=roller_.luck();}
         if(commands.avatar) presentation_.settings.avatar=*commands.avatar;
-        if(commands.biome) presentation_.settings.biome=*commands.biome;
+        if(commands.biome && aura::validBiome(*commands.biome) && !cutsceneActive() && !stageTravel_.active()) {
+            presentation_.settings.biome=*commands.biome; x_=z_=0; clearWorldInput();
+        }
+        if(commands.breakthroughCaptionOffset && std::isfinite(*commands.breakthroughCaptionOffset))
+            presentation_.settings.breakthroughCaptionOffset=std::clamp(*commands.breakthroughCaptionOffset,-5.f,5.f);
+        if(commands.breakthroughWordTimes) {
+            const auto& times=*commands.breakthroughWordTimes;
+            bool valid=true; float previous=-1;
+            for(const float second:times) {
+                if(!std::isfinite(second) || second<0 || second>=aura::BreakthroughCutsceneDuration || second<=previous) valid=false;
+                previous=second;
+            }
+            if(valid) presentation_.settings.breakthroughWordTimes=times;
+        }
         if(commands.vrmPath) {presentation_.settings.vrmPath=*commands.vrmPath; renderer_->reloadVrm();}
         if(commands.bgmPath) {presentation_.settings.bgmPath=*commands.bgmPath; music_.reload();}
         if(commands.pixelationBgmPath) {presentation_.settings.pixelationBgmPath=*commands.pixelationBgmPath; music_.reload();}
         if(commands.pixelationFinalBgmPath) {presentation_.settings.pixelationFinalBgmPath=*commands.pixelationFinalBgmPath; music_.reload();}
         if(commands.volume) presentation_.settings.volume=*commands.volume;
         if(commands.username || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
-            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.volume) {
-            try { aura::saveSettings(saves_/L"settings.txt",presentation_.settings); }
-            catch(const std::exception&) { notice_="Settings could not be saved."; }
+            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes) {
+            savePlayerSettings();
         }
         if(commands.playEquinoxCutscene) startCutscene();
         if(commands.playBreakthroughCutscene) startCutscene(aura::CutsceneKind::Breakthrough);
@@ -285,9 +325,18 @@ private:
         if(pending_) { action(*pending_); pending_.reset(); }
         if(stopCutsceneRequested_) stopCutscene();
         if(cutsceneActive()) {
-            cutsceneTime_+=dt;
+            // 実際に音声出力されたサンプル数を映像の時計にします。
+            // MP4の初回デコードや重いフレームがあっても字幕と音が離れません。
+            const auto played=cutsceneMusic_.playbackSeconds();
+            if(!opts_.smoke && cutsceneAudioAvailable_ && played) cutsceneTime_=*played;
+            else cutsceneTime_+=dt;
             if(cutsceneTime_>=aura::cutsceneDuration(cutsceneKind_)) stopCutscene();
         }
+        if(const auto destination=stageTravel_.update(dt,aura::tuning::stages::TravelDurationSeconds)) {
+            // 画面が宇宙に覆われた中間点で惑星と着地点を切り替えます。
+            presentation_.settings.biome=*destination; x_=z_=0; facing_=0; savePlayerSettings();
+        }
+        if(stageTravel_.arrived()) stageTravel_.finish();
         if(auto_ && cooldown_<=0) roll();
         const auto& s=presentation_.settings;
         discord_.update(!opts_.smoke && s.discordEnabled,s.discordApplicationId,s.username,progress_.rolls,dt);
@@ -325,7 +374,7 @@ private:
             lastShotCycle_=volley.shotCycle; lastImpactCycle_=volley.impactCycle; sfxBaseline_=true;
         } else sfxBaseline_=false;
         bool moving=false;
-        if(!cutsceneActive() && (foreground_ || opts_.smoke) && !renderer_->wantsKeyboard()) {
+        if(!worldInputBlocked() && (foreground_ || opts_.smoke) && !renderer_->wantsKeyboard()) {
             float mx=0,mz=0;
             if(keys_['W'] || keys_[VK_UP]) mz+=1;
             if(keys_['S'] || keys_[VK_DOWN]) mz-=1;
@@ -396,7 +445,9 @@ private:
             const float yawBefore=yaw_,pitchBefore=pitch_;
             SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(540,340));
             SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(580,360));
-            if(!dragging_ || yaw_<=yawBefore || pitch_<=pitchBefore) throw std::runtime_error("Right-drag orbit failed");
+            if(!dragging_ || yaw_>=yawBefore || pitch_<=pitchBefore) throw std::runtime_error("Inverted right-drag orbit failed");
+            SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(540,360));
+            if(std::abs(yaw_-yawBefore)>.00001f) throw std::runtime_error("Left-drag did not reverse horizontal rotation");
             SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(1000,410)); // Continue over the debug window.
             SendMessageW(window_,WM_RBUTTONUP,0,MAKELPARAM(1000,410));
             const float released=yaw_;
@@ -573,6 +624,63 @@ private:
         if(roller_.luck()!=25 || presentation_.settings.biome!=aura::Biome::Desert) throw std::runtime_error("World settings actions failed");
         render(false); captureExtra(L"-desert");
         world.biome=aura::Biome::Normal; applyDebugActions(world); render(false);
+        // 惑星選択は通常のクリック入力で確認。移動中にロールや視点操作が漏れないことも確認。
+        const bool stageDebugWasOpen=renderer_->debugOpen();
+        if(stageDebugWasOpen) renderer_->toggleDebug();
+        const auto stageCounts=progress_.counts; const auto stageRolls=progress_.rolls,stageLogs=log_.size();
+        const auto stageEquipped=progress_.equipped;
+        const float stageDistance=distance_,stagePitch=pitch_,stageYaw=yaw_;
+        aura::DebugActions stagePreview; stagePreview.preview=0; applyDebugActions(stagePreview);
+        distance_=26; pitch_=.64f; yaw_=.45f; x_=z_=0;
+        for(unsigned destination=0;destination<aura::StageCount;++destination) {
+            if(destination==0) {render(false); captureExtra(L"-planet-garden"); continue;}
+            auto_=true;
+            SendMessageW(window_,WM_KEYDOWN,'M',0); update(0);
+            if(!stageSelectOpen_ || auto_) throw std::runtime_error("Planet menu did not stop AutoRoll");
+            render(false); if(destination==1) captureExtra(L"-planet-select");
+            if(destination==1) {
+                SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false); captureExtra(L"-planet-select-small");
+                const float smallScale=renderer_->scale();
+                const auto smallMenu=aura::stageSelectLayout(1000/smallScale,700/smallScale);
+                SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(static_cast<int>((smallMenu.x+smallMenu.width-33)*smallScale),
+                    static_cast<int>((smallMenu.y+31)*smallScale))); update(0);
+                if(stageSelectOpen_) throw std::runtime_error("Scaled planet-menu close button failed");
+                SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+                SendMessageW(window_,WM_KEYDOWN,'M',0); update(0);
+            }
+            const auto menu=aura::stageSelectLayout(1440,900);
+            const auto scale=renderer_->scale();
+            SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(static_cast<int>((menu.x+menu.width*.5f)*scale),
+                static_cast<int>((menu.y+112+destination*64.f+28)*scale)));
+            update(0);
+            if(stageSelectOpen_ || !stageTravel_.active() || auto_) throw std::runtime_error("Planet card did not launch rocket");
+            const float lockedYaw=yaw_; const auto originalPlanet=presentation_.settings.biome;
+            SendMessageW(window_,WM_KEYDOWN,'W',0); SendMessageW(window_,WM_KEYDOWN,'R',0); SendMessageW(window_,WM_KEYDOWN,'F',0);
+            SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(540,340));
+            SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(580,360));
+            update(aura::tuning::stages::TravelDurationSeconds*.25f);
+            if(x_!=0 || z_!=0 || yaw_!=lockedYaw || dragging_ || auto_ || progress_.rolls!=stageRolls || presentation_.settings.biome!=originalPlanet)
+                throw std::runtime_error("Rocket launch leaked gameplay or switched planet early");
+            render(false); if(destination==2) captureExtra(L"-rocket-launch");
+            update(aura::tuning::stages::TravelDurationSeconds*.26f);
+            if(presentation_.settings.biome!=static_cast<aura::Biome>(destination)) throw std::runtime_error("Planet swap missed midpoint");
+            render(false); if(destination==2) captureExtra(L"-rocket-space");
+            update(aura::tuning::stages::TravelDurationSeconds*.40f);
+            render(false); if(destination==2) captureExtra(L"-rocket-landing");
+            update(aura::tuning::stages::TravelDurationSeconds*.10f); render(false);
+            if(stageTravel_.active() || aura::loadSettings(saves_/L"settings.txt").biome!=static_cast<aura::Biome>(destination))
+                throw std::runtime_error("Planet arrival was not saved or unlocked");
+            const wchar_t* suffixes[]={L"-planet-garden",L"-planet-desert",L"-planet-ocean",L"-planet-forest",L"-planet-volcano"};
+            captureExtra(suffixes[destination]);
+            if(renderer_->instanceCount()>4096) throw std::runtime_error("Planet exceeded scene instance budget");
+        }
+        SendMessageW(window_,WM_KEYDOWN,'M',0); update(0);
+        SendMessageW(window_,WM_KEYDOWN,VK_ESCAPE,0); update(0);
+        if(stageSelectOpen_ || quitting_) throw std::runtime_error("Planet menu Escape did not close safely");
+        if(progress_.counts!=stageCounts || progress_.rolls!=stageRolls || log_.size()!=stageLogs || progress_.equipped!=stageEquipped)
+            throw std::runtime_error("Planet travel changed inventory or roll history");
+        distance_=stageDistance; pitch_=stagePitch; yaw_=stageYaw;
+        if(stageDebugWasOpen) renderer_->toggleDebug();
         world.biome=aura::Biome::Desert; world.luck=1; applyDebugActions(world);
         previewCommand.preview=singularity; applyDebugActions(previewCommand); update(.4f); render(false); captureExtra(L"-space");
         for(unsigned level=0;level<=3;++level) {
@@ -717,6 +825,18 @@ private:
                 cutsceneAudioPath_.filename()!=L"BreakthroughCutsceneV2.mp4.mp4")
                 throw std::runtime_error("BreakThrough local clipped audio failed: "+cutsceneMusic_.status());
         }
+        aura::DebugActions captionTuning;
+        captionTuning.breakthroughCaptionOffset=-.1f;
+        captionTuning.breakthroughWordTimes=presentation_.settings.breakthroughWordTimes;
+        (*captionTuning.breakthroughWordTimes)[0]=22.4f;
+        applyDebugActions(captionTuning);
+        const auto savedCaption=aura::loadSettings(saves_/L"settings.txt");
+        if(savedCaption.breakthroughCaptionOffset!=-.1f || savedCaption.breakthroughWordTimes[0]!=22.4f)
+            throw std::runtime_error("Live cutscene caption settings were not applied and saved");
+        captionTuning.breakthroughCaptionOffset=0.f;
+        captionTuning.breakthroughWordTimes=aura::tuning::cutscene::BreakthroughWordTimes;
+        applyDebugActions(captionTuning);
+        cutsceneTime_=24.2f; render(false); captureExtra(L"-breakthrough-words");
         constexpr float breakCutTimes[]={1,4,9,13,14.5f,15.5f,18,22,26,28.5f,29.5f};
         for(float second:breakCutTimes) {
             cutsceneTime_=second; render(false);
@@ -878,6 +998,7 @@ private:
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: "
                <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
+            out<<"Planets: PASS / garden, desert, ocean, forest, volcano, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
             out<<"Profile: PASS / UTF-8 username and Discord settings save/restore; editable total 0 / 123456789 / original, AutoRoll stop, inventory/history/best unchanged\n"
                <<"Discord integration: disabled during game smoke; transport and payload covered by isolated fake IPC tests\n";
             out<<"Pixelation: PASS / preview-only, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
@@ -896,6 +1017,7 @@ private:
                <<"BreakThrough instances: "<<breakthroughInstances<<"\nMean BreakThrough frame submission time: "<<meanBreakthroughMs
                <<" ms/frame (60 offscreen frames, no vsync)\n"
                <<"BreakThrough cutscene: PASS / static pillar positions, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
+            out<<"BreakThrough captions: PASS / eight measured word times, live offset/per-word changes saved during playback, reset to defaults\n";
             out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
                <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
@@ -927,7 +1049,7 @@ private:
         }
         // Once a drag starts on the stage it owns the mouse until release or
         // capture loss. ImGui's previous-frame capture flag must not interrupt it.
-        if(message==WM_RBUTTONDOWN && !app->cutsceneActive() && app->renderer_ && app->renderer_->canOrbit(
+        if(message==WM_RBUTTONDOWN && !app->worldInputBlocked() && app->renderer_ && app->renderer_->canOrbit(
             static_cast<float>(GET_X_LPARAM(lp)),static_cast<float>(GET_Y_LPARAM(lp)))) {
             app->lastMouseX_=GET_X_LPARAM(lp); app->lastMouseY_=GET_Y_LPARAM(lp);
             app->dragging_=true; SetFocus(window); SetCapture(window); return 0;
@@ -935,7 +1057,8 @@ private:
         if(message==WM_MOUSEMOVE && app->dragging_) {
             const int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
             app->mouseX_=static_cast<float>(x); app->mouseY_=static_cast<float>(y);
-            app->yaw_+=(x-app->lastMouseX_)*aura::tuning::game::OrbitHorizontalSensitivity;
+            // マウスを右へ動かすと左回転。左右だけ反転し、上下の操作は従来通りです。
+            app->yaw_-=(x-app->lastMouseX_)*aura::tuning::game::OrbitHorizontalSensitivity;
             app->pitch_=std::clamp(app->pitch_+(y-app->lastMouseY_)*aura::tuning::game::OrbitVerticalSensitivity,
                 aura::tuning::game::MinimumCameraPitch,aura::tuning::game::MaximumCameraPitch);
             app->lastMouseX_=x; app->lastMouseY_=y; return 0;
@@ -945,6 +1068,12 @@ private:
         }
         if(message==WM_CAPTURECHANGED) app->dragging_=false;
         if(app->renderer_ && app->renderer_->handleMessage(window,message,wp,lp)) return 0;
+        if((app->stageSelectOpen_ || app->stageTravel_.active()) && message==WM_KEYDOWN) {
+            if((wp==VK_ESCAPE || wp=='M') && app->stageSelectOpen_ && !(lp & (1LL<<30))) app->pending_=aura::Hit{aura::Action::CloseStages,0};
+            return 0;
+        }
+        if((app->stageSelectOpen_ || app->stageTravel_.active()) &&
+            (message==WM_RBUTTONDOWN || message==WM_RBUTTONUP || message==WM_MOUSEWHEEL)) return 0;
         if(app->cutsceneActive()) {
             if(message==WM_KEYDOWN) return 0;
             if(message==WM_LBUTTONUP || message==WM_RBUTTONDOWN || message==WM_RBUTTONUP || message==WM_MOUSEWHEEL) return 0;
@@ -970,6 +1099,7 @@ private:
             if(!(lp & (1LL<<30))) {
                 if(wp==VK_SPACE || wp=='R') app->pending_=aura::Hit{aura::Action::Roll,0};
                 if(wp=='F') app->pending_=aura::Hit{aura::Action::Auto,0};
+                if(wp=='M') app->pending_=aura::Hit{aura::Action::Stages,0};
                 if(wp==VK_ESCAPE) app->quitting_=true;
             }
             return 0;
@@ -1005,6 +1135,8 @@ private:
     bool quitting_{},minimized_{},foreground_{true},auto_{},dragging_{};
     bool cutsceneDebugWasOpen_{},stopCutsceneRequested_{},sfxBaseline_{};
     bool cutsceneAudioAvailable_{};
+    bool stageSelectOpen_{};
+    aura::StageTravel stageTravel_;
     aura::CutsceneKind cutsceneKind_{aura::CutsceneKind::Equinox};
     float effectClock_{},actionClock_{},shotOrbitClock_{},cutsceneTime_{-1};
     std::int64_t shotOrbitCycle_{-1};

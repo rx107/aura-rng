@@ -1,5 +1,6 @@
 #include "render/renderer.hpp"
 #include "tuning/breakthrough.hpp"
+#include "tuning/cutscene.hpp"
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <array>
@@ -361,10 +362,14 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     }
     if(t>=16.05f && t<25.4f)caption(L"it wasn't gone",center-210+std::min(t-16.05f,4.f)*6,285,-2);
     if(t>=20.0f && t<26.0f)caption(L"with only 5 fragments left",center+175,300,7);
-    if(t>=22.35f && t<25.4f) {
+    {
+        // 音声の再生秒に、保存された「単語ごとの時刻 + 一括 Offset」を重ねる。
+        // 等間隔の計算をやめ、サックスの各音に合わせた初出フレームを使います。
         constexpr std::array<std::wstring_view,8> words={L"how",L"much",L"do",L"you",L"believe",L"in",L"this",L"world?"};
-        const unsigned count=std::min(8u,static_cast<unsigned>((t-22.35f)*4.f)+1);
-        for(unsigned i=0;i<count;++i)caption(words[i],center,105.f+static_cast<float>(i)*29.f,0);
+        const auto& timing=frame.presentation.settings;
+        for(unsigned i=0;i<words.size();++i)
+            if(tuning::cutscene::breakthroughWordVisible(t,i,timing.breakthroughWordTimes,timing.breakthroughCaptionOffset))
+                caption(words[i],center,105.f+static_cast<float>(i)*29.f,0);
     }
     if(t>=15.35f && t<28.9f) {
         constexpr std::array<std::wstring_view,7> numerals={L"I",L"II",L"III",L"IV",L"V",L"VI",L"VII"};

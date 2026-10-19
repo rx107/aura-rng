@@ -10,6 +10,7 @@
 #include <shobjidl.h>
 #include <sstream>
 #include <iomanip>
+#include <initializer_list>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -180,9 +181,18 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::TextWrapped("%s",t("1x uses the base odds. Lx has the rarity distribution of the best of L rolls. One result is recorded per Roll.",
                 "1倍は基本確率です。L倍ではL回分の最もレアな結果と同じ確率になります。ロール1回につき結果は1個です。"));
             int biome=static_cast<int>(f.presentation.settings.biome);
-            const char* biomes[]={t("Normal / Quiet Garden","通常 / 静かな庭園"),t("Desert / Sunlit Dunes","砂漠 / 陽光の砂丘")};
-            if(ImGui::Combo(t("Biome","バイオーム"),&biome,biomes,2)) debugActions_.biome=static_cast<Biome>(biome);
-            ImGui::TextDisabled("%s",t("Biome currently changes the scenery.","現在のバイオーム変更は景観に反映されます。"));
+            const auto currentStage=stageDisplayName(f.presentation.settings.biome,language);
+            if(ImGui::BeginCombo(t("Planet / stage","惑星 / ステージ"),currentStage.c_str())) {
+                for(unsigned i=0;i<StageCount;++i) {
+                    const auto destination=static_cast<Biome>(i);
+                    const bool selected=biome==static_cast<int>(i);
+                    if(ImGui::Selectable(stageDisplayName(destination,language).c_str(),selected)) debugActions_.biome=destination;
+                    if(selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::TextWrapped("%s",t("Debug changes the scenery immediately. Use PLANETS in the game view to travel by rocket.",
+                "デバッグでは景観をすぐに変更します。ゲーム画面の「惑星を選択」ではロケットで移動します。"));
             ImGui::Separator();
             ImGui::TextUnformatted(t("CURRENT ODDS / WITH LUCK","現在の排出確率 / Luck反映後"));
             for(std::size_t i=0;i<f.roller.catalog().size();++i) {
@@ -256,6 +266,38 @@ void Renderer::debugUi(const Frame& f) {
                 if(ImGui::Button(t("Play cutscene only##breakthrough","カットシーンのみ再生##breakthrough"))) debugActions_.playBreakthroughCutscene=true;
                 ImGui::SameLine();
                 if(ImGui::Button(t("Stop cutscene##breakthrough","カットシーン停止##breakthrough"))) debugActions_.stopCutscene=true;
+                if(ImGui::CollapsingHeader(t("Caption timing / seconds##breakthrough","字幕タイミング / 秒##breakthrough"))) {
+                    // 音楽そのものをずらすのではなく、字幕の時刻だけ変更します。
+                    // マイナスならサックスより先へ、プラスなら後ろへ。変更は保存されます。
+                    float offset=f.presentation.settings.breakthroughCaptionOffset;
+                    if(ImGui::DragFloat(t("All words offset","全単語の時差"),&offset,.01f,-5.f,5.f,"%+.2f s",ImGuiSliderFlags_AlwaysClamp))
+                        debugActions_.breakthroughCaptionOffset=offset;
+                    ImGui::TextWrapped("%s",t("Negative: earlier. Positive: later. Changes are saved; no rebuild is needed. Replay to check against the saxophone.",
+                        "負の値で早く、正の値で遅く表示します。自動保存され、再ビルドは不要です。再生し直してサックスと合わせてください。"));
+                    if(f.cutsceneTime>=0 && f.cutsceneKind==CutsceneKind::Breakthrough)
+                        ImGui::Text(t("Cutscene clock: %.2f s","カットシーンの現在時刻: %.2f 秒"),f.cutsceneTime);
+                    else ImGui::TextDisabled("%s",t("Play the cutscene above to see its clock.","上のボタンで再生すると、現在時刻を確認できます。"));
+                    auto times=f.presentation.settings.breakthroughWordTimes;
+                    constexpr std::array<const char*,8> words={"how","much","do","you","believe","in","this","world?"};
+                    bool changed=false;
+                    ImGui::TextWrapped("%s",t("Each time is measured from the start of the cutscene. The offset above is added to every word.",
+                        "各値はカットシーン開始からの秒数です。上の時差をすべての単語に加算します。"));
+                    for(std::size_t word=0;word<times.size();++word) {
+                        ImGui::PushID(static_cast<int>(word));
+                        // 前後の単語を追い越さない範囲で、1/100秒単位に調整できます。
+                        const float earliest=word?times[word-1]+.01f:0.f;
+                        const float latest=word+1<times.size()?times[word+1]-.01f:BreakthroughCutsceneDuration-.01f;
+                        if(ImGui::DragFloat(words[word],&times[word],.01f,earliest,latest,"%.2f s",ImGuiSliderFlags_AlwaysClamp)) changed=true;
+                        ImGui::PopID();
+                    }
+                    if(changed) debugActions_.breakthroughWordTimes=times;
+                    if(ImGui::Button(t("Reset caption timing##breakthrough","字幕タイミングを初期値へ##breakthrough"),{-1,30})) {
+                        debugActions_.breakthroughCaptionOffset=0.f;
+                        debugActions_.breakthroughWordTimes=tuning::cutscene::BreakthroughWordTimes;
+                    }
+                    ImGui::TextWrapped("%s",t("F1 toggles this panel during playback. Esc skips the cutscene.",
+                        "再生中もF1でこのパネルを開閉できます。Escでカットシーンを終了します。"));
+                }
             }
             if (ImGui::Button(t("Restore Collection aura","コレクションの装備に戻す"),{-1,30})) debugActions_.restore=true;
             ImGui::Separator();
@@ -396,11 +438,12 @@ void Renderer::ui(const Frame& f) {
             (h-448)*static_cast<float>(visible)/static_cast<float>(defs.size()),Mint,1);
     }
     stroke(256,96,w-596,h-280,Border,14);
-    label(t("SANCTUARY","サンクチュアリ"),276,116,190,25,12,White,true);
-    const bool desert=f.presentation.settings.biome==Biome::Desert;
-    label(desert?t("02 / SUNLIT DUNES","02 / 陽光の砂丘"):t("01 / THE QUIET GARDEN","01 / 静かな庭園"),276,140,240,20,10,Muted);
+    label(t("PLANET SANCTUARY","惑星のサンクチュアリ"),276,116,240,25,12,White,true);
+    label(stageDisplayName(f.presentation.settings.biome,language),276,140,300,20,10,Muted);
     rect(w-487,114,130,26,D2D1::ColorF(.05f,.10f,.12f,.90f),13);
-    label(desert?t("BIOME / DESERT","バイオーム / 砂漠"):t("BIOME / NORMAL","バイオーム / 通常"),w-475,121,125,18,10,Mint);
+    const bool stageHover=inside(f.mouseX/scale_,f.mouseY/scale_,w-487,114,130,26);
+    stroke(w-487,114,130,26,stageHover?Mint:Border,13);
+    label(t("PLANETS / TRAVEL","惑星を選択 / 移動"),w-481,120,118,20,10,Mint,true,true);
     const float titleY=h-281;
     label(f.presentation.preview?t("DEBUG PREVIEW","デバッグプレビュー"):t("EQUIPPED AURA","装備中のオーラ"),276,titleY,300,20,10,Muted,true);
     label(name(shown),276,titleY+23,w-650,45,32,tint(equipped.color),true);
@@ -451,13 +494,102 @@ void Renderer::ui(const Frame& f) {
     rect(w-179,by,130,62,D2D1::ColorF(.08f,.12f,.15f),10);
     label(t("OPEN LOGS","ログを開く"),w-158,by+14,110,24,12,White,true);
     text(L"CSV / UTC",w-147,by+36,100,18,10,Muted);
-    label(t("SPACE / ROLL   WASD / MOVE   RIGHT DRAG / ORBIT   WHEEL / ZOOM   F1 / DEBUG",
-        "SPACE / ロール   WASD / 移動   右ドラッグ / 回転   ホイール / ズーム   F1 / デバッグ"),24,h-39,w-200,23,11,Muted);
+    label(t("SPACE / ROLL   WASD / MOVE   RIGHT DRAG / ORBIT   WHEEL / ZOOM   M / PLANETS   F1 / DEBUG",
+        "SPACE / ロール   WASD / 移動   右ドラッグ / 回転   ホイール / ズーム   M / 惑星   F1 / デバッグ"),24,h-39,w-200,23,11,Muted);
     std::ostringstream luckText; luckText<<t("LUCK ","幸運 ")<<std::fixed<<std::setprecision(f.roller.luck()>=1000?0:2)<<f.roller.luck()<<"x";
     label(luckText.str(),w-150,h-39,134,22,11,Mint,true);
     if (!f.notice.empty()) {
         rect(276,174,w-650,56,D2D1::ColorF(.23f,.13f,.10f,.94f),8);
         label(f.notice,288,188,w-680,28,12,D2D1::ColorF(1,.75f,.56f));
     }
+    if(f.stageSelectOpen) stageSelectUi(f);
+    if(f.stageTravelProgress>=0) stageTravelUi(f);
+}
+void Renderer::stageSelectUi(const Frame& f) {
+    // この画面は描画だけを担当します。クリック判定はRenderer::hit、移動はAppが担当。
+    // 描画と判定でstageSelectLayout()を共有し、ボタン位置のずれを防ぎます。
+    const auto language=f.presentation.settings.language;
+    auto t=[&](const char* en,const char* ja){return std::string(tr(language,en,ja));};
+    const auto layout=stageSelectLayout(logicalW_,logicalH_);
+    const float x=layout.x,y=layout.y,w=layout.width;
+    rect(0,80,logicalW_,logicalH_-80,D2D1::ColorF(.005f,.012f,.025f,.68f));
+    rect(x,y,w,layout.height,D2D1::ColorF(.025f,.047f,.068f,.99f),16);
+    stroke(x,y,w,layout.height,D2D1::ColorF(.19f,.36f,.37f),16);
+    star(x+32,y+31,8,Mint,false);
+    label(t("ROCKET / FLIGHT TERMINAL","ロケット / 惑星ターミナル"),x+50,y+20,w-122,30,19,White,true);
+    const bool closeHover=inside(f.mouseX/scale_,f.mouseY/scale_,x+w-48,y+16,30,30);
+    rect(x+w-48,y+16,30,30,closeHover?D2D1::ColorF(.16f,.28f,.30f):Panel,8);
+    text(L"×",x+w-48,y+18,30,26,20,White,false,true);
+    label(t("Choose your next planet. Your aura travels with you.","次の惑星を選んで出発。装備したオーラも一緒に移動します。"),x+22,y+60,w-44,23,12,Muted);
+    label(t("DESTINATION","目的地"),x+24,y+89,w-48,18,9,Mint,true);
+    constexpr std::array<Color,StageCount> colors={Color{.34f,.85f,.62f},Color{.95f,.73f,.38f},Color{.22f,.68f,.95f},Color{.32f,.69f,.35f},Color{1.f,.35f,.15f}};
+    const std::array<std::string,StageCount> descriptions={
+        t("A quiet garden beneath the stars","星空の下、穏やかな庭園"),t("Golden dunes and sunlit ruins","黄金の砂丘と、陽光に包まれた遺跡"),
+        t("Blue waves around a sandy island","青い波に囲まれた砂浜の島"),t("A woodland of towering green trees","大きな木々に囲まれた緑の森"),t("Volcanic rock and glowing lava","黒い岩と、赤く輝く溶岩")};
+    for(unsigned i=0;i<StageCount;++i) {
+        const auto destination=static_cast<Biome>(i);
+        const bool current=destination==f.presentation.settings.biome;
+        const float rowY=y+112+i*64.f;
+        const bool hover=!current && inside(f.mouseX/scale_,f.mouseY/scale_,x+20,rowY,w-40,56);
+        rect(x+20,rowY,w-40,56,hover?D2D1::ColorF(.08f,.17f,.20f):D2D1::ColorF(.043f,.080f,.105f),9);
+        stroke(x+20,rowY,w-40,56,hover?Mint:current?D2D1::ColorF(.20f,.39f,.35f):Border,9);
+        brush_->SetColor(tint(colors[i],.18f)); d2d_->FillEllipse(D2D1::Ellipse({x+49,rowY+28},20,20),brush_.Get());
+        brush_->SetColor(tint(colors[i])); d2d_->FillEllipse(D2D1::Ellipse({x+49,rowY+28},13,13),brush_.Get());
+        brush_->SetColor(D2D1::ColorF(.02f,.05f,.08f,.5f)); d2d_->FillEllipse(D2D1::Ellipse({x+54,rowY+24},10,13),brush_.Get());
+        star(x+40,rowY+19,2.3f,White);
+        label(stageDisplayName(destination,language),x+81,rowY+8,w-244,23,14,White,true);
+        label(descriptions[i],x+81,rowY+33,w-244,18,10,Muted);
+        label(current?t("YOU ARE HERE","現在地"):t("LAUNCH  >","出発  >"),x+w-149,rowY+19,104,23,11,current?Muted:Mint,true,true);
+    }
+    label(t("M / ESC / CLOSE     ·     No roll or inventory changes during travel","M / ESC / 閉じる     ・     移動で所持オーラやロール回数は変わりません"),x+22,y+458,w-44,23,10,Muted,false,true);
+}
+void Renderer::stageTravelUi(const Frame& f) {
+    // 半分の時点でAppが惑星を交換します。その付近は背景を完全に覆い、切替を隠します。
+    // pは0=離陸、0.5=宇宙を移動、1=着陸。所要時間はtuning/stages.hppを参照。
+    const float p=std::clamp(f.stageTravelProgress,0.f,1.f),w=logicalW_,h=logicalH_;
+    const float opacity=std::clamp(std::min(p/.10f,(1-p)/.12f),0.f,1.f);
+    if(opacity<=0) return;
+    const auto language=f.presentation.settings.language;
+    auto t=[&](const char* en,const char* ja){return std::string(tr(language,en,ja));};
+    rect(0,0,w,h,D2D1::ColorF(.009f,.018f,.040f,opacity));
+    // 低コストな2Dの星空。ロケットと反対方向へ流れることで移動感を出します。
+    for(unsigned i=0;i<70;++i) {
+        const float sx=std::fmod(i*193.73f+91.f,w),sy=std::fmod(i*97.21f+p*h*2.f,h);
+        const float glow=(.25f+.50f*(.5f+.5f*std::sin(i*3.1f+f.time*1.4f)))*opacity;
+        star(sx,sy,i%5==0?3.f:1.5f,D2D1::ColorF(.65f,.82f,1.f,glow));
+        if(p>.22f && p<.72f && i%3==0) {
+            brush_->SetColor(D2D1::ColorF(.43f,.70f,.94f,glow*.35f));
+            d2d_->DrawLine({sx,sy+6},{sx,sy+26},brush_.Get(),1,roundStroke_.Get());
+        }
+    }
+    const float cx=w*.5f;
+    const float lift=std::clamp(p/.27f,0.f,1.f),land=std::clamp((p-.76f)/.24f,0.f,1.f);
+    const float cy=h*(.65f-.25f*std::sin(lift*Pi*.5f)+.25f*land*land)+std::sin(f.time*5.f)*2;
+    // 形は単純な図形の組合せ。縦長の白い機体、青緑の窓、左右の翼、エンジンの炎。
+    auto polygon=[&](std::initializer_list<D2D1_POINT_2F> points,D2D1_COLOR_F color) {
+        ComPtr<ID2D1PathGeometry> geometry; checked(d2dFactory_->CreatePathGeometry(&geometry),"Rocket path");
+        ComPtr<ID2D1GeometrySink> sink; checked(geometry->Open(&sink),"Rocket sink");
+        auto first=points.begin(); sink->BeginFigure(*first,D2D1_FIGURE_BEGIN_FILLED);
+        for(auto it=first+1;it!=points.end();++it) sink->AddLine(*it);
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED); checked(sink->Close(),"Close rocket");
+        brush_->SetColor(color); d2d_->FillGeometry(geometry.Get(),brush_.Get());
+    };
+    const float flame=34+9*std::sin(f.time*37.f);
+    if(p<.93f) {
+        polygon({{cx-13,cy+30},{cx,cy+73+flame},{cx+13,cy+30}},D2D1::ColorF(.36f,.95f,.85f,opacity*.25f));
+        polygon({{cx-8,cy+30},{cx,cy+52+flame*.45f},{cx+8,cy+30}},D2D1::ColorF(.80f,1,.91f,opacity*.9f));
+    }
+    polygon({{cx-17,cy+2},{cx-34,cy+36},{cx-14,cy+25}},D2D1::ColorF(.27f,.78f,.72f,opacity));
+    polygon({{cx+17,cy+2},{cx+34,cy+36},{cx+14,cy+25}},D2D1::ColorF(.27f,.78f,.72f,opacity));
+    rect(cx-17,cy-24,34,57,D2D1::ColorF(.91f,.95f,.96f,opacity),15);
+    polygon({{cx-16,cy-15},{cx,cy-54},{cx+16,cy-15}},D2D1::ColorF(.94f,.98f,1.f,opacity));
+    brush_->SetColor(D2D1::ColorF(.05f,.20f,.29f,opacity)); d2d_->FillEllipse(D2D1::Ellipse({cx,cy-2},10,10),brush_.Get());
+    brush_->SetColor(D2D1::ColorF(.48f,.96f,.84f,opacity)); d2d_->FillEllipse(D2D1::Ellipse({cx-2,cy-4},6,6),brush_.Get());
+    rect(cx-11,cy+29,22,8,D2D1::ColorF(.13f,.24f,.31f,opacity),2);
+    label(p<.27f?t("LIFT OFF","離陸中"):p<.76f?t("CROSSING THE STARS","星の海を移動中"):t("ARRIVING","着陸中"),cx-270,h*.19f,540,32,19,D2D1::ColorF(.76f,.96f,.94f,opacity),true,true);
+    label(stageDisplayName(f.stageTravelTarget,language),cx-320,h*.19f+43,640,40,28,D2D1::ColorF(.96f,.98f,1,opacity),true,true);
+    rect(cx-160,h*.82f,320,2,D2D1::ColorF(.15f,.28f,.37f,opacity),1);
+    rect(cx-160,h*.82f,320*p,2,D2D1::ColorF(.50f,.96f,.83f,opacity),1);
+    star(cx-160+320*p,h*.82f,6,D2D1::ColorF(.60f,1,.90f,opacity),true,p*240);
 }
 } // namespace aura

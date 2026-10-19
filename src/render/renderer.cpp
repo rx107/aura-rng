@@ -1,6 +1,7 @@
 #include "render/renderer.hpp"
 #include "tuning/game.hpp"
 #include "tuning/world.hpp"
+#include "tuning/stages.hpp"
 #include "tuning/ui.hpp"
 #include "imgui.h"
 #include "backends/imgui_impl_dx11.h"
@@ -27,6 +28,25 @@ const D2D1_COLOR_F Panel = D2D1::ColorF(tuning::ui::Panel[0],tuning::ui::Panel[1
 const D2D1_COLOR_F Border = D2D1::ColorF(tuning::ui::Border[0],tuning::ui::Border[1],tuning::ui::Border[2]);
 D2D1_COLOR_F tint(Color c, float alpha = 1) { return D2D1::ColorF(c.r, c.g, c.b, alpha); }
 bool inside(float x, float y, float rx, float ry, float w, float h) { return x >= rx && x < rx+w && y >= ry && y < ry+h; }
+// 惑星ごとの空と遠景の色。RGBは0〜1。海は青、森は緑、火山は赤茶にしています。
+Color stageSky(Biome biome) {
+    switch(biome) {
+    case Biome::Desert: return {.075f,.059f,.045f};
+    case Biome::Ocean: return {.032f,.115f,.17f};
+    case Biome::Forest: return {.022f,.075f,.054f};
+    case Biome::Volcano: return {.10f,.028f,.025f};
+    default: return {.028f,.046f,.066f};
+    }
+}
+Color stageFog(Biome biome) {
+    switch(biome) {
+    case Biome::Desert: return {.15f,.11f,.073f};
+    case Biome::Ocean: return {.07f,.23f,.29f};
+    case Biome::Forest: return {.031f,.12f,.079f};
+    case Biome::Volcano: return {.15f,.046f,.032f};
+    default: return {.042f,.069f,.098f};
+    }
+}
 constexpr char Shader[] = R"(
 cbuffer Camera : register(b0) { row_major float4x4 viewProjection; float4 eyeAndTime; float4 auraLight; };
 struct Input { float3 p:POSITION; float3 n:NORMAL; float4 a:INSTANCE0; float4 b:INSTANCE1; float4 c:INSTANCE2; float4 d:INSTANCE3; float4 color:COLOR0; };
@@ -41,7 +61,7 @@ float4 psMain(Output i):SV_TARGET {
     float diffuse=max(0,dot(normalize(i.n),normalize(float3(-.4,.85,-.5))));
     float3 color=i.color.rgb*(.43+.57*diffuse)*auraLight.x+i.color.rgb*i.color.a*.55;
     float fog=saturate((distance(i.world,eyeAndTime.xyz)-17)/35);
-    return float4(lerp(color,float3(.042,.069,.098),fog*.7),1);
+    return float4(lerp(color,auraLight.yzw,fog*.7),1);
 }
 float4 holeMain(Output i):SV_TARGET {
     float2 q=i.local.xy*2; float r=length(q),angle=atan2(q.y,q.x);
@@ -206,27 +226,55 @@ void Renderer::world(const Frame& f) {
     instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
-    const bool desert=f.presentation.settings.biome==Biome::Desert;
-    box(0,-.6f,0,StageHalfExtent*2,1.0f,StageHalfExtent*2,desert?Color{.38f,.23f,.13f}:Color{.095f,.15f,.18f});
-    box(0,-.12f,0,StageHalfExtent*2-.3f,.10f,StageHalfExtent*2-.3f,desert?Color{.68f,.46f,.24f}:Color{.17f,.28f,.29f});
+    const auto biome=f.presentation.settings.biome;
+    const bool desert=biome==Biome::Desert, ocean=biome==Biome::Ocean;
+    const bool forest=biome==Biome::Forest, volcano=biome==Biome::Volcano;
+    const float layout=tuning::world::PropLayoutScale;
+    const float islandRadius=StageHalfExtent*tuning::stages::OceanIslandRadiusRatio;
+    const Color baseColor=desert?Color{.38f,.23f,.13f}:ocean?Color{.045f,.17f,.23f}:
+        forest?Color{.065f,.12f,.075f}:volcano?Color{.075f,.062f,.069f}:Color{.095f,.15f,.18f};
+    box(0,-.6f,0,StageHalfExtent*2,1.0f,StageHalfExtent*2,baseColor);
+    box(0,ocean?-.25f:-.12f,0,StageHalfExtent*2-.3f,.10f,StageHalfExtent*2-.3f,
+        desert?Color{.68f,.46f,.24f}:ocean?Color{.075f,.35f,.44f}:
+        forest?Color{.12f,.23f,.13f}:volcano?Color{.15f,.12f,.13f}:Color{.17f,.28f,.29f});
     // 半径から枚数を計算するため、HalfExtentだけで床全体の広さを変更できます。
     for (int x=-tuning::world::TileHalfCount;x<=tuning::world::TileHalfCount;++x)
     for (int z=-tuning::world::TileHalfCount;z<=tuning::world::TileHalfCount;++z) {
         const bool path=std::abs(x)<=tuning::world::PathHalfTiles || std::abs(z)<=tuning::world::PathHalfTiles;
         const float checker=((x+z)%2==0)?.035f:0;
-        const Color c=desert?(path?Color{.72f+checker,.52f+checker,.31f+checker}:Color{.83f+checker,.64f+checker,.39f+checker}):
+        const float tileX=static_cast<float>(x)*tuning::world::TileSize,tileZ=static_cast<float>(z)*tuning::world::TileSize;
+        Color c=desert?(path?Color{.72f+checker,.52f+checker,.31f+checker}:Color{.83f+checker,.64f+checker,.39f+checker}):
             (path?Color{.27f+checker,.34f+checker,.37f+checker}:Color{.14f+checker,.30f+checker,.26f+checker});
-        box(static_cast<float>(x)*tuning::world::TileSize,-.03f,static_cast<float>(z)*tuning::world::TileSize,
-            tuning::world::TileSize-.02f,.12f,tuning::world::TileSize-.02f,c);
+        float tileY=-.03f;
+        if(ocean) {
+            // 島の外側は青い水面。十字の桟橋は同じ高さなので中央から歩いて渡れます。
+            const float radius=std::sqrt(tileX*tileX+tileZ*tileZ);
+            const float coast=islandRadius+std::sin(std::atan2(tileZ,tileX)*5)*layout;
+            const bool dock=std::abs(tileX)<tuning::world::TileSize*.75f || std::abs(tileZ)<tuning::world::TileSize*.75f;
+            if(radius<coast) c=radius<coast*.72f?Color{.20f+checker,.43f+checker,.29f+checker}:Color{.83f+checker,.75f+checker,.49f+checker};
+            else if(dock) c={.42f+checker,.29f+checker,.19f+checker};
+            else {
+                const float wave=.5f+.5f*std::sin(tileX*.6f+tileZ*.35f+f.time*tuning::stages::OceanWaveSpeed);
+                c={.07f+wave*.025f,.32f+wave*.07f,.44f+wave*.09f};
+                tileY=-.21f+(wave-.5f)*tuning::stages::OceanWaveHeight;
+            }
+        } else if(forest) c=path?Color{.29f+checker,.25f+checker,.16f+checker}:Color{.105f+checker,.26f+checker,.135f+checker};
+        else if(volcano) c=path?Color{.24f+checker,.21f+checker,.22f+checker}:Color{.105f+checker,.105f+checker,.135f+checker};
+        box(tileX,tileY,tileZ,tuning::world::TileSize-.02f,.12f,tuning::world::TileSize-.02f,c);
     }
     // A low central plinth and its emissive frame are built from the same cube mesh.
-    box(0,.07f,0,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:Color{.20f,.29f,.32f});
+    box(0,.07f,0,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:ocean?Color{.51f,.46f,.30f}:
+        forest?Color{.23f,.30f,.22f}:volcano?Color{.25f,.22f,.25f}:Color{.20f,.29f,.32f});
     for (int i=0;i<4;++i) {
         const float a=i*Pi/2; box(std::sin(a)*2.25f,.16f,std::cos(a)*2.25f,4.5f,.025f,.035f,d.color,a,1);
     }
+    // 床を細かくして木を最大まで増やした場合も、アバターやオーラが消えないようにします。
+    // 新しい景観の飾りだけを先に止め、後で描く機体/人/最大160粒子/最大128点の輪に512箱を確保。
+    const auto sceneryRoom=[&](std::size_t cubes) {return instances_.size()+cubes<=MaxInstances-512;};
     const float trees[][2]={{-6,-5},{6,5},{-6,6},{6,-6},{-8,1},{8,0},
         {-18,-18},{18,18},{-18,18},{18,-18},{-26,-8},{26,8},{-8,26},{8,-26},{-26,25},{26,-25},{-12,-24},{12,24}};
     for (const auto& p:trees) {
+        if(ocean || forest || volcano) break;
         // 外周の木/サボテンもステージの広さに合わせて配置だけ拡大します。
         const float treeX=p[0]*tuning::world::PropLayoutScale;
         const float treeZ=p[1]*tuning::world::PropLayoutScale;
@@ -244,10 +292,148 @@ void Renderer::world(const Frame& f) {
         box(treeX,2.2f,treeZ,1.9f,1.4f,1.9f,{.13f,.35f,.29f});
         box(treeX-.1f,3.05f,treeZ,1.3f,.6f,1.3f,{.21f,.45f,.34f});
     }
+    // 海: ヤシ、桟橋、白い波。波は少数の細い箱を動かすだけで、重い流体計算はしません。
+    if(ocean) {
+        for(unsigned i=0;i<7;++i) {
+            const float a=i*2.399963f;
+            const float radius=islandRadius*(i<3?.56f:.81f);
+            const float x=std::cos(a)*radius,z=std::sin(a)*radius;
+            if(std::abs(x)<2.f || std::abs(z)<2.f || std::hypot(x-tuning::stages::RocketX,z-tuning::stages::RocketZ)<3.f) continue;
+            if(!sceneryRoom(11)) break;
+            for(int trunk=0;trunk<4;++trunk)
+                box(x+trunk*.10f, .45f+trunk*.70f,z,.42f,.78f,.42f,{.40f,.28f,.16f},a);
+            for(int leaf=0;leaf<6;++leaf) {
+                const float angle=leaf*Pi/3+a;
+                box(x+.3f+std::cos(angle)*1.f,3.f,z+std::sin(angle)*1.f,2.4f,.13f,.55f,{.17f,.46f,.28f},-angle);
+            }
+            box(x+.25f,2.65f,z,.65f,.45f,.65f,{.37f,.28f,.15f},a);
+        }
+        for(unsigned i=0;i<tuning::stages::OceanWaveCount && sceneryRoom(1);++i) {
+            const float a=i*2.399963f;
+            const float radius=islandRadius+2.f+std::fmod(i*3.71f, std::max(1.f,StageHalfExtent-islandRadius-4.f));
+            const float x=std::cos(a)*radius,z=std::sin(a)*radius;
+            if(std::abs(x)<2.f || std::abs(z)<2.f) continue;
+            const float phase=f.time*tuning::stages::OceanWaveSpeed+i;
+            box(x+std::sin(phase)*.35f,-.085f+std::sin(phase)*tuning::stages::OceanWaveHeight,z,
+                1.6f+.5f*std::sin(i*2.f),.025f,.10f,{.49f,.84f,.87f},-a+.4f,.45f);
+        }
+        // 桟橋の杭と板の継ぎ目。プレイヤーの道の中央は空けたままです。
+        for(int i=0;i<14;++i) {
+            const float along=(i-6.5f)*(StageHalfExtent/7.f);
+            if(std::abs(along)<islandRadius) continue;
+            if(!sceneryRoom(6)) break;
+            for(float side:{-1.f,1.f}) {
+                box(side*1.12f,.28f,along,.16f,.80f,.16f,{.31f,.22f,.16f});
+                box(along,.28f,side*1.12f,.16f,.80f,.16f,{.31f,.22f,.16f});
+            }
+            box(0,.04f,along,2.f,.025f,.06f,{.24f,.17f,.12f});
+            box(along,.04f,0,.06f,.025f,2.f,{.24f,.17f,.12f});
+        }
+    }
+    // 森: 決まった種から配置を計算するため、毎フレーム同じ森になります。
+    // 木は中央7単位と十字路、ロケット発着場を避けて置きます。
+    if(forest) {
+        for(unsigned i=0;i<tuning::stages::ForestTreeCount;++i) {
+            const float angle=i*2.399963f;
+            const float radius=7.5f+std::sqrt(static_cast<float>(i)/tuning::stages::ForestTreeCount)*(StageHalfExtent-9.f);
+            const float x=std::cos(angle)*radius,z=std::sin(angle)*radius;
+            if(std::abs(x)<3.1f || std::abs(z)<3.1f || std::hypot(x-tuning::stages::RocketX,z-tuning::stages::RocketZ)<3.3f) continue;
+            if(!sceneryRoom(5)) break;
+            const float height=tuning::stages::ForestTreeHeight*(.78f+.32f*(.5f+.5f*std::sin(i*2.7f)));
+            const float sway=std::sin(f.time*.35f+i)*.055f;
+            box(x,height*.38f,z,.60f,height*.76f,.60f,{.20f,.16f,.115f},angle);
+            box(x,height*.70f,z,3.1f,height*.36f,3.1f,{.065f,.24f,.135f},angle+sway);
+            box(x-.18f,height*.91f,z,2.55f,height*.27f,2.55f,{.10f,.34f,.17f},angle+.4f+sway);
+            box(x+.12f,height*1.065f,z,1.7f,height*.18f,1.7f,{.17f,.42f,.22f},angle+sway);
+            box(x,.10f,z,1.3f,.20f,1.2f,{.14f,.23f,.12f},angle);
+        }
+        for(unsigned i=0;i<45;++i) {
+            const float a=i*2.399963f,r=5.8f+std::fmod(i*3.21f,StageHalfExtent-8.f);
+            const float x=std::cos(a)*r,z=std::sin(a)*r;
+            if(std::abs(x)<2.7f || std::abs(z)<2.7f) continue;
+            if(!sceneryRoom(i%3==0?4:2)) break;
+            box(x,.22f,z,.75f,.44f,.85f,{.13f,.34f,.15f},a);
+            box(x+.34f,.38f,z,.11f,.48f,.56f,{.24f,.48f,.20f},a+.8f);
+            if(i%3==0) {box(x-.3f,.16f,z+.2f,.07f,.30f,.07f,{.65f,.63f,.45f});box(x-.3f,.33f,z+.2f,.33f,.12f,.30f,{.75f,.28f,.21f},a);}
+        }
+        for(unsigned i=0;i<tuning::stages::ForestFireflyCount && sceneryRoom(1);++i) {
+            const float a=i*2.399963f+f.time*tuning::stages::ForestFireflySpeed*.12f;
+            const float r=3.8f+std::fmod(i*1.47f,StageHalfExtent*.72f);
+            const float pulse=.5f+.5f*std::sin(f.time*1.8f+i*1.7f);
+            box(std::cos(a)*r,.6f+std::fmod(i*.43f,3.f)+std::sin(f.time*tuning::stages::ForestFireflySpeed+i)*.24f,
+                std::sin(a)*r,.045f+pulse*.025f,.045f+pulse*.025f,.045f+pulse*.025f,{.71f,1.f,.30f},a,1.4f);
+        }
+    }
+    // 火山: 中央の平らな玄武岩広場を残し、溶岩の枝と遠景の火口を描きます。
+    if(volcano) {
+        const float pulse=.65f+.35f*std::sin(f.time*tuning::stages::LavaPulseSpeed);
+        for(int branch=0;branch<5 && sceneryRoom(1);++branch) for(int segment=0;segment<19 && sceneryRoom(1);++segment) {
+            const float r=6.f+segment*(StageHalfExtent-8.f)/19.f;
+            const float a=branch*2*Pi/5+.26f*std::sin(r*.25f+branch);
+            box(std::cos(a)*r,.065f,std::sin(a)*r,.58f+.18f*std::sin(static_cast<float>(segment)),.06f,1.7f,{1.f,.17f+pulse*.13f,.035f},-a+Pi/2,1.4f);
+        }
+        for(int i=0;i<28;++i) {
+            const float a=i*2.399963f,r=8.f+std::fmod(i*3.13f,StageHalfExtent-11.f);
+            const float x=std::cos(a)*r,z=std::sin(a)*r;
+            if(std::abs(x)<3.f || std::abs(z)<3.f) continue;
+            if(!sceneryRoom(2)) break;
+            const float h=.65f+1.8f*(.5f+.5f*std::sin(i*2.1f));
+            box(x,h*.5f,z,1.05f,h,1.2f,{.13f,.125f,.17f},a);
+            box(x+.25f,h+.14f,z,.85f,.28f,.88f,{.22f,.20f,.25f},a+.2f);
+        }
+        const float mountainX=StageHalfExtent*tuning::stages::VolcanoXRatio,mountainZ=StageHalfExtent*tuning::stages::VolcanoZRatio;
+        // 層を上に重ねて裾の広い山を作り、最上部だけ輪にして火口を空けます。
+        for(int layer=0;layer<8;++layer) {
+            if(!sceneryRoom(layer<6?1:16)) break;
+            const float h=tuning::stages::VolcanoHeight/8.f,r=(7.6f-layer*.63f)*layout;
+            const float y=layer*h+h*.5f;
+            if(layer<6) box(mountainX,y,mountainZ,r*2,h+.04f,r*2,{.14f+layer*.009f,.12f+layer*.008f,.15f+layer*.009f},.18f);
+            else for(int side=0;side<16;++side) {
+                const float angle=side*Pi/8;
+                box(mountainX+std::cos(angle)*r,y,mountainZ+std::sin(angle)*r,1.35f*layout,h+.06f,1.35f*layout,{.27f,.19f,.19f},angle);
+            }
+        }
+        if(sceneryRoom(1)) box(mountainX,tuning::stages::VolcanoHeight*.77f,mountainZ,5.2f*layout,.16f,5.2f*layout,{1.f,.24f,.045f},.18f,2.f);
+        for(unsigned i=0;i<tuning::stages::VolcanoEmberCount && sceneryRoom(1);++i) {
+            const float a=i*2.399963f,r=3.2f+std::fmod(i*2.3f,StageHalfExtent*.77f);
+            const float y=.5f+std::fmod(i*.71f+f.time*tuning::stages::VolcanoEmberRiseSpeed,6.f);
+            const float size=.035f+.04f*(.5f+.5f*std::sin(i*1.7f));
+            box(std::cos(a)*r+std::sin(f.time*.4f+i)*.35f,y,std::sin(a)*r,size,size*1.7f,size,{1.f,.43f,.09f},a,1.5f);
+        }
+    }
     for (float x : {-4.f,4.f}) for (float z : {-3.f,3.f}) {
         box(x,.55f,z,.5f,1.1f,.5f,{.31f,.37f,.39f});
-        box(x,1.15f,z,.56f,.14f,.56f,{.50f,.94f,.80f},0,1);
+        box(x,1.15f,z,.56f,.14f,.56f,volcano?Color{1.f,.51f,.22f}:forest?Color{.79f,.96f,.46f}:Color{.50f,.94f,.80f},0,1);
     }
+    // 全惑星共通の小型ロケット。発着場と機体は元からある箱メッシュだけで作っています。
+    // tuning/stages.hpp の RocketX / RocketZ / RocketScale で配置と大きさを変更できます。
+    const float rocketX=tuning::stages::RocketX,rocketZ=tuning::stages::RocketZ,rocketScale=tuning::stages::RocketScale;
+    const Color rocketAccent{.22f,.65f,.85f};
+    box(rocketX,.10f,rocketZ,4.1f,.20f,4.1f,{.16f,.22f,.28f},Pi/4);
+    for(int i=0;i<16;++i) {
+        const float a=i*Pi/8;
+        box(rocketX+std::cos(a)*1.82f,.225f,rocketZ+std::sin(a)*1.82f,.53f,.035f,.075f,{.38f,.86f,1.f},-a+Pi/2,1.f);
+    }
+    auto rocketPart=[&](float x,float y,float z,float sx,float sy,float sz,Color color,float angle=0.f,float glow=0.f) {
+        box(rocketX+x*rocketScale,.24f+y*rocketScale,rocketZ+z*rocketScale,sx*rocketScale,sy*rocketScale,sz*rocketScale,color,angle,glow);
+    };
+    rocketPart(0,1.85f,0,1.15f,2.6f,1.15f,{.82f,.86f,.89f},Pi/4);
+    rocketPart(0,1.85f,0,1.34f,2.6f,.78f,{.87f,.91f,.93f});
+    rocketPart(0,.61f,0,1.26f,.22f,1.26f,{.23f,.30f,.38f},Pi/4);
+    rocketPart(0,1.19f,0,1.37f,.22f,.82f,rocketAccent);
+    for(int ring=0;ring<6;++ring) {
+        const float width=1.24f-ring*.18f;
+        rocketPart(0,3.19f+ring*.14f,0,width,.17f,width,ring<2?Color{.85f,.90f,.93f}:rocketAccent,Pi/4);
+    }
+    rocketPart(0,2.45f,-.62f,.55f,.64f,.12f,{.12f,.20f,.29f});
+    rocketPart(0,2.45f,-.69f,.36f,.43f,.035f,{.35f,.88f,1.f},0,.75f);
+    for(int fin=0;fin<4;++fin) {
+        const float a=fin*Pi/2;
+        rocketPart(std::cos(a)*.82f,.65f,std::sin(a)*.82f,.70f,.85f,.20f,rocketAccent,-a);
+        rocketPart(std::cos(a)*.95f,.18f,std::sin(a)*.95f,.65f,.16f,.38f,{.19f,.25f,.32f},-a);
+    }
+    box(rocketX-2.05f,.54f,rocketZ-1.18f,.50f,1.05f,.40f,{.19f,.27f,.34f});
+    box(rocketX-2.05f,1.14f,rocketZ-1.18f,.74f,.20f,.55f,{.25f,.65f,.77f},0,.55f);
     // The lightweight primitive avatar remains available while a VRM is loading.
     const bool useVrm=f.presentation.settings.avatar==Avatar::Vrm && vrmReady();
     const bool floating=d.id=="singularity";
@@ -333,7 +519,9 @@ void Renderer::world(const Frame& f) {
     nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=!breakthrough && tag.z>0 && tag.z<1;
     struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye,light; } camera{};
     XMStoreFloat4x4(&camera.vp,view*projection); XMStoreFloat4(&camera.eye,eye); camera.eye.w=pixelated?effectTime:f.time;
-    camera.light={pixelated?.30f:(equinox || breakthrough)?.20f:1.f,0,0,0};
+    const auto fogColor=stageFog(biome);
+    // xはオーラ時の照明、y/z/wは惑星の霧のRGB。既存の96バイト定数バッファを共用します。
+    camera.light={pixelated?.30f:(equinox || breakthrough)?.20f:1.f,fogColor.r,fogColor.g,fogColor.b};
     context_->UpdateSubresource(constants_.Get(),0,nullptr,&camera,0,0);
     D3D11_MAPPED_SUBRESOURCE mapped{}; checked(context_->Map(instanceBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped), "Map instances");
     std::memcpy(mapped.pData,instances_.data(),instances_.size()*sizeof(Instance)); context_->Unmap(instanceBuffer_.Get(),0);
@@ -375,7 +563,8 @@ void Renderer::label(const std::string& value,float x,float y,float w,float h,fl
 void Renderer::draw(const Frame& frame,bool present) {
     updateVrm(frame);
     debugUi(frame);
-    const float clear[]={.028f,.046f,.066f,1}; context_->ClearRenderTargetView(target_.Get(),clear);
+    const auto sky=stageSky(frame.presentation.settings.biome);
+    const float clear[]={sky.r,sky.g,sky.b,1}; context_->ClearRenderTargetView(target_.Get(),clear);
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     if(frame.cutsceneTime>=0) {
@@ -398,6 +587,16 @@ Hit Renderer::hit(float px,float py,const Frame& f) const {
     if(f.cutsceneTime>=0) return {};
     const float x=px/scale_,y=py/scale_,w=logicalW_,h=logicalH_,bx=w*.5f-105,by=h-146;
     if(inside(x,y,w-330,26,112,28)) return {Action::Debug,0};
+    if(f.stageTravelProgress>=0) return {};
+    if(f.stageSelectOpen) {
+        const auto panel=stageSelectLayout(w,h);
+        if(inside(x,y,panel.x+panel.width-48,panel.y+16,30,30)) return {Action::CloseStages,0};
+        for(unsigned i=0;i<StageCount;++i)
+            if(inside(x,y,panel.x+20,panel.y+112+i*64.f,panel.width-40,56) &&
+                static_cast<Biome>(i)!=f.presentation.settings.biome) return {Action::Travel,i};
+        return {};
+    }
+    if(inside(x,y,w-487,114,130,26)) return {Action::Stages,0};
     if(inside(x,y,bx,by,210,62)) return {Action::Roll,0};
     if(inside(x,y,bx+228,by,134,62)) return {Action::Auto,0};
     if(inside(x,y,w-179,by,130,62)) return {Action::Logs,0};

@@ -7,6 +7,7 @@
 #include <DirectXMath.h>
 #include <wrl/client.h>
 #include <array>
+#include <algorithm>
 #include <span>
 #include <future>
 #include "render/vrm.hpp"
@@ -32,9 +33,19 @@ struct Frame {
     CutsceneKind cutsceneKind{CutsceneKind::Equinox};
     std::string discordStatus;
     float actionTime{-1},shotOrbitTime{-1};
+    bool stageSelectOpen{};
+    float stageTravelProgress{-1};
+    Biome stageTravelTarget{Biome::Normal};
 };
-enum class Action { None, Roll, Auto, Logs, Equip, Debug };
+enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
+// 描く場所とクリック判定は同じ設計図を使います。座標は1440×900基準の論理ピクセル。
+// 惑星カード i は {x+20, y+112+i*64, width-40, 56}、閉じるは右上の30×30です。
+struct StageSelectLayout { float x,y,width,height; };
+inline StageSelectLayout stageSelectLayout(float w,float h) {
+    const float width=std::min(760.f,w-636.f),height=504.f;
+    return {256+(w-596-width)*.5f,96+(h-280-height)*.5f,width,height};
+}
 class Renderer {
 public:
     ~Renderer();
@@ -97,6 +108,8 @@ private:
     void world(const Frame& frame);
     void updateVrm(const Frame& frame);
     void ui(const Frame& frame);
+    void stageSelectUi(const Frame& frame);
+    void stageTravelUi(const Frame& frame);
     void initializeDebug();
     void debugUi(const Frame& frame);
     void createStar();

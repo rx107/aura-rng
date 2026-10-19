@@ -12,6 +12,16 @@
 #endif
 
 namespace aura {
+std::string stageDisplayName(Biome stage,Language language) {
+    switch(stage) {
+    case Biome::Normal: return tr(language,"Quiet Garden","静かな庭園");
+    case Biome::Desert: return tr(language,"Sunlit Dunes","陽光の砂丘");
+    case Biome::Ocean: return tr(language,"Azure Ocean","蒼海の惑星");
+    case Biome::Forest: return tr(language,"Verdant Forest","深緑の惑星");
+    case Biome::Volcano: return tr(language,"Ember Volcano","火山の惑星");
+    }
+    return {};
+}
 std::string displayName(const Definition& d, Language language) {
     if (language == Language::English) return d.name;
     const std::pair<const char*, const char*> names[] = {
@@ -66,8 +76,16 @@ void validate(const Settings& s) {
     if(!validDiscordApplicationId(s.discordApplicationId)) throw std::runtime_error("Discord Application ID requires at most 20 digits");
     if (!std::isfinite(s.luck) || s.luck<1 || s.luck>1'000'000 || !std::isfinite(s.volume) || s.volume<0 || s.volume>1)
         throw std::runtime_error("Invalid luck or volume");
-    if ((s.avatar!=Avatar::Block && s.avatar!=Avatar::Vrm) || (s.biome!=Biome::Normal && s.biome!=Biome::Desert))
+    if ((s.avatar!=Avatar::Block && s.avatar!=Avatar::Vrm) || !validBiome(s.biome))
         throw std::runtime_error("Invalid avatar or biome");
+    if(!std::isfinite(s.breakthroughCaptionOffset) || std::abs(s.breakthroughCaptionOffset)>5.f)
+        throw std::runtime_error("Caption offset must be between -5 and 5 seconds");
+    float previous=-1;
+    for(const float second:s.breakthroughWordTimes) {
+        if(!std::isfinite(second) || second<0 || second>=BreakthroughCutsceneDuration || second<=previous)
+            throw std::runtime_error("Caption words must have ascending times inside the cutscene");
+        previous=second;
+    }
     for (const auto* p:{&s.vrmPath,&s.bgmPath,&s.pixelationBgmPath,&s.pixelationFinalBgmPath})
         if (p->size()>2048 || p->find_first_of("\r\n\0",0,3)!=std::string::npos)
         throw std::runtime_error("Invalid asset path");
@@ -83,7 +101,7 @@ Settings loadSettings(const std::filesystem::path& path) {
     std::ifstream input(path);
     std::string header, kind, language, extra;
     std::getline(input, header);
-    if (header != "STARS_RNG_SETTINGS 1" && header != "STARS_RNG_SETTINGS 2" && header != "STARS_RNG_SETTINGS 3" && header != "STARS_RNG_SETTINGS 4")
+    if (header != "STARS_RNG_SETTINGS 1" && header != "STARS_RNG_SETTINGS 2" && header != "STARS_RNG_SETTINGS 3" && header != "STARS_RNG_SETTINGS 4" && header != "STARS_RNG_SETTINGS 5")
         throw std::runtime_error("Invalid settings header");
     if (!(input >> kind >> language) || kind != "language" || (language != "en" && language != "ja"))
         throw std::runtime_error("Invalid language setting");
@@ -97,17 +115,24 @@ Settings loadSettings(const std::filesystem::path& path) {
             !(input>>kind>>std::quoted(s.vrmPath)) || kind!="vrm" || !(input>>kind>>std::quoted(s.bgmPath)) || kind!="bgm")
             throw std::runtime_error("Invalid asset settings");
         s.avatar=static_cast<Avatar>(avatar); s.biome=static_cast<Biome>(biome);
-        if ((header=="STARS_RNG_SETTINGS 3" || header=="STARS_RNG_SETTINGS 4") &&
+        if ((header=="STARS_RNG_SETTINGS 3" || header=="STARS_RNG_SETTINGS 4" || header=="STARS_RNG_SETTINGS 5") &&
             (!(input>>kind>>std::quoted(s.pixelationBgmPath)) || kind!="pixelation_bgm" ||
              !(input>>kind>>std::quoted(s.pixelationFinalBgmPath)) || kind!="pixelation_final_bgm"))
             throw std::runtime_error("Invalid Pixelation audio settings");
-        if(header=="STARS_RNG_SETTINGS 4") {
+        if(header=="STARS_RNG_SETTINGS 4" || header=="STARS_RNG_SETTINGS 5") {
             int enabled{};
             if(!(input>>kind>>std::quoted(s.username)) || kind!="username" ||
                 !(input>>kind>>enabled) || kind!="discord_enabled" || (enabled!=0 && enabled!=1) ||
                 !(input>>kind>>std::quoted(s.discordApplicationId)) || kind!="discord_application_id")
                 throw std::runtime_error("Invalid profile settings");
             s.discordEnabled=enabled!=0;
+        }
+        if(header=="STARS_RNG_SETTINGS 5") {
+            if(!(input>>kind>>s.breakthroughCaptionOffset) || kind!="breakthrough_caption_offset" ||
+                !(input>>kind) || kind!="breakthrough_word_times")
+                throw std::runtime_error("Invalid caption settings");
+            for(float& second:s.breakthroughWordTimes)
+                if(!(input>>second)) throw std::runtime_error("Invalid caption word time");
         }
     }
     if (input>>extra) throw std::runtime_error("Unexpected settings data");
@@ -118,14 +143,17 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     auto temporary = path; temporary += ".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    out << "STARS_RNG_SETTINGS 4\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
+    out << "STARS_RNG_SETTINGS 5\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
         << "\nshirt " << std::setprecision(17) << settings.shirt.r << ' ' << settings.shirt.g << ' ' << settings.shirt.b
         << "\nluck "<<settings.luck<<"\navatar "<<static_cast<int>(settings.avatar)<<"\nbiome "<<static_cast<int>(settings.biome)
         <<"\nvolume "<<settings.volume<<"\nvrm "<<std::quoted(settings.vrmPath)<<"\nbgm "<<std::quoted(settings.bgmPath)
         <<"\npixelation_bgm "<<std::quoted(settings.pixelationBgmPath)
         <<"\npixelation_final_bgm "<<std::quoted(settings.pixelationFinalBgmPath)
         <<"\nusername "<<std::quoted(settings.username)<<"\ndiscord_enabled "<<(settings.discordEnabled?1:0)
-        <<"\ndiscord_application_id "<<std::quoted(settings.discordApplicationId)<<'\n';
+        <<"\ndiscord_application_id "<<std::quoted(settings.discordApplicationId)
+        <<"\nbreakthrough_caption_offset "<<settings.breakthroughCaptionOffset<<"\nbreakthrough_word_times";
+    for(const float second:settings.breakthroughWordTimes) out<<' '<<second;
+    out<<'\n';
     out.flush();
     if (!out) throw std::runtime_error("Cannot write settings");
     out.close();

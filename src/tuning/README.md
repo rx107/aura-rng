@@ -10,6 +10,8 @@
 | --- | --- | --- |
 | ロール間隔・移動・カメラ | [game.hpp](game.hpp) | `RollCooldownSeconds` を `1.4f → .7f`。待ち時間が半分。 |
 | ステージ・標準オーラ・Singularity | [world.hpp](world.hpp) | `HalfExtent` を `32.f → 40.f`。床・木・歩行範囲が一緒に広がる。 |
+| 惑星の景観・ロケット | [stages.hpp](stages.hpp) | `TravelDurationSeconds` を `3.6f → 5.f`。移動演出が長くなる。木・波・火の粉もここ。 |
+| BreakThroughの字幕 | [cutscene.hpp](cutscene.hpp) | `BreakthroughWordTimes` の各秒数。F1からも再ビルドなしで変更可能。 |
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |
 | Pixelation | [pixelation.hpp](pixelation.hpp) | `FinalMotionSpeed` を `3.f → 4.f`。Lv3 の周囲だけ高速化。 |

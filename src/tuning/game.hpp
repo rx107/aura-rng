@@ -20,6 +20,7 @@ inline constexpr float InitialCameraYaw = .45f;
 inline constexpr float InitialCameraPitch = .52f;
 
 // 右ドラッグの感度 [ラジアン/ピクセル]。小さくするとゆっくり回せます。
+// 左右は「右へドラッグ→左回転」です。反転の符号は platform/main.cpp の WM_MOUSEMOVE。
 inline constexpr float OrbitHorizontalSensitivity = .008f;
 inline constexpr float OrbitVerticalSensitivity = .006f;
 inline constexpr float MinimumCameraPitch = .12f;

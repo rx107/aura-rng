@@ -1,18 +1,21 @@
 #pragma once
 #include "core/aura.hpp"
+#include "core/stages.hpp"
+#include "tuning/cutscene.hpp"
 #include "tuning/game.hpp"
 #include "tuning/world.hpp"
+#include <array>
 #include <optional>
 
 namespace aura {
 enum class Language { English, Japanese };
 enum class Avatar { Block, Vrm };
-enum class Biome { Normal, Desert };
 enum class CutsceneKind { Equinox, Breakthrough };
 inline const char* tr(Language language, const char* english, const char* japanese) {
     return language == Language::Japanese ? japanese : english;
 }
 std::string displayName(const Definition& definition, Language language);
+std::string stageDisplayName(Biome stage,Language language);
 struct Settings {
     // F1で変えて保存する「プレイヤーの設定」。src/tuningはビルド時のゲーム調整値。
     // settings.txtが既にある場合は、その保存内容を優先して読み込みます。
@@ -25,6 +28,9 @@ struct Settings {
     std::string username{"Player"},discordApplicationId{"1560569853184573590"};
     bool discordEnabled{true};
     float volume{.55f};
+    // 字幕の微調整 [秒]。負数は早く、正数は遅く表示。F1から変更して保存できます。
+    float breakthroughCaptionOffset{};
+    std::array<float,8> breakthroughWordTimes{tuning::cutscene::BreakthroughWordTimes};
 };
 Settings loadSettings(const std::filesystem::path& path);
 void saveSettings(const std::filesystem::path& path, const Settings& settings);
@@ -59,12 +65,14 @@ struct DebugActions {
     std::optional<std::string> username,discordApplicationId;
     std::optional<bool> discordEnabled;
     std::optional<std::uint64_t> rollCount;
+    std::optional<float> breakthroughCaptionOffset;
+    std::optional<std::array<float,8>> breakthroughWordTimes;
 };
 // 他の処理から読む共通名。数値の編集場所は tuning/game.hpp に集約。
 inline constexpr float RollCooldown = tuning::game::RollCooldownSeconds;
 inline constexpr float EquinoxCutsceneDuration = 10.9f;
-inline constexpr float BreakthroughCutsceneDuration = 30.f;
-inline constexpr float BreakthroughAudioStart = 4.5f;
+inline constexpr float BreakthroughCutsceneDuration = tuning::cutscene::BreakthroughDuration;
+inline constexpr float BreakthroughAudioStart = tuning::cutscene::BreakthroughAudioStart;
 inline constexpr float cutsceneDuration(CutsceneKind kind) {
     return kind==CutsceneKind::Breakthrough?BreakthroughCutsceneDuration:EquinoxCutsceneDuration;
 }
