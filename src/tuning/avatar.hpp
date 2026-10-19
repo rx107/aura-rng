@@ -57,6 +57,16 @@ inline constexpr std::array<float,2> ArmOut={.35f,.35f};
 inline constexpr std::array<float,2> ArmPitch={-.15f,-.15f};
 inline constexpr std::array<float,2> LegOut={.03f,.03f};
 }
+namespace illusionary {
+// 青いリングの下で静かに浮く固定ポーズ。歩いても手足は振りません。
+inline constexpr float Lift=.65f; // .9fなら全身が0.25単位上へ移動します。
+inline constexpr float BobAmplitude=.07f, BobFrequency=1.1f;
+inline constexpr float BodyPitch=-.22f;
+inline constexpr std::array<float,2> ArmOut={.78f,.92f};
+inline constexpr std::array<float,2> ArmPitch={-.50f,-.28f};
+inline constexpr std::array<float,2> LegPitch={-.34f,.36f};
+inline constexpr std::array<float,2> Knee={-.28f,-.42f};
+}
 static_assert(walking::GaitFrequency>0 && walking::IdleFrequency>0);
 static_assert(singularity::BobFrequency>0 && pixelation::BobFrequency>0 && equinox::BobFrequency>0);
 } // namespace aura::tuning::avatar

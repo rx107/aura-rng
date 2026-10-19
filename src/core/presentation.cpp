@@ -28,7 +28,8 @@ std::string displayName(const Definition& d, Language language) {
         {"still", "コモン"}, {"glimmer", "アンコモン"}, {"ember", "残火"}, {"stardust", "星屑"}, {"verdant", "翠緑"},
         {"tidal", "潮流"}, {"amethyst", "アメジスト"}, {"solar", "太陽"}, {"aurora", "オーロラ"},
         {"astral", "星界"}, {"eventide", "宵闇"}, {"zenith", "天頂"}, {"pixelation", "ピクセレーション"},
-        {"equinox", "エキノックス"}, {"breakthrough", "ブレイクスルー"}, {"nanally", "ナナリー"}, {"singularity", "特異点"}};
+        {"equinox", "エキノックス"}, {"breakthrough", "ブレイクスルー"}, {"nanally", "ナナリー"}, {"singularity", "特異点"},
+        {"illusionary","イリュージョナリー"}, {"dune","砂丘"}, {"mirage","蜃気楼"}, {"pharaoh","ファラオ"}};
     for (const auto& [id, name] : names) if (d.id == id) return name;
     return d.name;
 }

@@ -223,7 +223,7 @@ void Renderer::updateVrm(const Frame& f) {
 void Renderer::world(const Frame& f) {
     // 1. 前フレームの絵を消す → 2. ステージ → 3. アバター → 4. 表示オーラ → 5. GPUへ送る。
     // この関数は描画専用です。所持数・ロール回数を書き換えません。
-    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); holeVisible_=false;
+    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const auto biome=f.presentation.settings.biome;
@@ -262,11 +262,13 @@ void Renderer::world(const Frame& f) {
         else if(volcano) c=path?Color{.24f+checker,.21f+checker,.22f+checker}:Color{.105f+checker,.105f+checker,.135f+checker};
         box(tileX,tileY,tileZ,tuning::world::TileSize-.02f,.12f,tuning::world::TileSize-.02f,c);
     }
-    // A low central plinth and its emissive frame are built from the same cube mesh.
-    box(0,.07f,0,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:ocean?Color{.51f,.46f,.30f}:
+    // リスポーン台をロケットの発着台として共用。中心は stages.hpp から取得します。
+    // 台を二重に描かないので、同じ高さの面がちらつくこともありません。
+    box(tuning::stages::RespawnX,.07f,tuning::stages::RespawnZ,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:ocean?Color{.51f,.46f,.30f}:
         forest?Color{.23f,.30f,.22f}:volcano?Color{.25f,.22f,.25f}:Color{.20f,.29f,.32f});
     for (int i=0;i<4;++i) {
-        const float a=i*Pi/2; box(std::sin(a)*2.25f,.16f,std::cos(a)*2.25f,4.5f,.025f,.035f,d.color,a,1);
+        const float a=i*Pi/2;
+        box(tuning::stages::RespawnX+std::sin(a)*2.25f,.16f,tuning::stages::RespawnZ+std::cos(a)*2.25f,4.5f,.025f,.035f,d.color,a,1);
     }
     // 床を細かくして木を最大まで増やした場合も、アバターやオーラが消えないようにします。
     // 新しい景観の飾りだけを先に止め、後で描く機体/人/最大160粒子/最大128点の輪に512箱を確保。
@@ -405,17 +407,21 @@ void Renderer::world(const Frame& f) {
         box(x,.55f,z,.5f,1.1f,.5f,{.31f,.37f,.39f});
         box(x,1.15f,z,.56f,.14f,.56f,volcano?Color{1.f,.51f,.22f}:forest?Color{.79f,.96f,.46f}:Color{.50f,.94f,.80f},0,1);
     }
-    // 全惑星共通の小型ロケット。発着場と機体は元からある箱メッシュだけで作っています。
-    // tuning/stages.hpp の RocketX / RocketZ / RocketScale で配置と大きさを変更できます。
+    // 全惑星共通の小型ロケット。リスポーンと同じXZに置き、乗降スペースの上に機体を浮かべます。
+    // tuning/stages.hpp の RespawnX / RespawnZ / RocketScale / RocketBoardingClearance が調整入口。
     const float rocketX=tuning::stages::RocketX,rocketZ=tuning::stages::RocketZ,rocketScale=tuning::stages::RocketScale;
+    // 発着場のXZは動かさず、大きいオーラの頭上を機体で隠さないように空けます。
+    const bool tallAura=d.id=="illusionary" || d.id=="nanally" || d.id=="breakthrough" || d.id=="equinox" || d.id=="singularity";
+    const float nearDock=tallAura?std::clamp((6.f-std::hypot(f.avatarX-rocketX,f.avatarZ-rocketZ))/4.f,0.f,1.f):0.f;
+    const float rocketClearance=std::lerp(tuning::stages::RocketBoardingClearance,tuning::stages::RocketEffectClearance,nearDock);
     const Color rocketAccent{.22f,.65f,.85f};
-    box(rocketX,.10f,rocketZ,4.1f,.20f,4.1f,{.16f,.22f,.28f},Pi/4);
     for(int i=0;i<16;++i) {
         const float a=i*Pi/8;
-        box(rocketX+std::cos(a)*1.82f,.225f,rocketZ+std::sin(a)*1.82f,.53f,.035f,.075f,{.38f,.86f,1.f},-a+Pi/2,1.f);
+        box(rocketX+std::cos(a)*1.82f,.18f,rocketZ+std::sin(a)*1.82f,.53f,.035f,.075f,{.38f,.86f,1.f},-a+Pi/2,1.f);
     }
     auto rocketPart=[&](float x,float y,float z,float sx,float sy,float sz,Color color,float angle=0.f,float glow=0.f) {
-        box(rocketX+x*rocketScale,.24f+y*rocketScale,rocketZ+z*rocketScale,sx*rocketScale,sy*rocketScale,sz*rocketScale,color,angle,glow);
+        box(rocketX+x*rocketScale,.24f+rocketClearance+y*rocketScale,rocketZ+z*rocketScale,
+            sx*rocketScale,sy*rocketScale,sz*rocketScale,color,angle,glow);
     };
     rocketPart(0,1.85f,0,1.15f,2.6f,1.15f,{.82f,.86f,.89f},Pi/4);
     rocketPart(0,1.85f,0,1.34f,2.6f,.78f,{.87f,.91f,.93f});
@@ -441,11 +447,14 @@ void Renderer::world(const Frame& f) {
     const bool equinox=d.id=="equinox";
     const bool breakthrough=d.id=="breakthrough";
     const bool nanally=d.id=="nanally";
+    const bool illusionary=d.id=="illusionary";
+    const bool desertAura=d.id=="dune" || d.id=="mirage" || d.id=="pharaoh";
     pixelationVisible_=pixelated; equinoxVisible_=equinox; breakthroughVisible_=breakthrough;
     nanallyVisible_=nanally;
+    illusionaryVisible_=illusionary; desertAuraVisible_=desertAura;
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
     const float actionTime=f.actionTime>=0?f.actionTime:pixelationActionTime(f.time,pixelated?level:0);
-    const auto pose=pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
+    const auto pose=illusionary?illusionaryPose(f.time):pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
     auto base=XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift,f.avatarZ);
     auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,FXMMATRIX transform) {
@@ -456,7 +465,8 @@ void Renderer::world(const Frame& f) {
         if(pixelated) {const auto hue=pixelationColor(effectTime); lit={.45f+hue.r*.55f,.45f+hue.g*.55f,.45f+hue.b*.55f};}
         if(equinox) lit={.83f,.85f,.90f};
         if(breakthrough) lit={.65f,.71f,1.f};
-        instance.color={lit.r,lit.g,lit.b,pixelated?1.8f:(equinox || breakthrough)?.65f:0.f}; instances_.push_back(instance);
+        if(illusionary) lit={.66f,.72f,1.f};
+        instance.color={lit.r,lit.g,lit.b,illusionary?1.1f:pixelated?1.8f:(equinox || breakthrough)?.65f:0.f}; instances_.push_back(instance);
     };
     const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
     for(int side=0;side<2;++side) {
@@ -475,12 +485,12 @@ void Renderer::world(const Frame& f) {
     part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
     part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},identity);
     const float t=f.time*d.speed;
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && i<tuning::world::StandardRingSegments;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && i<tuning::world::StandardRingSegments;++i) {
         const float a=i*2*Pi/tuning::world::StandardRingSegments+t*tuning::world::StandardRingAngularSpeed;
         if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
         else box(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && i<d.particles;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
         const float y=.4f+std::fmod(u*3.3f+f.time*tuning::world::StandardParticleRiseSpeed,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
@@ -503,12 +513,14 @@ void Renderer::world(const Frame& f) {
     if(equinox) buildEquinox(f);
     if(breakthrough) buildBreakthrough(f);
     if(nanally) buildNanally(f);
+    if(illusionary) buildIllusionary(f);
+    if(desertAura) buildDesert(f);
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
-    const float focus=breakthrough?tuning::game::CameraFocusBreakthrough:nanally?tuning::game::CameraFocusNanally:
+    const float focus=illusionary?tuning::game::CameraFocusIllusionary:breakthrough?tuning::game::CameraFocusBreakthrough:nanally?tuning::game::CameraFocusNanally:
         holeVisible_?tuning::game::CameraFocusBlackHole:equinox?tuning::game::CameraFocusEquinox:
         (floating || pixelated)?tuning::game::CameraFocusFloating:tuning::game::CameraFocusNormal;
-    const float cameraDistance=f.cameraDistance;
+    const float cameraDistance=f.cameraDistance+(illusionary?2.5f:0.f);
     const XMVECTOR eye=XMVectorSet(f.avatarX+std::sin(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,
         focus+std::sin(f.cameraPitch)*cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,1);
     const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,focus,f.avatarZ,1),XMVectorSet(0,1,0,0));
@@ -516,12 +528,12 @@ void Renderer::world(const Frame& f) {
     const float tagHeight=nanally?6.8f:breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
     XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,tagHeight,f.avatarZ,1),
         viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));
-    nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=!breakthrough && tag.z>0 && tag.z<1;
+    nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=!breakthrough && !illusionary && tag.z>0 && tag.z<1;
     struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye,light; } camera{};
     XMStoreFloat4x4(&camera.vp,view*projection); XMStoreFloat4(&camera.eye,eye); camera.eye.w=pixelated?effectTime:f.time;
     const auto fogColor=stageFog(biome);
     // xはオーラ時の照明、y/z/wは惑星の霧のRGB。既存の96バイト定数バッファを共用します。
-    camera.light={pixelated?.30f:(equinox || breakthrough)?.20f:1.f,fogColor.r,fogColor.g,fogColor.b};
+    camera.light={illusionary?.22f:pixelated?.30f:(equinox || breakthrough)?.20f:1.f,fogColor.r,fogColor.g,fogColor.b};
     context_->UpdateSubresource(constants_.Get(),0,nullptr,&camera,0,0);
     D3D11_MAPPED_SUBRESOURCE mapped{}; checked(context_->Map(instanceBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped), "Map instances");
     std::memcpy(mapped.pData,instances_.data(),instances_.size()*sizeof(Instance)); context_->Unmap(instanceBuffer_.Get(),0);
@@ -568,9 +580,10 @@ void Renderer::draw(const Frame& frame,bool present) {
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     if(frame.cutsceneTime>=0) {
-        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear();
+        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear();
         pixelationVisible_=equinoxVisible_=breakthroughVisible_=holeVisible_=false;
         nanallyVisible_=false;
+        illusionaryVisible_=desertAuraVisible_=false;
         if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame); else drawCutscene(frame);
     } else world(frame);
     context_->OMSetRenderTargets(0,nullptr,nullptr);

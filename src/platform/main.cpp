@@ -334,7 +334,7 @@ private:
         }
         if(const auto destination=stageTravel_.update(dt,aura::tuning::stages::TravelDurationSeconds)) {
             // 画面が宇宙に覆われた中間点で惑星と着地点を切り替えます。
-            presentation_.settings.biome=*destination; x_=z_=0; facing_=0; savePlayerSettings();
+            presentation_.settings.biome=*destination; x_=aura::tuning::stages::RespawnX; z_=aura::tuning::stages::RespawnZ; facing_=0; savePlayerSettings();
         }
         if(stageTravel_.arrived()) stageTravel_.finish();
         if(auto_ && cooldown_<=0) roll();
@@ -905,7 +905,48 @@ private:
             throw std::runtime_error("Nanally changed inventory or history");
         applyDebugActions(previewCommand); render(false);
         if(renderer_->nanallyCount()) throw std::runtime_error("Nanally remained after switching aura");
+        const auto illusionary=findAura("illusionary"),dune=findAura("dune"),mirage=findAura("mirage"),pharaoh=findAura("pharaoh");
+        aura::DebugActions illusionaryPreview; illusionaryPreview.preview=illusionary;
+        auto_=true; applyDebugActions(illusionaryPreview);
+        time_=.35f; distance_=11; pitch_=.23f; yaw_=.15f; movement_=0; walk_=0;
+        world.biome=aura::Biome::Normal; applyDebugActions(world); render(false); captureExtra(L"-illusionary-at-spawn");
+        x_=10; z_=-2; render(false); captureExtra(L"-illusionary");
+        if(auto_ || roller_.tickets(illusionary) || !renderer_->illusionaryCount() || renderer_->pixelationCount() || renderer_->nanallyCount())
+            throw std::runtime_error("Illusionary preview isolation failed");
+        const auto illusionaryInstances=renderer_->illusionaryCount();
+        for(float angle:{-.9f,.9f,2.8f}) {yaw_=angle; render(false);}
+        yaw_=.15f;
+        for(float second:{.5f,1.3f,2.15f,3.2f,4.2f}) {
+            time_=second; render(false);
+            const auto suffix=L"-illusionary-phase-"+std::to_wstring(static_cast<int>(second*100)); captureExtra(suffix.c_str());
+        }
+        x_+=2; facing_=.6f; movement_=1; walk_=2; render(false);
+        if(!renderer_->illusionaryCount()) throw std::runtime_error("Illusionary did not follow movement");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false); captureExtra(L"-illusionary-small");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        applyDebugActions(playBreakthrough); render(false);
+        if(renderer_->illusionaryCount()) throw std::runtime_error("Illusionary remained during cutscene");
+        applyDebugActions(stop); render(false);
+        if(!renderer_->illusionaryCount()) throw std::runtime_error("Cutscene did not restore Illusionary");
         world.biome=aura::Biome::Desert; applyDebugActions(world);
+        for(const auto index:{dune,mirage,pharaoh}) {
+            aura::DebugActions desert; desert.preview=index; auto_=true; applyDebugActions(desert);
+            x_=9; z_=-2; time_=1.2f; yaw_=.15f; distance_=10; pitch_=.3f; movement_=0; walk_=0; facing_=0;
+            render(false);
+            if(auto_ || !renderer_->desertAuraCount() || renderer_->desertAuraCount()>300 || renderer_->illusionaryCount())
+                throw std::runtime_error("Lightweight desert aura preview/switch failed");
+            const auto suffix=L"-desert-aura-"+aura::widen(roller_.catalog()[index].id); captureExtra(suffix.c_str());
+            time_+=.6f; movement_=1; walk_=2; render(false);
+        }
+        if(progress_.counts!=cutCounts || progress_.rolls!=cutRolls || log_.size()!=cutLogs ||
+            std::filesystem::file_size(saves_/L"rolls.csv")!=cutLogBytes || progress_.equipped!=chosen)
+            throw std::runtime_error("New aura previews changed inventory or history");
+        aura::DebugActions spawnCommon; spawnCommon.preview=0; applyDebugActions(spawnCommon);
+        x_=aura::tuning::stages::RespawnX; z_=aura::tuning::stages::RespawnZ;
+        time_=1; distance_=14; pitch_=.3f; movement_=0; walk_=0; render(false); captureExtra(L"-rocket-respawn");
+        if(aura::tuning::stages::RocketX!=x_ || aura::tuning::stages::RocketZ!=z_)
+            throw std::runtime_error("Rocket is not at the respawn position");
+        if(renderer_->illusionaryCount() || renderer_->desertAuraCount()) throw std::runtime_error("New aura geometry remained after switch");
         if(!opts_.vrm.empty()) {
             aura::DebugActions avatar; avatar.avatar=aura::Avatar::Vrm; applyDebugActions(avatar);
             const auto deadline=Clock::now()+std::chrono::seconds(45);
@@ -931,6 +972,12 @@ private:
             applyDebugActions(nanallyPreview); movement_=0; walk_=0; facing_=0; distance_=12; pitch_=.23f; yaw_=.15f;
             render(false); captureExtra(L"-vrm-nanally");
             if(!renderer_->nanallyCount() || !renderer_->vrmReady()) throw std::runtime_error("Nanally VRM preview failed");
+            applyDebugActions(illusionaryPreview); x_=8; z_=-2; movement_=0; walk_=0; time_=.35f; render(false); captureExtra(L"-vrm-illusionary");
+            const auto illusionaryFixedA=renderer_->vrmBone(4);
+            movement_=1; walk_=2; render(false); const auto illusionaryFixedB=renderer_->vrmBone(4);
+            if(!renderer_->illusionaryCount() || std::abs(illusionaryFixedA.x-illusionaryFixedB.x)+
+                std::abs(illusionaryFixedA.y-illusionaryFixedB.y)+std::abs(illusionaryFixedA.z-illusionaryFixedB.z)>.00001f)
+                throw std::runtime_error("Moving changed fixed Illusionary VRM pose");
             aura::DebugActions common; common.preview=0; applyDebugActions(common);
             movement_=0; walk_=0; distance_=7; pitch_=.20f; yaw_=.15f;
             render(false); captureExtra(L"-vrm");
@@ -1018,6 +1065,9 @@ private:
                <<" ms/frame (60 offscreen frames, no vsync)\n"
                <<"BreakThrough cutscene: PASS / static pillar positions, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
             out<<"BreakThrough captions: PASS / eight measured word times, live offset/per-word changes saved during playback, reset to defaults\n";
+            out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview only, fixed pose, movement, resize, cutscene restore and clean switching\n"
+               <<"Desert auras: PASS / Dune 1 in 50, Mirage 1 in 5000, Pharaoh 1 in 250000, <=300 glow instances each, history isolation\n"
+               <<"Rocket: PASS / shared respawn XZ, boarding clearance, all five planets\n";
             out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
                <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
@@ -1146,7 +1196,7 @@ private:
     int collectionScroll_{},logScroll_{},lastMouseX_{},lastMouseY_{};
     float pitch_{aura::tuning::game::InitialCameraPitch};
     float movement_{};
-    float time_{},cooldown_{},x_{},z_{},facing_{},walk_{};
+    float time_{},cooldown_{},x_{aura::tuning::stages::RespawnX},z_{aura::tuning::stages::RespawnZ},facing_{},walk_{};
     float yaw_{aura::tuning::game::InitialCameraYaw},distance_{aura::tuning::game::InitialCameraDistance};
     float mouseX_{-1},mouseY_{-1},fps_{};
     std::string notice_;

@@ -10,7 +10,7 @@ Win32入力 → `App` がクールダウンを確認 → `Roller` がチケッ�
 
 `Progress::record()`は所持数と統計だけを更新します。`equipped`はコレクション操作から変更します。`Presentation`は装備と一時プレビューを分離し、プレビュー選択では自動ロールを停止するだけで抽選・ログ処理を呼びません。
 
-`Definition::previewOnly`は確率未設定の試作を同じカタログへ載せるための指定です。CSVの任意の末尾列`preview_only`から読み込み、抽選のチケット配分とLuckのCDFから除外します。`Progress::record()`と`appendLog()`でも登録を拒否し、試作の追加で既存の確率や履歴を変えないようにしています。付属カタログは抽選13種類とPixelation・Equinox・BreakThrough・Nanallyの試作4種類、合計17種類です。試作はImGuiから表示し、未所持でもコレクション・履歴を変更しません。`pixelationPose()`・`equinoxPose()`をブロックとVRMで共有し、BreakThroughにも浮遊姿勢を適用して、移動中も固定します。Nanallyは通常の立ち姿と歩行を使います。
+`Definition::previewOnly`は確率未設定の試作を同じカタログへ載せるための指定です。CSVの任意の末尾列`preview_only`から読み込み、抽選のチケット配分とLuckのCDFから除外します。`Progress::record()`と`appendLog()`でも登録を拒否し、試作の追加で既存の確率や履歴を変えないようにしています。付属カタログは抽選16種類とPixelation・Equinox・BreakThrough・Nanally・Illusionaryの試作5種類、合計21種類です。試作はImGuiから表示し、未所持でもコレクション・履歴を変更しません。`pixelationPose()`・`equinoxPose()`をブロックとVRMで共有し、BreakThroughにも浮遊姿勢を適用して、移動中も固定します。Nanallyは通常の立ち姿と歩行を使います。
 
 進行データのロード時には試作オーラの非0所持数を拒否し、初期装備とbestは抽選対象から選びます。保存時も試作の装備・best・非0所持数を拒否します。コレクションの達成数は抽選対象だけを数え、試作の追加で全取得が不可能にならないようにしています。
 
@@ -93,4 +93,8 @@ Windows標準のDirect3D 11デバイスをBGRA対応で作成し、DXGIサーフ
 
 ## 改造用の設定と起動
 
-よく触る数値は`src/tuning`の10ヘッダーで共有します。C++を再ビルドして反映し、F1の保存設定とは区別します。各オーラのCPU描画処理から設定を参照し、Equinoxの白黒周期は同じ値をGPUにも渡します。`Develop.cmd`は試作用の`local-save`を使用し、コンパイル後にF1を開きます。標準値向けテストは通常の`build.cmd`とCIで維持します。詳しい編集手順は[改造ガイド](development-guide.md)を参照してください。
+Illusionaryは通常のキューブ描画と同じ頂点形式で黒い帯を別バッチにし、その後に既存のブルームで青白い光を合成します。黒い板は深度へ書き込み、後ろの光線の透過を防ぎます。`illusionaryPose()`をブロックとVRMで共有し、移動しても固定姿勢を維持します。参考WebPは入力資料のみで、実行時には使いません。
+
+砂漠3種類は`buildDesert()`でIDごとに分岐し、既存の発光バッチを共有します。テーマの違いを見た目へ反映する機能で、抽選は惑星から独立です。Dune・Mirage・PharaohのチケットをStardustの残余配分から割り当て、分母指定済みの既存オーラは変更しません。リスポーンとロケットは`stages.hpp`の同じXZ定数を使い、機体だけ上へ持ち上げて乗降空間を残します。
+
+よく触る数値は`src/tuning`の12ヘッダーで共有します。C++を再ビルドして反映し、F1の保存設定とは区別します。各オーラのCPU描画処理から設定を参照し、Equinoxの白黒周期は同じ値をGPUにも渡します。`Develop.cmd`は試作用の`local-save`を使用し、コンパイル後にF1を開きます。標準値向けテストは通常の`build.cmd`とCIで維持します。詳しい編集手順は[改造ガイド](development-guide.md)を参照してください。

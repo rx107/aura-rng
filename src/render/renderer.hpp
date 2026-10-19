@@ -62,6 +62,8 @@ public:
     std::size_t equinoxCount() const { return equinoxVisible_?pixelationInstances_.size()+equinoxOrbs_.size()+equinoxTitles_.size():0; }
     std::size_t breakthroughCount() const { return breakthroughVisible_?pixelationInstances_.size():0; }
     std::size_t nanallyCount() const { return nanallyVisible_?nanallyInstances_.size()+pixelationInstances_.size():0; }
+    std::size_t illusionaryCount() const { return illusionaryVisible_?illusionaryInk_.size()+pixelationInstances_.size():0; }
+    std::size_t desertAuraCount() const { return desertAuraVisible_?pixelationInstances_.size():0; }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
     float scale() const { return scale_; }
@@ -96,6 +98,8 @@ private:
     void breakthroughCutsceneUi(const Frame& frame);
     void createNanally();
     void buildNanally(const Frame& frame);
+    void buildIllusionary(const Frame& frame);
+    void buildDesert(const Frame& frame);
     void createPixelationTargets();
     void compositePixelation();
     void pixelQuad(DirectX::FXMMATRIX transform,Color color,unsigned style,float opacity);
@@ -167,6 +171,7 @@ private:
     std::vector<Instance> equinoxOrbs_;
     std::vector<Instance> equinoxTitles_;
     std::vector<Instance> nanallyInstances_;
+    std::vector<Instance> illusionaryInk_; // 黒い帯は発光バッチから分け、黒色を保ちます。
     ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
     ComPtr<ID3D11BlendState> effectBlend_;
     ComPtr<ID3D11BlendState> additiveBlend_;
@@ -174,6 +179,7 @@ private:
     UINT starIndexCount_{};
     bool holeVisible_{},nameplateVisible_{},pixelationVisible_{},equinoxVisible_{},breakthroughVisible_{};
     bool nanallyVisible_{};
+    bool illusionaryVisible_{},desertAuraVisible_{};
     Instance blackHole_;
     DirectX::XMFLOAT2 nameplate_{};
     ImGuiContext* imguiContext_{};

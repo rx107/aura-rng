@@ -18,6 +18,8 @@
 | Equinox | [equinox.hpp](equinox.hpp) | `floorGlyphSize` を `3.2f → 2.8f`。床の「衡」が小さくなる。 |
 | BreakThrough の通常表示 | [breakthrough.hpp](breakthrough.hpp) | `titleHeight` を `3.55f → 3.9f`。名前を上に移動。 |
 | Nanally | [nanally.hpp](nanally.hpp) | `HeadWidth` を `6.35f → 7.0f`。頭が横に広がる。 |
+| Illusionary | [illusionary.hpp](illusionary.hpp) | `MotionSpeed` を `1.f → .7f`。回転と周囲の演出がゆっくりに。 |
+| 砂漠テーマ3種類 | [desert.hpp](desert.hpp) | Dune / Mirage / Pharaohそれぞれの半径・速度・粒子数を変更。 |
 
 オーラ名、確率、標準の輪・粒子の色や数は [data/auras.csv](../../data/auras.csv) を使います。特殊なオーラの形は同名の専用 `.hpp` で調整します。安全な試作用オーラを CSV に追加する例も、[改造ガイド](../../docs/development-guide.md#6-csv-で自作オーラを-1-個追加する) にあります。
 

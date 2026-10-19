@@ -229,6 +229,20 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::TextUnformatted(t("AURA PREVIEW / ALL AURAS","オーラプレビュー / 全種類"));
             ImGui::TextWrapped("%s",t("Includes unowned auras. Preview stops AutoRoll and does not add inventory or history.",
                 "未所持のオーラも表示できます。選択時に自動ロールを停止し、所持数や履歴には追加しません。"));
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="illusionary") {
+                ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.11f,.13f,.42f,1));
+                if(ImGui::Button(t("Preview Illusionary / prototype","Illusionary を表示 / 試作"),{-1,36})) debugActions_.preview=i;
+                ImGui::PopStyleColor();
+                ImGui::TextWrapped("%s",t("Black orbiting ribbons, cobalt rays, checker fragments and floating glitch panels. Visual preview; no roll history is added.",
+                    "黒い回転リボンと青白い光線、市松模様の破片、浮遊パネル。表示試作で、選択しても履歴を増やしません。"));
+            }
+            ImGui::TextDisabled("%s",t("Desert auras / rollable in every planet","砂漠テーマのオーラ / 全惑星で抽選可能"));
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) {
+                const auto& aura=f.roller.catalog()[i];
+                if(aura.id!="dune" && aura.id!="mirage" && aura.id!="pharaoh") continue;
+                const auto button=std::string(t("Preview ","表示: "))+displayName(aura,language)+" / "+oddsLabel(f.roller.catalog(),i);
+                if(ImGui::Button(button.c_str(),{-1,28})) debugActions_.preview=i;
+            }
             for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="nanally") {
                 ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.06f,.32f,.30f,1));
                 if(ImGui::Button(t("Preview Nanally / prototype","Nanally を表示 / 試作"),{-1,36})) debugActions_.preview=i;

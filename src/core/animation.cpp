@@ -41,6 +41,14 @@ AvatarPose pixelationPose(float time) {
     p.legPitch=pose::LegPitch; p.legOut=pose::LegOut; p.knee=pose::Knee;
     return p;
 }
+AvatarPose illusionaryPose(float time) {
+    namespace pose=tuning::avatar::illusionary;
+    AvatarPose p; p.fixed=true;
+    p.lift=pose::Lift+pose::BobAmplitude*std::sin(time*pose::BobFrequency);
+    p.bodyPitch=pose::BodyPitch;
+    p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch; p.legPitch=pose::LegPitch; p.knee=pose::Knee;
+    return p;
+}
 float pixelationMotionSpeed(unsigned level) {
     namespace effect=tuning::pixelation;
     return level>=3?effect::FinalMotionSpeed:(level>=1?effect::BoostedSpeed:effect::BaseSpeed);

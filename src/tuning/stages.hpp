@@ -7,11 +7,20 @@ namespace aura::tuning::stages {
 // ロケットの惑星間移動にかかる秒数。3.6f → 5.f で出発/到着の演出がゆっくりになります。
 inline constexpr float TravelDurationSeconds = 3.6f;
 
-// 全惑星にあるロケットの位置 [ワールド単位]。Xは左右、Zは前後。
-// Xを4.5f → 6.fにすると、発着場ごと中央から右に離れます。
-inline constexpr float RocketX = 4.5f;
-inline constexpr float RocketZ = 1.f;
-inline constexpr float RocketScale = 1.f; // ロケット本体の大きさ。1.2fなら20%大きくなります。
+// 全惑星共通のリスポーン/ロケット発着場 [ワールド単位]。Xは左右、Zは前後。
+// 同じ値を参照するため、到着後も毎回ロケットの真下から出発できます。
+// RespawnX を 0.f → 2.f にすると、プレイヤーと発着場が両方とも右へ2移動します。
+inline constexpr float RespawnX = 0.f;
+inline constexpr float RespawnZ = 0.f;
+inline constexpr float RocketX = RespawnX;
+inline constexpr float RocketZ = RespawnZ;
+inline constexpr float RocketScale = .8f; // 機体の大きさ。.8f → 1.f で25%大きくなります。
+// 乗降用に機体を持ち上げる高さ。通常の頭上を空け、同じXZでも体が機体に重なりません。
+// 3.f → 4.f で機体だけ1高くなります。足元の発着台はそのままです。
+inline constexpr float RocketBoardingClearance = 3.f;
+// 大きいオーラを発着場で表示するときは機体をさらに上へ退避します。
+// 11.f → 13.f で、Illusionaryなどの光や顔にロケットが重なりにくくなります。
+inline constexpr float RocketEffectClearance = 11.f;
 
 // 海: 島の半径はステージ半幅に対する割合。0.43f → 0.55fで砂浜が広くなります。
 inline constexpr float OceanIslandRadiusRatio = .43f;
@@ -36,6 +45,7 @@ inline constexpr float LavaPulseSpeed = 1.3f; // 溶岩が明るく脈打つ速�
 // 増やしすぎて重くならないための上限。数字を誤入力した場合はビルド時に教えてくれます。
 static_assert(TravelDurationSeconds >= 1.f && TravelDurationSeconds <= 12.f);
 static_assert(RocketScale >= .5f && RocketScale <= 1.5f);
+static_assert(RocketBoardingClearance >= 3.f && RocketBoardingClearance <= 8.f);
 static_assert(RocketX >= -12.f && RocketX <= 12.f && RocketZ >= -12.f && RocketZ <= 12.f);
 static_assert(OceanIslandRadiusRatio >= .3f && OceanIslandRadiusRatio <= .75f);
 static_assert(OceanWaveCount <= 64 && OceanWaveSpeed >= 0.f && OceanWaveHeight >= 0.f && OceanWaveHeight <= .2f);

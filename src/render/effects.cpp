@@ -58,7 +58,7 @@ void Renderer::particleStar(float x,float y,float z,float size,Color color,float
     star.color={color.r,color.g,color.b,1.1f}; starInstances_.push_back(star);
 }
 void Renderer::drawEffects(const Frame&) {
-    if(starInstances_.empty() && !holeVisible_ && pixelationInstances_.empty() && equinoxOrbs_.empty() && equinoxTitles_.empty() && nanallyInstances_.empty()) return;
+    if(starInstances_.empty() && !holeVisible_ && pixelationInstances_.empty() && equinoxOrbs_.empty() && equinoxTitles_.empty() && nanallyInstances_.empty() && illusionaryInk_.empty()) return;
     context_->IASetInputLayout(layout_.Get()); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context_->VSSetShader(vs_.Get(),nullptr,0); context_->PSSetShader(ps_.Get(),nullptr,0);
     ID3D11Buffer* cb=constants_.Get(); context_->VSSetConstantBuffers(0,1,&cb); context_->PSSetConstantBuffers(0,1,&cb);
@@ -88,6 +88,14 @@ void Renderer::drawEffects(const Frame&) {
         context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
         context_->OMSetDepthStencilState(effectDepth_.Get(),0);
         draw(holeVertices_.Get(),holeIndices_.Get(),6,nanallyInstances_.data(),nanallyInstances_.size());
+    }
+    if(!illusionaryInk_.empty()) {
+        // 加算で光を重ねる前に、黒い立体リボンの輪郭を描きます。
+        // 深度も保存し、帯の後ろの光線が手前へ透けないようにします。
+        context_->PSSetShader(ps_.Get(),nullptr,0);
+        context_->OMSetDepthStencilState(depthState_.Get(),0);
+        context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
+        draw(holeVertices_.Get(),holeIndices_.Get(),6,illusionaryInk_.data(),illusionaryInk_.size());
     }
     if(!pixelationInstances_.empty()) {
         createPixelationTargets();

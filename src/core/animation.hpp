@@ -16,6 +16,7 @@ struct AvatarPose {
 AvatarPose avatarPose(float time,float walkPhase,float movement,bool singularity);
 AvatarPose pixelationPose(float time);
 AvatarPose equinoxPose(float time);
+AvatarPose illusionaryPose(float time);
 float pixelationMotionSpeed(unsigned level);
 float pixelationMotionTime(float elapsed,unsigned level);
 float pixelationActionSpeed(unsigned level);

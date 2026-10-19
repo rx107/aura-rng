@@ -94,9 +94,15 @@ unsigned char glyph(char c,unsigned row) {
     static const unsigned char R[]={30,17,17,30,20,18,17}, D[]={30,17,17,17,17,17,30};
     static const unsigned char Q[]={14,17,17,17,21,18,13}, U[]={17,17,17,17,17,17,14};
     static const unsigned char one[]={4,12,4,4,4,4,14}, two[]={14,17,1,2,4,8,31};
+    static const unsigned char S[]={15,16,16,14,1,1,30}, H[]={17,17,17,31,17,17,17};
+    static const unsigned char C[]={14,17,16,16,16,17,14}, M[]={17,27,21,21,17,17,17};
+    static const unsigned char G[]={14,17,16,23,17,17,15}, B[]={30,17,17,30,17,17,30};
+    static const unsigned char F[]={31,16,16,30,16,16,16}, V[]={17,17,17,17,17,10,4};
     switch(c) {case 'P':p=P;break;case 'I':p=I;break;case 'X':p=X;break;case 'E':p=E;break;
         case 'L':p=L;break;case 'A':p=A;break;case 'T':p=T;break;case 'O':p=O;break;case 'N':p=N;break;
         case 'Y':p=Y;break;case 'R':p=R;break;case 'D':p=D;break;case 'Q':p=Q;break;case 'U':p=U;break;
+        case 'S':p=S;break;case 'H':p=H;break;case 'C':p=C;break;case 'M':p=M;break;
+        case 'G':p=G;break;case 'B':p=B;break;case 'F':p=F;break;case 'V':p=V;break;
         case '1':p=one;break;case '2':p=two;break;default:break;}
     return p?p[row]:0;
 }

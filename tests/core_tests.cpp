@@ -16,15 +16,16 @@ int main(int argc, char** argv) {
     try {
         check(argc == 2, "Catalog path required");
         const auto defs = aura::loadCatalog(argv[1]);
-        check(defs.size() == 17, "Expected 13 rollable auras and four previews");
+        check(defs.size() == 21, "Expected 16 rollable auras and five previews");
         const auto findAura=[&](const std::string& id) {
             const auto found=std::find_if(defs.begin(),defs.end(),[&](const auto& d){return d.id==id;});
             check(found!=defs.end(),"Required aura ID"); return static_cast<std::size_t>(found-defs.begin());
         };
         const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough"),nanally=findAura("nanally");
-        const auto previewIndices={pixelation,equinox,breakthrough,nanally};
-        check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==4 &&
-            defs[nanally].previewOnly && defs[nanally].denominator==0,"Nanally is the fourth unpriced preview");
+        const auto illusionary=findAura("illusionary"),dune=findAura("dune"),mirage=findAura("mirage"),pharaoh=findAura("pharaoh");
+        const auto previewIndices={pixelation,equinox,breakthrough,nanally,illusionary};
+        check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==5 &&
+            defs[illusionary].previewOnly && defs[illusionary].denominator==0,"Illusionary is the fifth unpriced preview");
         aura::Roller roller(defs, 42), same(defs, 42);
         std::uint64_t start = 0;
         for (std::size_t i = 0; i < defs.size(); ++i) {
@@ -52,7 +53,9 @@ int main(int argc, char** argv) {
                 "Unpriced previews do not claim a probability");
         check(roller.tickets(0) == aura::TicketPool / 2, "Common is exactly 50 percent");
         check(roller.tickets(1) == aura::TicketPool / 4, "Uncommon is exactly 25 percent");
-        check(defs[3].id=="stardust" && roller.tickets(3)==69'888'989'000ULL,"Stardust receives only the remaining probability");
+        check(defs[3].id=="stardust" && roller.tickets(3)==49'684'989'000ULL,"Only Stardust supplies the new desert aura probability");
+        check(roller.tickets(dune)==aura::TicketPool/50 && roller.tickets(mirage)==aura::TicketPool/5000 &&
+            roller.tickets(pharaoh)==aura::TicketPool/250000,"Desert themes have exact, distinct roll probabilities");
         check(aura::oddsInLabel(defs,1)=="1 in 4","Avatar probability uses 1 in N");
         check(defs[0].name == "Common" && defs[1].name == "Uncommon", "Renamed aura labels with stable IDs");
         std::set<std::uint64_t> uniqueWeights;
@@ -337,8 +340,11 @@ int main(int argc, char** argv) {
         }
         aura::saveProgress(save,levels,defs);
         check(aura::loadProgress(save,defs).auraLevel(singularity,defs)==3,"Aura Level survives save via stable counts");
-        auto previousCatalog=previousDefinitions; previousCatalog.erase(previousCatalog.begin()+3);
-        check(previousCatalog.size()==12 && previousDefinitions.size()==13,"Historical rollable catalogs contain 12 and 13 entries");
+        auto historicalCatalog=defs;
+        std::erase_if(historicalCatalog,[](const auto& d){return d.id=="illusionary" || d.id=="dune" || d.id=="mirage" || d.id=="pharaoh";});
+        auto historicalRollable=historicalCatalog; std::erase_if(historicalRollable,[](const auto& d){return d.previewOnly;});
+        auto previousCatalog=historicalRollable; previousCatalog.erase(previousCatalog.begin()+3);
+        check(previousCatalog.size()==12 && historicalRollable.size()==13,"Historical rollable catalogs contain 12 and 13 entries");
         aura::Progress previousProgress(previousCatalog.size());
         for(int i=0;i<3;++i) previousProgress.record(previousCatalog.size()-1,previousCatalog);
         previousProgress.equipped=previousCatalog.size()-1; aura::saveProgress(save,previousProgress,previousCatalog);
@@ -346,14 +352,14 @@ int main(int argc, char** argv) {
         check(migratedProgress.equipped==singularity && migratedProgress.auraLevel(singularity,defs)==2 && migratedProgress.counts[3]==0,
             "Previous 12-aura saves retain Singularity counts and gain a derived Aura Level");
         for(auto preview:previewIndices) check(migratedProgress.counts[preview]==0,"12-aura saves add every preview with zero inventory");
-        aura::Progress v013Progress(previousDefinitions.size());
-        for(int i=0;i<4;++i) v013Progress.record(previousDefinitions.size()-1,previousDefinitions);
-        v013Progress.equipped=previousDefinitions.size()-1; aura::saveProgress(save,v013Progress,previousDefinitions);
+        aura::Progress v013Progress(historicalRollable.size());
+        for(int i=0;i<4;++i) v013Progress.record(historicalRollable.size()-1,historicalRollable);
+        v013Progress.equipped=historicalRollable.size()-1; aura::saveProgress(save,v013Progress,historicalRollable);
         const auto v014Progress=aura::loadProgress(save,defs);
         check(v014Progress.rolls==4 && v014Progress.equipped==singularity && v014Progress.auraLevel(singularity,defs)==3 &&
             v014Progress.counts[pixelation]==0 && v014Progress.counts[equinox]==0 && v014Progress.counts[breakthrough]==0 && v014Progress.counts[nanally]==0,
             "Previous 13-aura saves retain counts, equipment, and Singularity level");
-        auto previousV014=defs;
+        auto previousV014=historicalCatalog;
         std::erase_if(previousV014,[](const auto& d){return d.id=="equinox" || d.id=="breakthrough" || d.id=="nanally";});
         check(previousV014.size()==14,"The v0.1.4 catalog contains 13 rollable auras and Pixelation");
         aura::Progress v014Saved(previousV014.size());
@@ -363,7 +369,7 @@ int main(int argc, char** argv) {
         check(v015Progress.equipped==singularity && v015Progress.counts[singularity]==1 && v015Progress.counts[equinox]==0 &&
             v015Progress.counts[pixelation]==0 && v015Progress.counts[breakthrough]==0 && v015Progress.counts[nanally]==0,
             "Previous 14-entry saves add Equinox, BreakThrough, and Nanally with zero preview inventory");
-        auto previousV015=defs; std::erase_if(previousV015,[](const auto& d){return d.id=="breakthrough" || d.id=="nanally";});
+        auto previousV015=historicalCatalog; std::erase_if(previousV015,[](const auto& d){return d.id=="breakthrough" || d.id=="nanally";});
         check(previousV015.size()==15,"The v0.1.5 catalog contains 13 rollable auras and two previews");
         aura::Progress v015Saved(previousV015.size());
         const auto v015Singularity=static_cast<std::size_t>(std::find_if(previousV015.begin(),previousV015.end(),[](const auto& d){return d.id=="singularity";})-previousV015.begin());
@@ -374,7 +380,7 @@ int main(int argc, char** argv) {
             v016Progress.counts[0]==1 && v016Progress.counts[singularity]==4 && v016Progress.auraLevel(singularity,defs)==3 &&
             v016Progress.counts[pixelation]==0 && v016Progress.counts[equinox]==0 && v016Progress.counts[breakthrough]==0 && v016Progress.counts[nanally]==0,
             "Previous 15-entry saves preserve all discoveries and equipment while adding BreakThrough and Nanally with zero inventory");
-        auto previousV017=defs; std::erase_if(previousV017,[](const auto& d){return d.id=="nanally";});
+        auto previousV017=historicalCatalog; std::erase_if(previousV017,[](const auto& d){return d.id=="nanally";});
         check(previousV017.size()==16,"The v0.1.7 catalog contains 13 rollable auras and three previews");
         aura::Progress v017Saved(previousV017.size());
         const auto v017Singularity=static_cast<std::size_t>(std::find_if(previousV017.begin(),previousV017.end(),[](const auto& d){return d.id=="singularity";})-previousV017.begin());
@@ -385,6 +391,24 @@ int main(int argc, char** argv) {
             v018Progress.counts[1]==1 && v018Progress.counts[singularity]==3 && v018Progress.auraLevel(singularity,defs)==2 &&
             v018Progress.counts[pixelation]==0 && v018Progress.counts[equinox]==0 && v018Progress.counts[breakthrough]==0 && v018Progress.counts[nanally]==0,
             "Previous 16-entry saves preserve the edited roll counter, discoveries, equipment, and levels while adding Nanally with zero inventory");
+        check(historicalCatalog.size()==17,"v0.1.10 fixture retains its original 17 IDs");
+        aura::Progress v010Saved(historicalCatalog.size());
+        v010Saved.record(singularity,historicalCatalog); v010Saved.equipped=singularity; v010Saved.setRollCount(98765);
+        aura::saveProgress(save,v010Saved,historicalCatalog);
+        const auto v011Restored=aura::loadProgress(save,defs);
+        check(v011Restored.rolls==98765 && v011Restored.equipped==singularity && v011Restored.counts[singularity]==1 &&
+            !v011Restored.counts[illusionary] && !v011Restored.counts[dune] && !v011Restored.counts[mirage] && !v011Restored.counts[pharaoh],
+            "Current save keeps inventory, equipment, and edited counter while adding four empty IDs");
+        aura::Roller historicalRoller(historicalCatalog,42);
+        for(std::size_t i=0;i<historicalCatalog.size();++i) if(historicalCatalog[i].id!="stardust")
+            check(historicalRoller.tickets(i)==roller.tickets(i),"Desert additions leave every specified old probability unchanged");
+        aura::Progress desertProgress(defs.size());
+        for(auto index:{dune,mirage,pharaoh}) desertProgress.record(index,defs);
+        desertProgress.equipped=pharaoh; aura::saveProgress(save,desertProgress,defs);
+        const auto desertRestored=aura::loadProgress(save,defs);
+        check(desertRestored.rolls==3 && desertRestored.counts[dune]==1 && desertRestored.counts[mirage]==1 &&
+            desertRestored.equipped==pharaoh && desertRestored.best==pharaoh,"New rollable desert inventory can be equipped, saved and restored");
+        check(aura::illusionaryPose(1.3f).fixed && aura::illusionaryPose(1.3f).lift>0,"Illusionary uses a floating fixed pose");
         const auto levelCounts=levels.counts;
         presentation.preview=singularity; presentation.singularityLevel=1;
         check(presentation.level(levels,defs)==1 && levels.counts==levelCounts,"Debug Aura Level leaves inventory untouched");

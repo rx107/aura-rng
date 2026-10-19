@@ -38,6 +38,7 @@ inline constexpr float CameraFocusFloating = 2.f;
 inline constexpr float CameraFocusEquinox = 2.3f;
 inline constexpr float CameraFocusBlackHole = 2.5f;
 inline constexpr float CameraFocusNanally = 2.8f;
+inline constexpr float CameraFocusIllusionary = 3.2f; // 頭上のリングと長い光線まで映す高さ。
 inline constexpr float CameraFocusBreakthrough = 3.3f;
 
 // static_assert は「実行前の設定チェック」。無効な値なら説明付きでビルドを止めます。

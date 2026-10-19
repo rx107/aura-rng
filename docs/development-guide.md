@@ -4,7 +4,7 @@
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.10-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.11-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -57,6 +57,9 @@ inline constexpr float HeadWidth = 7.0f;
 | Equinoxの床文字を小さくする | `src/tuning/equinox.hpp` → `floorGlyphSize` | `3.2f` → `2.8f` |
 | BreakThroughの名前を上げる | `src/tuning/breakthrough.hpp` → `titleHeight` | `3.55f` → `3.9f` |
 | Nanallyの電撃を太くする | `src/tuning/nanally.hpp` → `ElectricWidth` | `.12f` → `.18f`。小さな稲妻の線が太くなる |
+| Illusionaryの回転をゆっくりにする | `src/tuning/illusionary.hpp` → `MotionSpeed` | `1.f` → `.7f`。リボンと放射光の動きがゆっくりになる |
+| 砂漠オーラの砂を広げる | `src/tuning/desert.hpp` → `DuneRadius` | `1.75f` → `2.2f`。砂のらせんが外側へ広がる |
+| ロケットの乗降空間を高くする | `src/tuning/stages.hpp` → `RocketBoardingClearance` | `3.f` → `4.f`。機体だけ1単位上へ移動。発着地点は中央のまま |
 
 `HalfExtent`は全幅の**半分**です。32なら全幅64。処理を軽く保つため、範囲チェックでは12〜48を指定できるようにしています。
 
