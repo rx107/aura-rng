@@ -1,19 +1,34 @@
 #include "platform/audio.hpp"
 #include "render/renderer.hpp"
+#include "core/audio_envelope.hpp"
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <cwctype>
 #include <stdexcept>
+
+// Ogg VorbisをWindowsの追加コーデックなしで読む、小さな同梱デコーダー。
+// MP3/MP4/WAVなどは従来どおりMedia Foundationが読みます。
+#define STB_VORBIS_NO_PUSHDATA_API
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4244 4456 4457 4996 4701)
+#endif
+#include "stb/stb_vorbis.c"
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 namespace aura {
 using Microsoft::WRL::ComPtr;
 void Music::clear() {
     if(voice_) { voice_->DestroyVoice(); voice_=nullptr; }
-    pcm_.clear(); playing_=false; gain_=0; sampleRate_=0; playbackEndSeconds_=0;
+    pcm_.clear(); bass_.clear(); playing_=false; gain_=0; sampleRate_=0; playbackEndSeconds_=0;
 }
+float Music::bassPulse(float seconds) const {return bassAt(bass_,seconds);}
 std::optional<float> Music::playbackSeconds() const noexcept {
     if(!voice_ || !playing_ || !sampleRate_)return std::nullopt;
     XAUDIO2_VOICE_STATE state{};
@@ -39,17 +54,46 @@ void Music::load(const std::filesystem::path& path,float startSeconds,float dura
     if(!master_) {
         checked(engine_->CreateMasteringVoice(&master_),"Audio output device");
     }
+    WAVEFORMATEX oggFormat{};
+    std::unique_ptr<WAVEFORMATEX,decltype(&CoTaskMemFree)> waveStorage(nullptr,CoTaskMemFree);
+    WAVEFORMATEX* wave=&oggFormat;
+    auto extension=path.extension().wstring();
+    std::transform(extension.begin(),extension.end(),extension.begin(),[](wchar_t c){return static_cast<wchar_t>(towlower(c));});
+    if(extension==L".ogg") {
+        FILE* file{}; _wfopen_s(&file,path.c_str(),L"rb");
+        if(!file) throw std::runtime_error("Cannot open Ogg BGM");
+        int error{};
+        std::unique_ptr<stb_vorbis,decltype(&stb_vorbis_close)> decoder(stb_vorbis_open_file(file,1,&error,nullptr),stb_vorbis_close);
+        if(!decoder) throw std::runtime_error("Invalid Ogg Vorbis BGM");
+        const auto info=stb_vorbis_get_info(decoder.get());
+        if(info.channels<1 || info.channels>2 || info.sample_rate<8000 || info.sample_rate>192000)
+            throw std::runtime_error("Ogg BGM must be mono/stereo, 8..192 kHz");
+        oggFormat.wFormatTag=WAVE_FORMAT_PCM; oggFormat.nChannels=static_cast<WORD>(info.channels);
+        oggFormat.nSamplesPerSec=info.sample_rate; oggFormat.wBitsPerSample=16;
+        oggFormat.nBlockAlign=oggFormat.nChannels*2; oggFormat.nAvgBytesPerSec=info.sample_rate*oggFormat.nBlockAlign;
+        std::array<short,8192> decoded{};
+        for(;;) {
+            const int frames=stb_vorbis_get_samples_short_interleaved(decoder.get(),info.channels,decoded.data(),static_cast<int>(decoded.size()));
+            if(!frames) break;
+            const auto bytes=static_cast<std::size_t>(frames)*oggFormat.nBlockAlign;
+            if(pcm_.size()+bytes>128ull*1024*1024) throw std::runtime_error("Decoded BGM exceeds 128 MiB");
+            const auto* first=reinterpret_cast<const BYTE*>(decoded.data());
+            pcm_.insert(pcm_.end(),first,first+bytes);
+        }
+        if(stb_vorbis_get_error(decoder.get())!=VORBIS__no_error) throw std::runtime_error("Ogg BGM decoding failed");
+    } else {
     ComPtr<IMFSourceReader> reader; checked(MFCreateSourceReaderFromURL(path.c_str(),nullptr,&reader),"Open BGM");
     checked(reader->SetStreamSelection(static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS),FALSE),"BGM stream selection");
     checked(reader->SetStreamSelection(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),TRUE),"BGM audio stream");
     ComPtr<IMFMediaType> request; checked(MFCreateMediaType(&request),"BGM media type");
     checked(request->SetGUID(MF_MT_MAJOR_TYPE,MFMediaType_Audio),"BGM audio type");
     checked(request->SetGUID(MF_MT_SUBTYPE,MFAudioFormat_PCM),"BGM PCM type");
+    checked(request->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE,16),"BGM PCM sample size");
     checked(reader->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),nullptr,request.Get()),"Decode BGM to PCM");
     ComPtr<IMFMediaType> format; checked(reader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),&format),"BGM output format");
     WAVEFORMATEX* raw{}; UINT length{};
     checked(MFCreateWaveFormatExFromMFMediaType(format.Get(),&raw,&length),"BGM wave format");
-    std::unique_ptr<WAVEFORMATEX,decltype(&CoTaskMemFree)> wave(raw,CoTaskMemFree);
+    waveStorage.reset(raw); wave=raw;
     for(;;) {
         DWORD flags{}; ComPtr<IMFSample> sample;
         checked(reader->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),0,nullptr,&flags,nullptr,&sample),"Decode BGM sample");
@@ -64,17 +108,19 @@ void Music::load(const std::filesystem::path& path,float startSeconds,float dura
         }
         if(flags&MF_SOURCE_READERF_ENDOFSTREAM) break;
     }
+    }
     if(pcm_.empty()) throw std::runtime_error("BGM contains no audio");
     if(startSeconds>0 || durationSeconds>0) {
-        const auto begin=static_cast<std::size_t>(startSeconds*wave->nSamplesPerSec)*wave->nBlockAlign;
+        const auto begin=static_cast<std::size_t>(std::llround(static_cast<double>(startSeconds)*wave->nSamplesPerSec))*wave->nBlockAlign;
         if(begin>=pcm_.size()) throw std::runtime_error("Audio clip starts beyond its duration");
         pcm_.erase(pcm_.begin(),pcm_.begin()+begin);
         if(durationSeconds>0) {
-            const auto bytes=static_cast<std::size_t>(durationSeconds*wave->nSamplesPerSec)*wave->nBlockAlign;
+            const auto bytes=static_cast<std::size_t>(std::llround(static_cast<double>(durationSeconds)*wave->nSamplesPerSec))*wave->nBlockAlign;
             if(pcm_.size()>bytes) pcm_.resize(bytes);
         }
     }
-    checked(engine_->CreateSourceVoice(&voice_,wave.get()),"BGM source voice");
+    bass_=bassEnvelope(pcm_,wave->nSamplesPerSec,wave->nChannels);
+    checked(engine_->CreateSourceVoice(&voice_,wave),"BGM source voice");
     checked(voice_->SetVolume(0),"BGM initial volume");
     XAUDIO2_BUFFER buffer{}; buffer.AudioBytes=static_cast<UINT32>(pcm_.size()); buffer.pAudioData=pcm_.data();
     buffer.Flags=XAUDIO2_END_OF_STREAM; buffer.LoopCount=durationSeconds>0?0:XAUDIO2_LOOP_INFINITE;

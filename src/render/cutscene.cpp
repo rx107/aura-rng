@@ -10,7 +10,7 @@
 namespace aura {
 namespace {
 constexpr char CutsceneShader[]=R"(
-cbuffer Cinematic : register(b0) { float4 screenAndTime; };
+cbuffer Cinematic : register(b0) { float4 screenAndTime; float4 motion; };
 struct Input { float4 p:SV_POSITION; float2 uv:TEXCOORD0; };
 float hash(float2 p) {
     float3 v=frac(float3(p.x,p.y,p.x)*.1031);
@@ -44,7 +44,9 @@ float field(float2 p,float density,float time) {
 }
 float4 main(Input i):SV_TARGET {
     float time=screenAndTime.x,aspect=screenAndTime.y;
-    float2 q=(i.uv-.5)*float2(aspect,1);
+    // 音声の低音に合わせた、画面高に対する上下移動。字幕にも同じ移動をかける。
+    float2 screenUv=i.uv-float2(0,motion.x);
+    float2 q=(screenUv-.5)*float2(aspect,1);
     float angle=.65+time*2.1;
     float2 normal=float2(cos(angle),sin(angle));
     float side=dot(q,normal);
@@ -104,12 +106,12 @@ float4 main(Input i):SV_TARGET {
     // Foreground piano-key blocks gather at the beginning and end of each verse.
     float verse=frac(max(0,time-.25)/2.7)*2.7;
     float keys=saturate(1-smoothstep(.25,.78,verse)+smoothstep(2.23,2.66,verse));
-    float keyX=(i.uv.x+sin(time*.73)*.012)*32;
+    float keyX=(screenUv.x+sin(time*.73)*.012)*32;
     float column=floor(keyX);
     float top=.018+hash(float2(column,4))*hash(float2(column,14))*.24;
     float bottom=.014+hash(float2(column,8))*hash(float2(column,19))*.25;
-    float bar=max(1-smoothstep(top*keys,top*keys+.0015,i.uv.y),
-                  smoothstep(1-bottom*keys-.0015,1-bottom*keys,i.uv.y));
+    float bar=max(1-smoothstep(top*keys,top*keys+.0015,screenUv.y),
+                  smoothstep(1-bottom*keys-.0015,1-bottom*keys,screenUv.y));
     float keyGap=1-smoothstep(.76,.79,frac(keyX));
     color=lerp(color,1-light,bar*keyGap);
 
@@ -118,7 +120,7 @@ float4 main(Input i):SV_TARGET {
         float phase=frac(time*(.32+b*.037)+b*.317);
         float x=-.25+phase*1.5;
         float width=b==0?.018:(b==1?.045:.105);
-        float band=1-smoothstep(width,width+.0015,abs(i.uv.x-x));
+        float band=1-smoothstep(width,width+.0015,abs(screenUv.x-x));
         float visibility=(b==2?.65:1)*(1-smoothstep(2.35,2.7,verse));
         color=lerp(color,1-light,band*visibility);
     }
@@ -127,9 +129,10 @@ float4 main(Input i):SV_TARGET {
     float flash=exp(-pow((time-2.84)/.085,2));
     flash+=exp(-pow((time-5.52)/.085,2))+exp(-pow((time-8.20)/.085,2));
     color=lerp(color,.56,saturate(flash*.83));
-    float fade=smoothstep(.15,.34,time)*(1-smoothstep(10.76,10.90,time));
+    // 終了時は黒へ落とさず、下に描いた実際のオーラへ透明度でつなげる。
+    float fade=smoothstep(.15,.34,time);
     float gray=saturate(color)*fade;
-    return float4(gray,gray,gray,1);
+    return float4(gray,gray,gray,screenAndTime.z);
 })";
 
 struct Verse {
@@ -166,7 +169,7 @@ void Renderer::createCutscene() {
     if(FAILED(hr) && errors) throw std::runtime_error(static_cast<const char*>(errors->GetBufferPointer()));
     checked(hr,"Compile Equinox CutScene shader");
     checked(device_->CreatePixelShader(shader->GetBufferPointer(),shader->GetBufferSize(),nullptr,&cutscenePs_),"Equinox CutScene shader");
-    D3D11_BUFFER_DESC description{}; description.ByteWidth=16; description.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC description{}; description.ByteWidth=32; description.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     description.Usage=D3D11_USAGE_DEFAULT;
     checked(device_->CreateBuffer(&description,nullptr,&cutsceneConstants_),"Equinox CutScene constants");
     checked(write_->CreateTextFormat(L"Times New Roman",nullptr,DWRITE_FONT_WEIGHT_BOLD,DWRITE_FONT_STYLE_NORMAL,
@@ -182,10 +185,12 @@ void Renderer::createCutscene() {
 
 void Renderer::drawCutscene(const Frame& frame) {
     if(frame.cutsceneTime<0 || frame.cutsceneTime>EquinoxCutsceneDuration) return;
-    const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,static_cast<float>(width_),static_cast<float>(height_)};
+    const float opacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,EquinoxCutsceneDuration);
+    const float shake=-tuning::cutscene::EquinoxBassShakeHeight*std::clamp(frame.cutsceneBass,0.f,1.f);
+    const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,opacity,static_cast<float>(height_),shake,0,0,0};
     context_->UpdateSubresource(cutsceneConstants_.Get(),0,nullptr,constants,0,0);
     ID3D11RenderTargetView* target=target_.Get(); context_->OMSetRenderTargets(1,&target,nullptr);
-    context_->OMSetDepthStencilState(effectDepth_.Get(),0); context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
+    context_->OMSetDepthStencilState(effectDepth_.Get(),0); context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
     D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};
     context_->RSSetViewports(1,&viewport); context_->RSSetState(raster_.Get());
     context_->IASetInputLayout(nullptr); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -199,12 +204,14 @@ void Renderer::cutsceneUi(const Frame& frame) {
     const float referenceWidth=static_cast<float>(width_)*480/height_;
     const float factor=static_cast<float>(height_)/480;
     D2D1_MATRIX_3X2_F previous; d2d_->GetTransform(&previous);
-    d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
+    const float ending=tuning::cutscene::endingOpacity(time,EquinoxCutsceneDuration);
+    const float shake=-480*tuning::cutscene::EquinoxBassShakeHeight*std::clamp(frame.cutsceneBass,0.f,1.f);
+    d2d_->SetTransform(D2D1::Matrix3x2F::Translation(0,shake)*D2D1::Matrix3x2F::Scale(factor,factor));
     const Verse* verse=nullptr;
     for(const auto& v:Verses) if(time>=v.start && time<=v.end) { verse=&v; break; }
     if(verse) {
         const auto length=std::min(verse->caption.size(),static_cast<std::size_t>((time-verse->start)*90)+1);
-        const float opacity=std::clamp((verse->end-time)/.14f,0.f,1.f);
+        const float opacity=std::clamp((verse->end-time)/.14f,0.f,1.f)*ending;
         const float ghost=std::clamp((time-verse->start-1.85f)*3,0.f,1.f)*opacity*.11f;
         const float angle=.65f+time*2.1f;
         const float nx=std::cos(angle),ny=std::sin(angle);
@@ -235,9 +242,11 @@ void Renderer::cutsceneUi(const Frame& frame) {
             d2d_->PopLayer();
         }
     }
+    // スキップ表示は操作用なので揺らさず、最後だけ演出と一緒に消します。
+    d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
     const bool japanese=frame.presentation.settings.language==Language::Japanese;
-    rect(referenceWidth-112,8,104,23,D2D1::ColorF(0,0,0,.40f),3);
-    text(japanese?L"Esc / スキップ":L"Esc / Skip",referenceWidth-108,12,96,17,10,D2D1::ColorF(1,1,1,.82f),false,true);
+    rect(referenceWidth-112,8,104,23,D2D1::ColorF(0,0,0,.40f*ending),3);
+    text(japanese?L"Esc / スキップ":L"Esc / Skip",referenceWidth-108,12,96,17,10,D2D1::ColorF(1,1,1,.82f*ending),false,true);
     d2d_->SetTransform(previous);
 }
 } // namespace aura

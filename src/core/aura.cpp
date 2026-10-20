@@ -54,7 +54,6 @@ void validate(const std::vector<Definition>& definitions) {
     if (definitions.empty() || definitions.size() > 4096) throw std::runtime_error("Catalog requires 1..4096 auras");
     std::unordered_set<std::string> ids;
     unsigned fallback = 0;
-    std::uint64_t total = 0;
     for (const auto& d : definitions) {
         if (d.id.empty() || d.id.size() > 64 || !std::all_of(d.id.begin(), d.id.end(), [](unsigned char c) {
             return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
@@ -71,11 +70,19 @@ void validate(const std::vector<Definition>& definitions) {
         else if (d.denominator == 0) ++fallback;
         else {
             if (d.denominator < 2 || d.denominator > TicketPool) throw std::runtime_error("Denominator must be 2..10^12");
-            total += TicketPool / d.denominator;
-            if (total >= TicketPool) throw std::runtime_error("Aura probabilities leave no fallback probability");
         }
     }
     if (fallback != 1) throw std::runtime_error("Exactly one denominator=0 fallback is required");
+    for(unsigned stage=0;stage<StageCount;++stage) {
+        std::uint64_t total=0;
+        bool hasFallback=false;
+        for(const auto& d:definitions) if(availableInBiome(d,static_cast<Biome>(stage))) {
+            if(d.denominator) total+=TicketPool/d.denominator;
+            else hasFallback=true;
+            if(total>=TicketPool) throw std::runtime_error("Stage probabilities leave no fallback probability");
+        }
+        if(!hasFallback) throw std::runtime_error("Every stage requires the shared fallback aura");
+    }
 }
 std::uint64_t collectedTotal(const Progress& progress) {
     std::uint64_t total=0;
@@ -122,18 +129,28 @@ std::vector<Definition> loadCatalog(const std::filesystem::path& path) {
     return result;
 }
 
-Roller::Roller(std::vector<Definition> definitions, std::uint64_t seed)
+AuraCategory auraCategory(const Definition& definition) {
+    // 新しい限定オーラを追加するときは、ここへidを足すとCollectionと抽選制限がそろいます。
+    const auto& id=definition.id;
+    if(id=="dune" || id=="mirage" || id=="pharaoh") return AuraCategory::Desert;
+    if(id=="pixelation" || id=="equinox" || id=="breakthrough" || id=="illusionary") return AuraCategory::Extra;
+    if(id=="nanally") return AuraCategory::Administrator;
+    return AuraCategory::Normal;
+}
+bool availableInBiome(const Definition& definition,Biome biome) {
+    if(!validBiome(biome) || definition.previewOnly) return false;
+    switch(auraCategory(definition)) {
+    case AuraCategory::Desert: return biome==Biome::Desert;
+    case AuraCategory::Extra: return biome==Biome::Extra;
+    case AuraCategory::Administrator: return false;
+    default: return true;
+    }
+}
+Roller::Roller(std::vector<Definition> definitions, std::uint64_t seed, Biome biome)
     : definitions_(std::move(definitions)), random_(seed) {
     validate(definitions_);
     weights_.resize(definitions_.size());
-    std::uint64_t remaining = TicketPool;
-    std::size_t fallback = 0;
-    for (std::size_t i = 0; i < definitions_.size(); ++i) {
-        if (definitions_[i].previewOnly) continue;
-        if (definitions_[i].denominator == 0) fallback = i;
-        else { weights_[i] = TicketPool / definitions_[i].denominator; remaining -= weights_[i]; }
-    }
-    weights_[fallback] = remaining;
+    setBiome(biome);
 }
 std::size_t Roller::selectTicket(std::uint64_t ticket) const {
     // 当たりくじの番号が、どのオーラに割り当てた区間に入っているかを調べます。
@@ -155,32 +172,47 @@ void Roller::setLuck(double value) {
     // The rarest result of L independent baseline rolls, evaluated from the CDF.
     // This also supports fractional L without a loop or a probability overflow.
     std::vector<std::size_t> order;
-    for (std::size_t i=0;i<definitions_.size();++i) if (!definitions_[i].previewOnly) order.push_back(i);
-    std::stable_sort(order.begin(),order.end(),[&](auto a,auto b){return probabilityTickets(definitions_,a)>probabilityTickets(definitions_,b);});
+    std::fill(weights_.begin(),weights_.end(),0);
+    for (std::size_t i=0;i<definitions_.size();++i) if (availableInBiome(definitions_[i],biome_)) order.push_back(i);
+    std::stable_sort(order.begin(),order.end(),[&](auto a,auto b){return probabilityTickets(definitions_,a,biome_)>probabilityTickets(definitions_,b,biome_);});
     std::uint64_t tail=TicketPool, previous=0;
     for (auto i:order) {
-        tail-=probabilityTickets(definitions_,i);
+        tail-=probabilityTickets(definitions_,i,biome_);
         const auto cumulative=value==1?TicketPool-tail:static_cast<std::uint64_t>(std::clamp(
             std::round(std::exp(value*std::log1p(-static_cast<double>(tail)/TicketPool))*TicketPool),0.,static_cast<double>(TicketPool)));
         weights_[i]=cumulative-previous; previous=cumulative;
     }
     luck_=value;
 }
+void Roller::setBiome(Biome biome) {
+    if(!validBiome(biome)) throw std::out_of_range("Invalid roll stage");
+    biome_=biome;
+    setLuck(luck_);
+}
 std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index) {
+    // 所持品のレア度比較には、今いる惑星に関係なくCSVの確率を使います。
+    // 出現しない惑星でDesert/Extraのレア度が0になってしまうのを防ぎます。
     if (catalog.at(index).previewOnly) return 0;
     const auto denominator = catalog.at(index).denominator;
     if (denominator) return TicketPool / denominator;
+    return probabilityTickets(catalog,index,Biome::Normal);
+}
+std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index, Biome biome) {
+    if(!validBiome(biome)) throw std::out_of_range("Invalid probability stage");
+    if(!availableInBiome(catalog.at(index),biome)) return 0;
+    const auto denominator=catalog[index].denominator;
+    if(denominator) return TicketPool/denominator;
     std::uint64_t remaining = TicketPool;
-    for (const auto& d : catalog) if (!d.previewOnly && d.denominator) remaining -= TicketPool / d.denominator;
+    for (const auto& d : catalog) if (availableInBiome(d,biome) && d.denominator) remaining -= TicketPool / d.denominator;
     return remaining;
 }
-std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index) {
+std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index, Biome biome) {
     const auto& d = catalog.at(index);
     if (d.previewOnly) return "Preview only";
     if (d.denominator) return "1 / " + formatNumber(d.denominator);
     std::ostringstream out;
     out << "~1 / " << std::fixed << std::setprecision(2)
-        << static_cast<double>(TicketPool) / static_cast<double>(probabilityTickets(catalog, index));
+        << static_cast<double>(TicketPool) / static_cast<double>(probabilityTickets(catalog, index, biome));
     return out.str();
 }
 void Progress::record(std::size_t index, const std::vector<Definition>& catalog) {
@@ -194,8 +226,8 @@ void Progress::record(std::size_t index, const std::vector<Definition>& catalog)
     if (counts.at(best)==0 || probabilityTickets(catalog, index) < probabilityTickets(catalog, best)) best = index;
     // Rolling changes inventory and statistics only. Collection owns equipment selection.
 }
-std::string oddsInLabel(const std::vector<Definition>& catalog,std::size_t index) {
-    auto label=oddsLabel(catalog,index);
+std::string oddsInLabel(const std::vector<Definition>& catalog,std::size_t index,Biome biome) {
+    auto label=oddsLabel(catalog,index,biome);
     const auto slash=label.find(" / ");
     if(slash!=std::string::npos) label.replace(slash,3," in ");
     return label;

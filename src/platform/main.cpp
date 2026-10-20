@@ -25,7 +25,7 @@ using Clock=std::chrono::steady_clock;
 struct Options {
     bool smoke{},warp{},debug{};
     std::filesystem::path capture, report, saveDir;
-    std::filesystem::path vrm,bgm,pixelationBgm,pixelationFinalBgm;
+    std::filesystem::path vrm,bgm,pixelationBgm,pixelationFinalBgm,illusionaryBgm;
     std::uint64_t seed{};
 };
 Options options() {
@@ -42,6 +42,7 @@ Options options() {
         else if(a.starts_with(L"--bgm=")) result.bgm=a.substr(6);
         else if(a.starts_with(L"--pixelation-bgm=")) result.pixelationBgm=a.substr(17);
         else if(a.starts_with(L"--pixelation-final-bgm=")) result.pixelationFinalBgm=a.substr(23);
+        else if(a.starts_with(L"--illusionary-bgm=")) result.illusionaryBgm=a.substr(18);
         else if(a.starts_with(L"--capture=")) result.capture=a.substr(10);
         else if(a.starts_with(L"--report=")) result.report=a.substr(9);
         else if(a.starts_with(L"--save-dir=")) result.saveDir=a.substr(11);
@@ -89,9 +90,11 @@ public:
         if(!opts_.bgm.empty()) presentation_.settings.bgmPath=utf8(opts_.bgm);
         if(!opts_.pixelationBgm.empty()) presentation_.settings.pixelationBgmPath=utf8(opts_.pixelationBgm);
         if(!opts_.pixelationFinalBgm.empty()) presentation_.settings.pixelationFinalBgmPath=utf8(opts_.pixelationFinalBgm);
+        if(!opts_.illusionaryBgm.empty()) presentation_.settings.illusionaryBgmPath=utf8(opts_.illusionaryBgm);
         downloads_=downloadsFolder();
         if(!downloads_.empty()) cutsceneAudioPath_=downloads_/L"EquinoxReworkedCutscene.mp4.mp4";
         roller_.setLuck(presentation_.settings.luck);
+        roller_.setBiome(presentation_.settings.biome);
     }
     aura::Frame frame() const {
         // Rendererに渡す「今のゲームのスナップショット」。ここでは抽選や装備変更をしません。
@@ -108,7 +111,8 @@ public:
             " / Aura BGM: "+music_.status():music_.status();
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
             mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime(),
-            stageSelectOpen_,stageTravel_.progress(),stageTravel_.target()};
+            stageSelectOpen_,stageTravel_.progress(),stageTravel_.target(),collectionCategory_,
+            cutsceneMusic_.bassPulse(cutsceneTime_)};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -189,20 +193,34 @@ private:
         return std::filesystem::is_regular_file(local,error)?local:bundled;
     }
     void startCutscene(aura::CutsceneKind kind=aura::CutsceneKind::Equinox) {
-        // 操作を止め、映像用の時計を0秒から開始。終了時に元のデバッグ表示へ戻します。
+        // 実際の装備と所持数は維持し、演出の最後に対応オーラを一時表示します。
+        // Esc/停止なら直前のプレビューに戻し、自然終了なら結果を見たままにします。
         stageSelectOpen_=false; stageTravel_.finish();
-        if(!cutsceneActive()) cutsceneDebugWasOpen_=renderer_->debugOpen();
+        if(!cutsceneActive()) {
+            cutsceneDebugWasOpen_=renderer_->debugOpen();
+            cutscenePreviousPreview_=presentation_.preview;
+        }
         if(renderer_->debugOpen()) renderer_->toggleDebug();
         cutsceneKind_=kind;
+        for(std::size_t i=0;i<roller_.catalog().size();++i)
+            if(roller_.catalog()[i].id==(kind==aura::CutsceneKind::Breakthrough?"breakthrough":"equinox"))
+                presentation_.showPreview(i,roller_.catalog().size(),auto_);
         cutsceneAudioPath_=downloads_.empty()?std::filesystem::path{}:downloads_/(kind==aura::CutsceneKind::Breakthrough?L"BreakthroughCutsceneV2.mp4.mp4":L"EquinoxReworkedCutscene.mp4.mp4");
+        // 配布版は動画ではなく、演出の範囲だけ切り出した音声を読みます。
+        // 同梱音声は既にトリミング済みなので、開始位置は0秒です。
+        const auto bundled=root_/L"data"/L"audio"/(kind==aura::CutsceneKind::Breakthrough?L"Breakthrough_Cutscene.m4a":L"Equinox_Cutscene.m4a");
+        std::error_code bundleError;
+        cutsceneAudioStart_=kind==aura::CutsceneKind::Breakthrough?aura::BreakthroughAudioStart:0.f;
+        if(std::filesystem::is_regular_file(bundled,bundleError)) {cutsceneAudioPath_=bundled; cutsceneAudioStart_=0;}
         cutsceneTime_=0; auto_=false; keys_.fill(false); movement_=0; dragging_=false;
         ReleaseCapture(); pending_.reset(); sfxBaseline_=false; stopCutsceneRequested_=false;
         std::error_code error;
         cutsceneAudioAvailable_=!cutsceneAudioPath_.empty() && std::filesystem::is_regular_file(cutsceneAudioPath_,error);
         cutsceneMusic_.reload();
     }
-    void stopCutscene() {
+    void stopCutscene(bool revealAura=false) {
         if(!cutsceneActive()) return;
+        if(!revealAura) presentation_.preview=cutscenePreviousPreview_;
         cutsceneTime_=-1; keys_.fill(false); dragging_=false; ReleaseCapture(); pending_.reset();
         cutsceneMusic_.reload();
         if(renderer_->debugOpen()!=cutsceneDebugWasOpen_) renderer_->toggleDebug();
@@ -216,6 +234,7 @@ private:
         // 1. 待ち時間が残っている間とCutScene中はロールしない。
         if(cooldown_>0 || worldInputBlocked()) return;
         // 2. 抽選 → 所持数と総回数へ追加。表示中のオーラは変更しない。
+        roller_.setBiome(presentation_.settings.biome);
         const auto result=roller_.roll();
         progress_.record(result,roller_.catalog());
         aura::LogEntry entry{progress_.rolls,aura::utcNow(),result};
@@ -239,6 +258,9 @@ private:
         case aura::Action::CloseStages: stageSelectOpen_=false; clearWorldInput(); break;
         case aura::Action::Travel:
             if(hit.index<aura::StageCount) travelTo(static_cast<aura::Biome>(hit.index));
+            break;
+        case aura::Action::CollectionCategory:
+            if(hit.index<4) {collectionCategory_=static_cast<aura::AuraCategory>(hit.index); collectionScroll_=0;}
             break;
         case aura::Action::Roll: roll(); break;
         case aura::Action::Auto: auto_=!auto_; break;
@@ -294,6 +316,7 @@ private:
         if(commands.avatar) presentation_.settings.avatar=*commands.avatar;
         if(commands.biome && aura::validBiome(*commands.biome) && !cutsceneActive() && !stageTravel_.active()) {
             presentation_.settings.biome=*commands.biome; x_=z_=0; clearWorldInput();
+            roller_.setBiome(*commands.biome);
         }
         if(commands.breakthroughCaptionOffset && std::isfinite(*commands.breakthroughCaptionOffset))
             presentation_.settings.breakthroughCaptionOffset=std::clamp(*commands.breakthroughCaptionOffset,-5.f,5.f);
@@ -310,9 +333,10 @@ private:
         if(commands.bgmPath) {presentation_.settings.bgmPath=*commands.bgmPath; music_.reload();}
         if(commands.pixelationBgmPath) {presentation_.settings.pixelationBgmPath=*commands.pixelationBgmPath; music_.reload();}
         if(commands.pixelationFinalBgmPath) {presentation_.settings.pixelationFinalBgmPath=*commands.pixelationFinalBgmPath; music_.reload();}
+        if(commands.illusionaryBgmPath) {presentation_.settings.illusionaryBgmPath=*commands.illusionaryBgmPath; music_.reload();}
         if(commands.volume) presentation_.settings.volume=*commands.volume;
         if(commands.username || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
-            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes) {
+            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.illusionaryBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes) {
             savePlayerSettings();
         }
         if(commands.playEquinoxCutscene) startCutscene();
@@ -330,11 +354,12 @@ private:
             const auto played=cutsceneMusic_.playbackSeconds();
             if(!opts_.smoke && cutsceneAudioAvailable_ && played) cutsceneTime_=*played;
             else cutsceneTime_+=dt;
-            if(cutsceneTime_>=aura::cutsceneDuration(cutsceneKind_)) stopCutscene();
+            if(cutsceneTime_>=aura::cutsceneDuration(cutsceneKind_)) stopCutscene(true);
         }
         if(const auto destination=stageTravel_.update(dt,aura::tuning::stages::TravelDurationSeconds)) {
             // 画面が宇宙に覆われた中間点で惑星と着地点を切り替えます。
             presentation_.settings.biome=*destination; x_=aura::tuning::stages::RespawnX; z_=aura::tuning::stages::RespawnZ; facing_=0; savePlayerSettings();
+            roller_.setBiome(*destination);
         }
         if(stageTravel_.arrived()) stageTravel_.finish();
         if(auto_ && cooldown_<=0) roll();
@@ -355,16 +380,16 @@ private:
         }
         bool musicActive=false;
         if(!cutsceneActive() && id=="singularity") {audioPath_=audioFile(s.bgmPath,L"Tides_of_the_Outer_Reach.mp3"); musicActive=true;}
+        if(!cutsceneActive() && id=="illusionary") {audioPath_=audioFile(s.illusionaryBgmPath,L"The_Weirdos.ogg"); musicActive=true;}
         if(!cutsceneActive() && id=="pixelation" && level>=1) {
             audioPath_=level>=3?audioFile(s.pixelationFinalBgmPath,L"Censored.mp3.mpeg"):audioFile(s.pixelationBgmPath,L"Redline_Shift.mp3");
             musicActive=true;
         }
         music_.update(audioPath_,musicActive,s.volume,dt);
-        // The reference video remains local. Its audio is stopped at the cinematic
-        // boundary, before the recording's later Collection footage can be heard.
-        cutsceneMusic_.update(cutsceneAudioPath_,cutsceneActive() && cutsceneAudioAvailable_,s.volume,dt,
-            cutsceneKind_==aura::CutsceneKind::Breakthrough?aura::BreakthroughAudioStart:0.f,
-            cutsceneKind_==aura::CutsceneKind::Breakthrough?aura::BreakthroughCutsceneDuration:0.f);
+        // 最後の映像の透明度と同じカーブで音量も落とします。通常BGMは終了後に開始。
+        const float cinematicGain=cutsceneActive()?aura::tuning::cutscene::endingOpacity(cutsceneTime_,aura::cutsceneDuration(cutsceneKind_)):0;
+        cutsceneMusic_.update(cutsceneAudioPath_,cutsceneActive() && cutsceneAudioAvailable_,s.volume*cinematicGain,dt,
+            cutsceneAudioStart_,aura::cutsceneDuration(cutsceneKind_));
         if(!cutsceneActive() && id=="pixelation" && level>=2) {
             const auto volley=aura::pixelationVolley(actionTime());
             if(sfxBaseline_) {
@@ -388,6 +413,7 @@ private:
                 // 方向×経過秒×速度で移動。clampはステージの端で止める処理です。
                 x_=std::clamp(x_+dx*dt*aura::tuning::game::WalkSpeed,-aura::StageWalkLimit,aura::StageWalkLimit);
                 z_=std::clamp(z_+dz*dt*aura::tuning::game::WalkSpeed,-aura::StageWalkLimit,aura::StageWalkLimit);
+                aura::clampStagePosition(s.biome,x_,z_,aura::StageHalfExtent,aura::tuning::world::EdgeWalkPadding);
                 moving=std::abs(x_-beforeX)+std::abs(z_-beforeZ)>.0001f;
                 facing_=std::atan2(-dx,-dz);
                 walk_+=dt*aura::tuning::game::WalkPhaseSpeed;
@@ -470,6 +496,24 @@ private:
         for(int i=0;i<18;++i) { cooldown_=0; roll(); }
         action({aura::Action::Equip,progress_.best});
         const auto chosen=progress_.equipped;
+        // 4フォルダーを実際にクリックし、表示番号とクリック判定の一致を確認。
+        const auto categoryRolls=progress_.rolls,categoryLogs=log_.size();
+        const auto categoryCounts=progress_.counts;
+        constexpr std::array<std::size_t,4> categorySizes={13,3,4,1};
+        for(unsigned category=0;category<4;++category) {
+            const float scale=renderer_->scale();
+            SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(static_cast<int>((82+(category%2)*100)*scale),
+                static_cast<int>((247+(category/2)*29)*scale))); update(0); render(false);
+            const auto items=aura::collectionItems(frame());
+            if(static_cast<unsigned>(collectionCategory_)!=category || items.size()!=categorySizes[category])
+                throw std::runtime_error("Collection category button / membership failed");
+            const auto hit=renderer_->hit(100*scale,316*scale,frame());
+            if(hit.action!=aura::Action::Equip || hit.index!=items.front()) throw std::runtime_error("Collection folder row hit mismatch");
+            if(!opts_.capture.empty()) renderer_->capture(opts_.capture.parent_path()/(L"collection-"+std::to_wstring(category)+L".png"));
+        }
+        action({aura::Action::CollectionCategory,0});
+        if(progress_.rolls!=categoryRolls || log_.size()!=categoryLogs || progress_.counts!=categoryCounts || progress_.equipped!=chosen)
+            throw std::runtime_error("Collection navigation changed progress");
         for(std::size_t i=0;i<roller_.catalog().size();++i) {
             aura::DebugActions command; command.preview=i; applyDebugActions(command); render(false);
         }
@@ -670,8 +714,12 @@ private:
             update(aura::tuning::stages::TravelDurationSeconds*.10f); render(false);
             if(stageTravel_.active() || aura::loadSettings(saves_/L"settings.txt").biome!=static_cast<aura::Biome>(destination))
                 throw std::runtime_error("Planet arrival was not saved or unlocked");
-            const wchar_t* suffixes[]={L"-planet-garden",L"-planet-desert",L"-planet-ocean",L"-planet-forest",L"-planet-volcano"};
+            const wchar_t* suffixes[]={L"-planet-garden",L"-planet-desert",L"-planet-ocean",L"-planet-forest",L"-planet-volcano",L"-planet-extra"};
             captureExtra(suffixes[destination]);
+            if(destination==static_cast<unsigned>(aura::Biome::Extra)) {
+                distance_=78; pitch_=1.25f; render(false); captureExtra(L"-planet-extra-overview");
+                distance_=26; pitch_=.64f;
+            }
             if(renderer_->instanceCount()>4096) throw std::runtime_error("Planet exceeded scene instance budget");
         }
         SendMessageW(window_,WM_KEYDOWN,'M',0); update(0);
@@ -762,8 +810,20 @@ private:
             cutsceneTime_=i*.18f; render(false);
             const auto suffix=L"-cutscene-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
         }
+        for(float remaining:{.8f,.4f,.05f}) {
+            cutsceneTime_=aura::EquinoxCutsceneDuration-remaining; render(false);
+            if(remaining<.8f && !renderer_->equinoxCount()) throw std::runtime_error("Equinox fade did not reveal underlying aura");
+            const auto suffix=L"-cutscene-fade-"+std::to_wstring(static_cast<int>(remaining*100)); captureExtra(suffix.c_str());
+        }
+        cutsceneTime_=4.1f;
+        for(float bass:{0.f,1.f}) {
+            auto testFrame=frame(); testFrame.cutsceneBass=bass; renderer_->draw(testFrame,false);
+            captureExtra(bass?L"-cutscene-bass1":L"-cutscene-bass0");
+        }
         cutsceneTime_=aura::EquinoxCutsceneDuration-.01f; update(.02f);
         if(cutsceneActive() || cutsceneMusic_.playing() || !renderer_->debugOpen()) throw std::runtime_error("Cutscene timeout did not stop audio / restore debug state");
+        if(presentation_.shown(progress_)!=equinox || progress_.equipped!=chosen) throw std::runtime_error("Cutscene natural end did not reveal Equinox preview");
+        presentation_.preview=cutPreview; // 以下のEsc確認は、直前のプレビューから再開。
         applyDebugActions(playCutscene);
         if(cutsceneMusic_.playing() || cutsceneMusic_.decodedBytes()) throw std::runtime_error("Cutscene restart did not reset audio to its beginning");
         update(.05f);
@@ -822,7 +882,7 @@ private:
         if(cutsceneAudioAvailable_) {
             breakthroughAudioBytes=cutsceneMusic_.decodedBytes();
             if(!cutsceneMusic_.playing() || breakthroughAudioBytes<1'000'000 || breakthroughAudioBytes>12'000'000 ||
-                cutsceneAudioPath_.filename()!=L"BreakthroughCutsceneV2.mp4.mp4")
+                (cutsceneAudioPath_.filename()!=L"BreakthroughCutsceneV2.mp4.mp4" && cutsceneAudioPath_.filename()!=L"Breakthrough_Cutscene.m4a"))
                 throw std::runtime_error("BreakThrough local clipped audio failed: "+cutsceneMusic_.status());
         }
         aura::DebugActions captionTuning;
@@ -914,6 +974,12 @@ private:
         if(auto_ || roller_.tickets(illusionary) || !renderer_->illusionaryCount() || renderer_->pixelationCount() || renderer_->nanallyCount())
             throw std::runtime_error("Illusionary preview isolation failed");
         const auto illusionaryInstances=renderer_->illusionaryCount();
+        update(.1f);
+        if(!music_.playing() || !music_.decodedBytes()) throw std::runtime_error("Illusionary Ogg BGM failed: "+music_.status());
+        const auto illusionaryAudioBytes=music_.decodedBytes();
+        pitch_=1.25f; render(false); captureExtra(L"-illusionary-overhead");
+        pitch_=.05f; yaw_=0; render(false); captureExtra(L"-illusionary-front");
+        pitch_=.23f;
         for(float angle:{-.9f,.9f,2.8f}) {yaw_=angle; render(false);}
         yaw_=.15f;
         for(float second:{.5f,1.3f,2.15f,3.2f,4.2f}) {
@@ -938,6 +1004,8 @@ private:
             const auto suffix=L"-desert-aura-"+aura::widen(roller_.catalog()[index].id); captureExtra(suffix.c_str());
             time_+=.6f; movement_=1; walk_=2; render(false);
         }
+        update(.6f);
+        if(music_.playing()) throw std::runtime_error("Illusionary BGM did not stop after aura switch");
         if(progress_.counts!=cutCounts || progress_.rolls!=cutRolls || log_.size()!=cutLogs ||
             std::filesystem::file_size(saves_/L"rolls.csv")!=cutLogBytes || progress_.equipped!=chosen)
             throw std::runtime_error("New aura previews changed inventory or history");
@@ -1033,6 +1101,26 @@ private:
         profileEdit.username=originalUsername; profileEdit.discordApplicationId=originalApplicationId; profileEdit.discordEnabled=originalDiscordEnabled;
         applyDebugActions(profileEdit); update(0);
         if(discord_.state()!=aura::DiscordPresenceState::Disabled) throw std::runtime_error("Smoke test must never publish a real Discord activity");
+        // 実際のApp::rollを高Luckで64回通し、Extraの4種の取得・演出発火を確認。
+        const auto beforeExtra=progress_.rolls; const auto extraEquipment=progress_.equipped;
+        const auto originalStage=presentation_.settings.biome; const auto originalLuck=roller_.luck();
+        aura::DebugActions extraWorld; extraWorld.biome=aura::Biome::Extra; extraWorld.luck=1'000'000; applyDebugActions(extraWorld);
+        std::array<bool,4> obtained{};
+        for(unsigned i=0;i<64;++i) {
+            if(cutsceneActive()) stopCutscene();
+            cooldown_=0; roll();
+            const auto result=log_.back().aura;
+            if(!aura::availableInBiome(roller_.catalog()[result],aura::Biome::Extra)) throw std::runtime_error("Offstage aura acquired in Extra");
+            const std::array<std::size_t,4> ids={pixelation,equinox,breakthrough,illusionary};
+            for(std::size_t a=0;a<ids.size();++a) if(result==ids[a]) obtained[a]=true;
+            if((result==equinox || result==breakthrough) && (!cutsceneActive() ||
+                cutsceneKind_!=(result==equinox?aura::CutsceneKind::Equinox:aura::CutsceneKind::Breakthrough)))
+                throw std::runtime_error("Acquired Extra aura did not trigger its CutScene");
+        }
+        if(cutsceneActive()) stopCutscene();
+        if(progress_.rolls!=beforeExtra+64 || progress_.equipped!=extraEquipment ||
+            !std::all_of(obtained.begin(),obtained.end(),[](bool got){return got;})) throw std::runtime_error("Extra real roll acquisition failed");
+        extraWorld.biome=originalStage; extraWorld.luck=originalLuck; applyDebugActions(extraWorld);
         persist();
         const auto restored=aura::loadProgress(saves_/L"progress.txt",roller_.catalog());
         if(restored.counts!=progress_.counts) throw std::runtime_error("Progress smoke check failed");
@@ -1045,35 +1133,37 @@ private:
                <<" ms/frame (60 offscreen frames, no vsync)\nRolls: "<<progress_.rolls<<"\n";
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: "
                <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
-            out<<"Planets: PASS / garden, desert, ocean, forest, volcano, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
+            out<<"Planets: PASS / garden, desert, ocean, forest, volcano, extra, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
+            out<<"Collection: PASS / Normal13 Desert3 Extra4 Administrator1, folder button and row click mapping, navigation preserves progress\nExtra acquisition: PASS / 64 actual rolls, all four exclusive auras acquired, CutScene triggers, equipment preserved\n";
             out<<"Profile: PASS / UTF-8 username and Discord settings save/restore; editable total 0 / 123456789 / original, AutoRoll stop, inventory/history/best unchanged\n"
                <<"Discord integration: disabled during game smoke; transport and payload covered by isolated fake IPC tests\n";
-            out<<"Pixelation: PASS / preview-only, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
+            out<<"Pixelation: PASS / preview isolation, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
                <<"Pixelation instances: "<<pixelationInstances<<"\nMean Pixelation frame submission time: "<<meanPixelationMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
             out<<"Pixelation levels: PASS / 0..3, split motion/action clocks; Lv2/Lv3 matching collision/explosion/float timing, fixed launch anchor during level switch; synchronized collision, one sound event per cycle\n"
                <<"Pixelation level instances: "<<pixelationLevelInstances[0]<<", "<<pixelationLevelInstances[1]<<", "<<pixelationLevelInstances[2]<<", "<<pixelationLevelInstances[3]
                <<"\nSFX: "<<sfx_.shotCount()<<" shots / "<<sfx_.impactCount()<<" impacts / "<<sfx_.status()<<"\n"
                <<"Equinox: PASS / preview, clean switching, no progress/history mutation\n"
-               <<"Cutscene: PASS / gameplay suppression, resize, 60 frames, timeout, Escape and debug stop, restored preview/levels/debug\n";
+               <<"Cutscene: PASS / gameplay suppression, resize, 60 frames, natural end reveals target preview, fade reveals underlying aura, Escape restores prior view\n";
             out<<"Equinox instances: "<<equinoxInstances<<"\nMean Equinox frame submission time: "<<meanEquinoxMs
                <<" ms/frame (60 offscreen frames, no vsync)\n"
                <<"Cutscene instances: 0 / one fullscreen triangle, procedural shader\nMean Cutscene frame submission time: "<<meanCutsceneMs
                <<" ms/frame ("<<CutsceneBenchmarkFrames<<" offscreen frames at t=1.5, no vsync)\n";
-            out<<"BreakThrough: PASS / preview-only, AutoRoll stop, clean switching, resize, inventory/history unchanged\n"
+            out<<"BreakThrough: PASS / preview isolation, AutoRoll stop, clean switching, resize, inventory/history unchanged\n"
                <<"BreakThrough instances: "<<breakthroughInstances<<"\nMean BreakThrough frame submission time: "<<meanBreakthroughMs
                <<" ms/frame (60 offscreen frames, no vsync)\n"
                <<"BreakThrough cutscene: PASS / static pillar positions, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
             out<<"BreakThrough captions: PASS / eight measured word times, live offset/per-word changes saved during playback, reset to defaults\n";
-            out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview only, fixed pose, movement, resize, cutscene restore and clean switching\n"
+            out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview isolation, reclining pose, solid floor, orbit lights, movement, resize, cutscene restore and clean switching\n"
                <<"Desert auras: PASS / Dune 1 in 50, Mirage 1 in 5000, Pharaoh 1 in 250000, <=300 glow instances each, history isolation\n"
-               <<"Rocket: PASS / shared respawn XZ, boarding clearance, all five planets\n";
+               <<"Rocket: PASS / shared respawn XZ, boarding clearance, all six planets\n";
+            out<<"Illusionary Ogg audio: PASS / "<<illusionaryAudioBytes<<" decoded PCM bytes, loop and stop\n";
             out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
                <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
-            if(breakthroughAudioBytes) out<<"BreakThrough local audio: PASS / "<<breakthroughAudioBytes<<" PCM bytes / 4.5s offset, 30s non-looping clip, restart and immediate stop\n";
+            if(breakthroughAudioBytes) out<<"BreakThrough audio: PASS / "<<breakthroughAudioBytes<<" PCM bytes / 30s non-looping clip, bundled trimmed M4A or local MP4 fallback, restart and stop\n";
             else out<<"BreakThrough local audio: visual-only / reference MP4 unavailable\n";
-            if(cutsceneDecoded) out<<"Local cutscene audio: PASS / "<<cutsceneDecoded<<" decoded PCM bytes / MP4 audio stream, restart from beginning, immediate stop before Collection footage\n";
+            if(cutsceneDecoded) out<<"Equinox audio: PASS / "<<cutsceneDecoded<<" decoded PCM bytes / 10.9s clip, measured bass, restart from beginning and stop\n";
             else out<<"Local cutscene audio: visual-only / reference MP4 unavailable\n";
             if(!opts_.pixelationBgm.empty()) out<<"Redline Shift: PASS / "<<redlineDecoded<<" decoded PCM bytes / Lv1-2 loop and stop\n";
             if(!opts_.pixelationFinalBgm.empty()) out<<"Censored: PASS / "<<finalDecoded<<" decoded PCM bytes / Lv3 switch and stop\n";
@@ -1182,6 +1272,8 @@ private:
     aura::DiscordPresence discord_;
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;
+    std::optional<std::size_t> cutscenePreviousPreview_;
+    aura::AuraCategory collectionCategory_{aura::AuraCategory::Normal};
     bool quitting_{},minimized_{},foreground_{true},auto_{},dragging_{};
     bool cutsceneDebugWasOpen_{},stopCutsceneRequested_{},sfxBaseline_{};
     bool cutsceneAudioAvailable_{};
@@ -1189,6 +1281,7 @@ private:
     aura::StageTravel stageTravel_;
     aura::CutsceneKind cutsceneKind_{aura::CutsceneKind::Equinox};
     float effectClock_{},actionClock_{},shotOrbitClock_{},cutsceneTime_{-1};
+    float cutsceneAudioStart_{};
     std::int64_t shotOrbitCycle_{-1};
     std::size_t effectAura_{std::numeric_limits<std::size_t>::max()};
     std::int64_t lastShotCycle_{-1},lastImpactCycle_{-1};

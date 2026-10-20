@@ -1,4 +1,5 @@
 #pragma once
+#include "core/stages.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <random>
@@ -21,20 +22,27 @@ struct Definition {
     float speed{}; // 標準の輪/粒子の回転速度係数。
     bool previewOnly{}; // trueならF1からの表示専用。ロール・在庫・履歴へ登録しない。
 };
+// Collectionのフォルダーと出現する惑星を、同じ分類から決めます。
+enum class AuraCategory { Normal, Desert, Extra, Administrator };
+AuraCategory auraCategory(const Definition& definition);
+bool availableInBiome(const Definition& definition, Biome biome);
 std::vector<Definition> loadCatalog(const std::filesystem::path& path);
 std::string csvQuote(const std::string& value);
 std::string formatNumber(std::uint64_t value);
 std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index);
-std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index);
-std::string oddsInLabel(const std::vector<Definition>& catalog, std::size_t index);
+std::uint64_t probabilityTickets(const std::vector<Definition>& catalog, std::size_t index, Biome biome);
+std::string oddsLabel(const std::vector<Definition>& catalog, std::size_t index, Biome biome = Biome::Normal);
+std::string oddsInLabel(const std::vector<Definition>& catalog, std::size_t index, Biome biome = Biome::Normal);
 
 class Roller {
 public:
-    explicit Roller(std::vector<Definition> definitions, std::uint64_t seed);
+    explicit Roller(std::vector<Definition> definitions, std::uint64_t seed, Biome biome = Biome::Normal);
     std::size_t roll(); // 抽選結果の「カタログ内の番号」を返す。所持数の更新はProgress担当。
     std::size_t selectTicket(std::uint64_t ticket) const;
     std::uint64_t tickets(std::size_t index) const;
     void setLuck(double value);
+    void setBiome(Biome biome); // 惑星の変更時、限定オーラの抽選表を作り直します。Luckは維持。
+    Biome biome() const { return biome_; }
     double luck() const { return luck_; }
     const std::vector<Definition>& catalog() const { return definitions_; }
 private:
@@ -42,6 +50,7 @@ private:
     std::vector<std::uint64_t> weights_;
     std::mt19937_64 random_;
     double luck_{1};
+    Biome biome_{Biome::Normal};
 };
 
 struct Progress {

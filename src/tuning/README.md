@@ -10,18 +10,21 @@
 | --- | --- | --- |
 | ロール間隔・移動・カメラ | [game.hpp](game.hpp) | `RollCooldownSeconds` を `1.4f → .7f`。待ち時間が半分。 |
 | ステージ・標準オーラ・Singularity | [world.hpp](world.hpp) | `HalfExtent` を `32.f → 40.f`。床・木・歩行範囲が一緒に広がる。 |
-| 惑星の景観・ロケット | [stages.hpp](stages.hpp) | `TravelDurationSeconds` を `3.6f → 5.f`。移動演出が長くなる。木・波・火の粉もここ。 |
-| BreakThroughの字幕 | [cutscene.hpp](cutscene.hpp) | `BreakthroughWordTimes` の各秒数。F1からも再ビルドなしで変更可能。 |
+| 惑星の景観・ロケット・Extraの星 | [stages.hpp](stages.hpp) | `ExtraInnerRadiusRatio` を `.55f → .65f`。星の谷が浅くなり、ふっくらする。 |
+| カットシーンのカメラ・揺れ・終了フェード | [cutscene.hpp](cutscene.hpp) | `EndingFadeSeconds` を `.8f → 1.2f`。映像と音がゆっくりオーラへ切り替わる。 |
+| BreakThroughの字幕 | [cutscene.hpp](cutscene.hpp) | `BreakthroughWordTimes` の各秒数。字幕の時差と単語の時刻はF1からも再ビルドなしで変更可能。 |
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |
 | Pixelation | [pixelation.hpp](pixelation.hpp) | `FinalMotionSpeed` を `3.f → 4.f`。Lv3 の周囲だけ高速化。 |
 | Equinox | [equinox.hpp](equinox.hpp) | `floorGlyphSize` を `3.2f → 2.8f`。床の「衡」が小さくなる。 |
 | BreakThrough の通常表示 | [breakthrough.hpp](breakthrough.hpp) | `titleHeight` を `3.55f → 3.9f`。名前を上に移動。 |
 | Nanally | [nanally.hpp](nanally.hpp) | `HeadWidth` を `6.35f → 7.0f`。頭が横に広がる。 |
-| Illusionary | [illusionary.hpp](illusionary.hpp) | `MotionSpeed` を `1.f → .7f`。回転と周囲の演出がゆっくりに。 |
+| Illusionaryの床・白い光・文字 | [illusionary.hpp](illusionary.hpp) | `OrbitLightRadius` を `1.92f → 2.2f`。白い光が体から離れた場所を回る。 |
 | 砂漠テーマ3種類 | [desert.hpp](desert.hpp) | Dune / Mirage / Pharaohそれぞれの半径・速度・粒子数を変更。 |
 
 オーラ名、確率、標準の輪・粒子の色や数は [data/auras.csv](../../data/auras.csv) を使います。特殊なオーラの形は同名の専用 `.hpp` で調整します。安全な試作用オーラを CSV に追加する例も、[改造ガイド](../../docs/development-guide.md#6-csv-で自作オーラを-1-個追加する) にあります。
+
+出現する惑星とCollectionの分類は `src/core/aura.cpp` の `auraCategory()` / `availableInBiome()`が担当します。Normalは全惑星、Desertは砂漠、ExtraはExtraで入手できます。AdministratorのNanallyはプレビュー専用です。分類と入手方法の一覧は[IllusionaryとExtraのガイド](../../docs/illusionary-and-extra-guide.md)へ。
 
 ## 1 回の編集の流れ
 
@@ -41,6 +44,9 @@ CSV を変えた場合も元の `data/auras.csv` を保存し、Develop.cmd を�
 
 - **Pixelation は時計が 2 本**あります。`FinalMotionSpeed` は Lv3 の周囲の回転用、`BoostedSpeed` は Lv2 / Lv3 で共通の弾・爆発・浮遊用でもあります。詳細は `pixelation.hpp` の冒頭へ。
 - **BreakThrough の通常表示と CutScene は独立**しています。このフォルダーの柱設定を変えても、CutScene の柱は変わらず静止します。
+- **Illusionaryの横向きポーズ**は `avatar.hpp` の `illusionary`にあります。`BodyRoll`が横倒しの角度、`Knee`が膝の曲がりです。`illusionary.hpp`は光・帯・床・文字を担当し、姿勢とは分けています。
+- **文字と光の明るさは別々**に調整します。Illusionaryの `TextSelfLight`はにじまない文字用です。`White`を変えると白い光全体にも影響します。
+- **Equinoxの揺れは音声の低音から**求めます。`EquinoxBassShakeHeight`は画面高に対する割合で、`.008f`なら0.8%、`0.f`なら無効です。音声がない場合も揺れはありません。
 - **数は少しずつ増やす**と試しやすくなります。粒子や線の数を増やすと描画量も増えます。各ファイルの範囲チェックを残したまま試してください。
 - **RGB は赤・緑・青**の順番です。UI の色は各 0〜1、専用オーラの発光は 1 を超える成分も使います。
 

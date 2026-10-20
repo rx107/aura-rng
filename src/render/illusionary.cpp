@@ -19,7 +19,7 @@ Color mix(Color a,Color b,float u) { return {a.r+(b.r-a.r)*u,a.g+(b.g-a.g)*u,a.b
 void Renderer::buildIllusionary(const Frame& f) {
     // 読む順番: ①時計と座標 → ②黒い帯 → ③白い放射線 → ④チェック → ⑤小さな画面。
     // 画像や動画は読み込まず、小さな板と線をまとめて GPU に送り、立体的に再構成します。
-    // 黒は発光で表現できないため illusionaryInk_、光は pixelationInstances_ に分けています。
+    // 不透明な帯・床・読みやすい文字は illusionaryInk_、ぼかす光は pixelationInstances_ です。
     const float t=f.time*settings::MotionSpeed;
     const float hover=std::sin(t*settings::HoverSpeed)*settings::HoverAmplitude;
     const float flashDistance=std::abs(std::fmod(t,settings::FlashPeriod)-settings::FlashAt);
@@ -36,14 +36,27 @@ void Renderer::buildIllusionary(const Frame& f) {
         return XMMatrixScaling(w,h,1)*XMMatrixRotationZ(rotation)*cameraBasis*
             XMMatrixTranslation(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p));
     };
-    auto dark=[&](FXMMATRIX model,Color color=Color{.001f,.001f,.005f}) {
-        // 容量の上限は調整値を増やしすぎた場合の安全柵。通常は約 400 枚です。
-        if(illusionaryInk_.size()>=700)return;
-        Instance v;XMStoreFloat4x4(&v.world,model);v.color={color.r,color.g,color.b,0};illusionaryInk_.push_back(v);
+    auto dark=[&](FXMMATRIX model,Color color=Color{.001f,.001f,.005f},float selfLight=0.f) {
+        // 床と文字も含む上限。GPU の共通バッファ上限 4096 枚より十分小さく保ちます。
+        if(illusionaryInk_.size()>=2000)return;
+        Instance v;XMStoreFloat4x4(&v.world,model);v.color={color.r,color.g,color.b,selfLight};illusionaryInk_.push_back(v);
     };
     auto beam=[&](XMVECTOR a,XMVECTOR b,float width,Color color,float opacity) {pixelLine(a,b,width,color,opacity,f);};
     auto glow=[&](XMVECTOR p,float w,float h,Color color,unsigned style,float opacity,float turn=0.f) {
         pixelQuad(billboard(p,w,h,turn),color,style,opacity);
+    };
+    auto readableText=[&](const char* value,XMVECTOR position,float size) {
+        // 共通の 5×7 文字生成だけを再利用し、できた画素を発光用から不透明用へ移します。
+        // 文字を小さく暗くするだけでは背景の光に負けるため、輪郭を保った白で描きます。
+        const auto first=pixelationInstances_.size();
+        pixelText(value,XMVectorGetX(position),XMVectorGetY(position),XMVectorGetZ(position),size,rgb(settings::TextColor),f);
+        for(std::size_t i=first;i<pixelationInstances_.size();++i) {
+            const auto& v=pixelationInstances_[i];
+            // pixelText の光のにじみ用の余白を削り、各画素をほぼ一マスにそろえます。
+            dark(XMMatrixScaling(settings::TextPixelFill/1.60f,settings::TextPixelFill/1.60f,1)*XMLoadFloat4x4(&v.world),
+                rgb(settings::TextColor),settings::TextSelfLight);
+        }
+        pixelationInstances_.resize(first); // ブルーム処理へ同じ文字を二重に送らない。
     };
 
     // ① 黒いリボン。1 周を短い台形に分け、その左右の端をぴったりつなぎます。
@@ -123,8 +136,45 @@ void Renderer::buildIllusionary(const Frame& f) {
             XMMatrixTranslation(ox+std::sin(angle)*(radius+.012f),y,oz-std::cos(angle)*(radius+.012f));
         pixelQuad(emission,(i+row)%2?blue:white,1,(i+row)%2?.61f:.49f);
     }
+    // ③-2 円の上面。外周のチェック壁だけでは中央に穴があるため、面そのものを敷きます。
+    // 細い横列ごとに円の左右端 sqrt(r²-z²) を計算し、各チェックを円周で切り取ります。
+    // 全タイルが深度を書き込む不透明な板なので、真上から見ても下のステージは透けません。
+    const float floorRadius=settings::FootRadius+.025f;
+    const float stripDepth=floorRadius*2/settings::FloorStrips;
+    const float floorY=.16f+settings::FootRows*settings::FootCellHeight+.008f;
+    const int cells=static_cast<int>(std::ceil(floorRadius/settings::FloorCellSize));
+    for(unsigned row=0;row<settings::FloorStrips;++row) {
+        const float z=-floorRadius+(row+.5f)*stripDepth;
+        const float edge=std::sqrt(std::max(0.f,floorRadius*floorRadius-z*z));
+        const int tileZ=static_cast<int>(std::floor(z/settings::FloorCellSize));
+        for(int tileX=-cells;tileX<cells;++tileX) {
+            const float left=std::max(-edge,tileX*settings::FloorCellSize);
+            const float right=std::min(edge,(tileX+1)*settings::FloorCellSize);
+            if(right<=left)continue;
+            const auto tile=XMMatrixScaling(right-left,stripDepth*1.004f,1)*XMMatrixRotationX(Pi*.5f)*
+                XMMatrixTranslation(ox+(left+right)*.5f,floorY,oz+z);
+            dark(tile,rgb((tileX+tileZ)%2?settings::FloorBlue:settings::FloorWhite),settings::FloorSelfLight);
+        }
+    }
 
     // ④ 青と白の星。8 本の短い線で描くため、専用画像を追加する必要はありません。
+    // 中央の白い光は残したまま、反対側からスタートする 2 つの光を体の周りに追加します。
+    auto orbitPoint=[&](float angle) {
+        return point(std::cos(angle)*settings::OrbitLightRadius,
+            settings::OrbitLightHeight+std::sin(angle*2)*settings::OrbitLightBob,std::sin(angle)*settings::OrbitLightRadius);
+    };
+    for(unsigned light=0;light<2;++light) {
+        const float angle=t*settings::OrbitLightSpeed+light*Pi;
+        const auto p=orbitPoint(angle);
+        glow(p,settings::OrbitLightWidth,settings::OrbitLightHeightSize,white,4,settings::OrbitLightBrightness);
+        glow(p,.66f,.66f,white,5,.42f);
+        for(unsigned trail=0;trail<settings::OrbitTrailSegments;++trail) {
+            const float a=angle-settings::OrbitTrailAngle*trail/settings::OrbitTrailSegments;
+            const float b=angle-settings::OrbitTrailAngle*(trail+1)/settings::OrbitTrailSegments;
+            const float fade=1-static_cast<float>(trail)/settings::OrbitTrailSegments;
+            beam(orbitPoint(a),orbitPoint(b),.033f,white,.46f*fade*fade);
+        }
+    }
     for(unsigned i=0;i<settings::SparkCount;++i) {
         const float angle=i*2.399963f+t*.15f;
         const float radius=2.20f+random(i,4)*1.10f;
@@ -162,18 +212,14 @@ void Renderer::buildIllusionary(const Frame& f) {
         const auto p2=screenPoint(x-side*(width*.5f+.93f),y+.12f,-.20f);
         beam(p0,p1,.013f,i%2?white:blue,.35f);beam(p1,p2,.013f,i%2?white:blue,.35f);
         if(i<4) {
-            const auto textPoint=screenPoint(x,y+.005f,-.235f);
-            dark(billboard(textPoint,width*.93f,.15f),i%2?Color{.70f,.71f,.76f}:ink);
             const auto letters=screenPoint(x,y+.005f,-.260f);
-            pixelText(captions[i],XMVectorGetX(letters),XMVectorGetY(letters),XMVectorGetZ(letters),
-                settings::CaptionPixelSize,i%2?Color{.025f,.03f,.18f}:white,f);
+            readableText(captions[i],letters,settings::CaptionPixelSize);
         }
     }
-    // 見出しだけは十分な大きさにし、背景に細い黒板を敷いて読めるようにします。
+    // 見出しも黒い背景を敷かず、にじまない文字を直接置きます。
     const auto title=screenPoint(settings::TitleSideOffset,settings::TitleHeight-settings::BurstHeight,-.32f);
-    dark(billboard(title,2.65f,.39f),ink);
     const auto letters=XMVectorAdd(title,XMVector3TransformNormal(XMVectorSet(0,0,-.025f,0),cameraBasis));
-    pixelText("ILLUSIONARY",XMVectorGetX(letters),XMVectorGetY(letters),XMVectorGetZ(letters),settings::TitlePixelSize,white,f);
+    readableText("ILLUSIONARY",letters,settings::TitlePixelSize);
     beam(screenPoint(settings::TitleSideOffset+1.42f,settings::TitleHeight-settings::BurstHeight,-.34f),
         screenPoint(settings::TitleSideOffset+2.13f,settings::TitleHeight-settings::BurstHeight,-.34f),.013f,white,.47f);
 }

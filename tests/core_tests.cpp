@@ -1,6 +1,7 @@
 #include "core/aura.hpp"
 #include "core/presentation.hpp"
 #include "core/animation.hpp"
+#include "core/audio_envelope.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -16,81 +17,90 @@ int main(int argc, char** argv) {
     try {
         check(argc == 2, "Catalog path required");
         const auto defs = aura::loadCatalog(argv[1]);
-        check(defs.size() == 21, "Expected 16 rollable auras and five previews");
+        check(defs.size() == 21, "Expected 20 rollable auras and one administrator preview");
         const auto findAura=[&](const std::string& id) {
             const auto found=std::find_if(defs.begin(),defs.end(),[&](const auto& d){return d.id==id;});
             check(found!=defs.end(),"Required aura ID"); return static_cast<std::size_t>(found-defs.begin());
         };
         const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough"),nanally=findAura("nanally");
         const auto illusionary=findAura("illusionary"),dune=findAura("dune"),mirage=findAura("mirage"),pharaoh=findAura("pharaoh");
-        const auto previewIndices={pixelation,equinox,breakthrough,nanally,illusionary};
-        check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==5 &&
-            defs[illusionary].previewOnly && defs[illusionary].denominator==0,"Illusionary is the fifth unpriced preview");
-        aura::Roller roller(defs, 42), same(defs, 42);
-        std::uint64_t start = 0;
-        for (std::size_t i = 0; i < defs.size(); ++i) {
-            const auto count = roller.tickets(i);
-            if(defs[i].previewOnly) {
-                check(count==0 && aura::probabilityTickets(defs,i)==0,"Preview-only auras have no tickets");
-                continue;
-            }
-            check(count > 0, "Every aura must be reachable");
-            check(roller.selectTicket(start) == i, "Range start");
-            check(roller.selectTicket(start + count - 1) == i, "Range end");
-            if (defs[i].denominator) check(count == aura::TicketPool / defs[i].denominator, "Probability weight");
-            start += count;
-        }
-        check(start == aura::TicketPool, "Probability total");
-        auto previousDefinitions=defs; std::erase_if(previousDefinitions,[](const auto& d){return d.previewOnly;});
-        aura::Roller previousRoller(previousDefinitions,42);
-        for(std::size_t i=0;i<defs.size();++i) if(!defs[i].previewOnly) {
-            const auto old=std::find_if(previousDefinitions.begin(),previousDefinitions.end(),[&](const auto& d){return d.id==defs[i].id;});
-            check(old!=previousDefinitions.end() && roller.tickets(i)==previousRoller.tickets(static_cast<std::size_t>(old-previousDefinitions.begin())),
-                "Adding a preview preserves every previous aura's ticket count");
-        }
-        for(auto preview:previewIndices)
-            check(aura::oddsLabel(defs,preview)=="Preview only" && aura::oddsInLabel(defs,preview)=="Preview only",
-                "Unpriced previews do not claim a probability");
-        check(roller.tickets(0) == aura::TicketPool / 2, "Common is exactly 50 percent");
-        check(roller.tickets(1) == aura::TicketPool / 4, "Uncommon is exactly 25 percent");
-        check(defs[3].id=="stardust" && roller.tickets(3)==49'684'989'000ULL,"Only Stardust supplies the new desert aura probability");
-        check(roller.tickets(dune)==aura::TicketPool/50 && roller.tickets(mirage)==aura::TicketPool/5000 &&
-            roller.tickets(pharaoh)==aura::TicketPool/250000,"Desert themes have exact, distinct roll probabilities");
-        check(aura::oddsInLabel(defs,1)=="1 in 4","Avatar probability uses 1 in N");
-        check(defs[0].name == "Common" && defs[1].name == "Uncommon", "Renamed aura labels with stable IDs");
-        std::set<std::uint64_t> uniqueWeights;
-        for(std::size_t i=0;i<defs.size();++i) {
-            if(defs[i].previewOnly) continue;
-            check(uniqueWeights.insert(roller.tickets(i)).second, "Every demo aura has a distinct probability");
-            check(aura::probabilityTickets(defs,i) == roller.tickets(i), "Displayed probability matches the actual ticket pool");
-        }
-        check(aura::oddsLabel(defs,0) == "1 / 2", "Common probability label");
-        for(double luck:{1.5,2.,10.,1000.,1'000'000.}) {
-            roller.setLuck(luck); previousRoller.setLuck(luck); std::uint64_t total=0;
+        const auto previewIndices={nanally};
+        const auto extraIndices={pixelation,equinox,breakthrough,illusionary};
+        check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==1 && defs[nanally].previewOnly,
+            "Only Nanally remains an administrator preview");
+        check(aura::auraCategory(defs[0])==aura::AuraCategory::Normal && aura::auraCategory(defs[singularity])==aura::AuraCategory::Normal &&
+            aura::auraCategory(defs[dune])==aura::AuraCategory::Desert && aura::auraCategory(defs[mirage])==aura::AuraCategory::Desert &&
+            aura::auraCategory(defs[pharaoh])==aura::AuraCategory::Desert && aura::auraCategory(defs[nanally])==aura::AuraCategory::Administrator,
+            "Collection groups have stable categories independent of CSV order");
+        aura::Roller roller(defs,42),same(defs,42);
+        for(unsigned stage=0;stage<aura::StageCount;++stage) {
+            const auto biome=static_cast<aura::Biome>(stage);
+            aura::Roller stageRoller(defs,73,biome),stageSame(defs,73,biome);
+            std::uint64_t start=0;
             for(std::size_t i=0;i<defs.size();++i) {
-                total+=roller.tickets(i);
-                if(defs[i].previewOnly) continue;
-                const auto old=std::find_if(previousDefinitions.begin(),previousDefinitions.end(),[&](const auto& d){return d.id==defs[i].id;});
-                check(roller.tickets(i)==previousRoller.tickets(static_cast<std::size_t>(old-previousDefinitions.begin())),
-                    "Preview leaves every existing aura's Luck-adjusted probability unchanged");
+                const bool normal=aura::auraCategory(defs[i])==aura::AuraCategory::Normal;
+                const bool eligible=normal || (biome==aura::Biome::Desert && aura::auraCategory(defs[i])==aura::AuraCategory::Desert) ||
+                    (biome==aura::Biome::Extra && aura::auraCategory(defs[i])==aura::AuraCategory::Extra);
+                check(aura::availableInBiome(defs[i],biome)==eligible,"Each planet enforces its own aura access");
+                const auto count=stageRoller.tickets(i);
+                check(count==aura::probabilityTickets(defs,i,biome),"Displayed stage odds match the actual ticket distribution");
+                if(!eligible) {check(count==0,"Unavailable auras get no ticket interval"); continue;}
+                check(count>0,"Every eligible aura has a reachable ticket interval");
+                check(stageRoller.selectTicket(start)==i && stageRoller.selectTicket(start+count-1)==i,"Both interval boundaries select the eligible aura");
+                if(defs[i].denominator) check(count==aura::TicketPool/defs[i].denominator,"Declared stage odds remain exact");
+                start+=count;
             }
-            check(total==aura::TicketPool,"Luck preserves total probability");
-            for(auto preview:previewIndices) check(roller.tickets(preview)==0,"Luck never makes previews rollable");
-            check(roller.tickets(0)<aura::TicketPool/2 && roller.tickets(singularity)>1000,"Luck raises rare tail and reduces Common");
+            check(start==aura::TicketPool,"Every stage sums to exactly 100 percent");
+            check(stageRoller.tickets(0)==aura::TicketPool/2 && stageRoller.tickets(1)==aura::TicketPool/4,
+                "Common and Uncommon retain exact 1/2 and 1/4 on every planet");
+            for(unsigned i=0;i<20000;++i) {
+                const auto result=stageRoller.roll();
+                check(result==stageSame.roll() && aura::availableInBiome(defs[result],biome),"Seeded rolls are deterministic and never leave the planet's catalog");
+            }
+            for(double luck:{1.5,2.,10.,1000.,1'000'000.}) {
+                stageRoller.setLuck(luck); std::uint64_t total=0;
+                for(std::size_t i=0;i<defs.size();++i) {
+                    total+=stageRoller.tickets(i);
+                    if(!aura::availableInBiome(defs[i],biome)) check(stageRoller.tickets(i)==0,"Luck cannot unlock a different planet's aura");
+                }
+                check(total==aura::TicketPool,"Stage Luck adjustment preserves 100 percent total");
+                check(stageRoller.tickets(0)<aura::TicketPool/2 && stageRoller.tickets(singularity)>1000,"Luck raises rare odds within the chosen planet");
+            }
+            stageRoller.setLuck(1);
+            for(std::size_t i=0;i<defs.size();++i) check(stageRoller.tickets(i)==aura::probabilityTickets(defs,i,biome),"Luck reset restores the chosen stage's baseline");
         }
-        roller.setLuck(2);
-        check(roller.tickets(0)==aura::TicketPool/4,"2x Luck gives Common a 25 percent probability");
-        check(std::abs(static_cast<double>(roller.tickets(singularity))-2000)<=1,"Rare aura approximates twice the base odds at 2x");
-        rejects([&]{roller.setLuck(NAN);}); rejects([&]{roller.setLuck(0);}); rejects([&]{roller.setLuck(1'000'001);});
+        check(roller.tickets(3)==69'888'989'000ULL,"Normal Stardust receives the exact unused probability");
+        roller.setBiome(aura::Biome::Desert);
+        check(roller.tickets(3)==49'684'989'000ULL && roller.tickets(dune)==aura::TicketPool/50 &&
+            roller.tickets(mirage)==aura::TicketPool/5000 && roller.tickets(pharaoh)==aura::TicketPool/250000,
+            "Desert keeps its three original distinct probabilities");
+        roller.setLuck(2); roller.setBiome(aura::Biome::Extra);
+        check(roller.luck()==2 && roller.tickets(0)==aura::TicketPool/4 && roller.tickets(dune)==0,
+            "Planet change reapplies existing Luck and clears stale desert weights");
         roller.setLuck(1);
-        for(std::size_t i=0;i<defs.size();++i) check(roller.tickets(i)==aura::probabilityTickets(defs,i),"Reset Luck restores exact baseline");
-        rejects([&] { roller.selectTicket(aura::TicketPool); });
+        check(roller.tickets(3)==69'887'505'667ULL,"Extra's fixed rare odds consume only its own Stardust remainder");
+        for(auto extra:extraIndices) {
+            check(aura::auraCategory(defs[extra])==aura::AuraCategory::Extra && roller.tickets(extra)>0,
+                "The four former previews can now be obtained in Extra");
+            check(aura::oddsLabel(defs,extra)!="Preview only","Obtainable Extra auras show their editable CSV odds");
+        }
+        roller.setBiome(aura::Biome::Normal);
+        check(aura::oddsLabel(defs,nanally)=="Preview only" && aura::oddsInLabel(defs,nanally)=="Preview only","Administrator aura stays unpriced");
+        check(aura::oddsInLabel(defs,1)=="1 in 4" && defs[0].name=="Common" && defs[1].name=="Uncommon","Stable IDs keep the requested names and odds labels");
+        roller.setLuck(2);
+        check(roller.tickets(0)==aura::TicketPool/4 && std::abs(static_cast<double>(roller.tickets(singularity))-2000)<=1,
+            "2x Luck has the expected CDF behavior");
+        rejects([&]{roller.setLuck(NAN);}); rejects([&]{roller.setLuck(0);}); rejects([&]{roller.setLuck(1'000'001);});
+        rejects([&]{roller.setBiome(static_cast<aura::Biome>(99));});
+        roller.setLuck(1);
+        rejects([&]{roller.selectTicket(aura::TicketPool);});
         std::vector<std::uint64_t> observed(defs.size());
-        for (int i = 0; i < 200000; ++i) { const auto n = roller.roll(); check(n == same.roll(), "Seed reproducibility"); ++observed[n]; }
-        check(std::abs(static_cast<double>(observed[0]) / 200000 - .5) < .01, "Common distribution");
-        check(std::abs(static_cast<double>(observed[2]) / 200000 - .125) < .005, "Ember distribution");
-        check(std::abs(static_cast<double>(observed[1]) / 200000 - .25) < .005,"Uncommon distribution");
-        for(auto preview:previewIndices) check(observed[preview]==0,"Preview-only auras are never rolled");
+        for(int i=0;i<200000;++i) {const auto n=roller.roll(); check(n==same.roll(),"Seed reproducibility"); ++observed[n];}
+        check(std::abs(static_cast<double>(observed[0])/200000-.5)<.01 &&
+            std::abs(static_cast<double>(observed[1])/200000-.25)<.005 &&
+            std::abs(static_cast<double>(observed[2])/200000-.125)<.005,"Baseline distribution matches its declared probabilities");
+        for(std::size_t i=0;i<defs.size();++i) if(!aura::availableInBiome(defs[i],aura::Biome::Normal))
+            check(observed[i]==0,"Normal rolls cannot produce any limited or administrator aura");
         auto invalid = defs; invalid[1].id = invalid[0].id;
         rejects([&] { aura::Roller bad(invalid, 1); });
         invalid = defs; invalid[0].denominator = 0;
@@ -126,11 +136,11 @@ int main(int argc, char** argv) {
             check(unownedPreviewSave.equipped==0 && unownedPreviewSave.best==0 && unownedPreviewSave.counts[preview]==0,
                 "A preview ID without inventory cannot become equipment or best discovery");
         }
-        auto previewFirst=defs; std::swap(previewFirst[0],previewFirst[pixelation]);
+        auto previewFirst=defs; std::swap(previewFirst[0],previewFirst[nanally]);
         auto initialPreviewFirst=aura::loadProgress(dir/"preview-first-missing",previewFirst);
-        check(initialPreviewFirst.equipped==pixelation && initialPreviewFirst.best==pixelation && !previewFirst[initialPreviewFirst.equipped].previewOnly,
+        check(initialPreviewFirst.equipped==nanally && initialPreviewFirst.best==nanally && !previewFirst[initialPreviewFirst.equipped].previewOnly,
             "Common is preferred after moving a preview to the first catalog row");
-        previewFirst[pixelation].id="common";
+        previewFirst[nanally].id="common";
         initialPreviewFirst=aura::loadProgress(dir/"preview-first-no-still-missing",previewFirst);
         check(initialPreviewFirst.equipped==1 && initialPreviewFirst.best==1,"A catalog without the old Common ID starts with its first rollable aura");
         previewFirst[0].id="still";
@@ -237,6 +247,7 @@ int main(int argc, char** argv) {
         settings.vrmPath="C:/モデル/Chocolat.vrm"; settings.bgmPath="C:/Music/Tides of the Outer Reach.mp3"; settings.volume=.35f;
         settings.pixelationBgmPath="C:/音楽/Pixelation base.mp3";
         settings.pixelationFinalBgmPath="C:/Music/Pixelation \"final\".mp3";
+        settings.illusionaryBgmPath="C:/音楽/The Weirdos \"loop\".ogg";
         settings.username="星の \"Player\" 🌟"; settings.discordEnabled=false; settings.discordApplicationId="12345678901234567890";
         aura::saveSettings(settingsPath,settings); const auto loadedSettings=aura::loadSettings(settingsPath);
         check(loadedSettings.language==aura::Language::Japanese && std::abs(loadedSettings.shirt.r-.95f)<.0001f,
@@ -245,6 +256,7 @@ int main(int argc, char** argv) {
             loadedSettings.vrmPath==settings.vrmPath && loadedSettings.bgmPath==settings.bgmPath && loadedSettings.volume==settings.volume &&
             loadedSettings.pixelationBgmPath==settings.pixelationBgmPath && loadedSettings.pixelationFinalBgmPath==settings.pixelationFinalBgmPath,
             "Extended settings / UTF-8 audio paths / quoted names round trip");
+        check(loadedSettings.illusionaryBgmPath==settings.illusionaryBgmPath,"Schema 6 preserves the Illusionary OGG path and quoted Unicode names");
         check(loadedSettings.username==settings.username && !loadedSettings.discordEnabled && loadedSettings.discordApplicationId==settings.discordApplicationId,
             "Schema 4 preserves Unicode/quoted usernames and Discord preferences");
         settings.breakthroughCaptionOffset=-.18f;
@@ -254,15 +266,27 @@ int main(int argc, char** argv) {
             const auto planetSettings=aura::loadSettings(settingsPath);
             check(planetSettings.biome==settings.biome && planetSettings.breakthroughCaptionOffset==-.18f &&
                 planetSettings.breakthroughWordTimes==settings.breakthroughWordTimes,
-                "All five planets and custom per-word caption times survive save/reload");
+                "All six planets and custom per-word caption times survive save/reload");
             check(!aura::stageDisplayName(settings.biome,aura::Language::English).empty() &&
                 !aura::stageDisplayName(settings.biome,aura::Language::Japanese).empty(),"All planets have bilingual names");
         }
-        settings.biome=static_cast<aura::Biome>(5); rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.biome=aura::Biome::Desert;
+        settings.biome=static_cast<aura::Biome>(aura::StageCount); rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.biome=aura::Biome::Desert;
         settings.breakthroughCaptionOffset=NAN; rejects([&]{aura::saveSettings(settingsPath,settings);});
         settings.breakthroughCaptionOffset=5.1f; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.breakthroughCaptionOffset=0;
         settings.breakthroughWordTimes[1]=settings.breakthroughWordTimes[0]; rejects([&]{aura::saveSettings(settingsPath,settings);});
         settings.breakthroughWordTimes=aura::tuning::cutscene::BreakthroughWordTimes;
+        aura::saveSettings(settingsPath,settings);
+        {
+            std::ifstream oldSettings(settingsPath); std::string all((std::istreambuf_iterator<char>(oldSettings)),{});
+            all.replace(all.find("STARS_RNG_SETTINGS 6"),20,"STARS_RNG_SETTINGS 5");
+            const auto musicRow=all.find("illusionary_bgm ");
+            check(musicRow!=std::string::npos,"New settings contain the named Illusionary music field");
+            all.erase(musicRow,all.find('\n',musicRow)-musicRow+1);
+            std::ofstream legacySettings(settingsPath); legacySettings<<all;
+        }
+        const auto migratedV5=aura::loadSettings(settingsPath);
+        check(migratedV5.biome==settings.biome && migratedV5.breakthroughWordTimes==settings.breakthroughWordTimes &&
+            migratedV5.illusionaryBgmPath.empty(),"Schema 5 keeps existing planet and captions while defaulting the new BGM path");
         {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 4\nlanguage ja\nshirt 0.5 0.7 0.9\nluck 2.5\navatar 0\nbiome 1\nvolume 0.25\nvrm \"\"\nbgm \"space.mp3\"\npixelation_bgm \"base.mp3\"\npixelation_final_bgm \"final.mp3\"\nusername \"Existing Player\"\ndiscord_enabled 0\ndiscord_application_id \"12345\"\n";}
         const auto migratedV4=aura::loadSettings(settingsPath);
         check(migratedV4.biome==aura::Biome::Desert && migratedV4.username=="Existing Player" && !migratedV4.discordEnabled &&
@@ -277,6 +301,17 @@ int main(int argc, char** argv) {
         check(flight.update(.02f,1.f)==aura::Biome::Ocean && !flight.update(.02f,1.f),"Destination is applied exactly once at the midpoint");
         check(!flight.update(3.f,1.f) && flight.arrived(),"Long frames complete a flight without applying the destination twice");
         flight.finish();
+        for(unsigned i=0;i<180;++i) {
+            const float angle=i*.034906585f;
+            float x=std::cos(angle)*100.f,z=std::sin(angle)*100.f;
+            aura::clampStagePosition(aura::Biome::Extra,x,z,aura::StageHalfExtent,1.2f);
+            check(std::abs(std::hypot(x,z)-(aura::extraStageRadius(angle,aura::StageHalfExtent)-1.2f))<.001f,
+                "The star planet walking boundary follows every rounded tip and valley");
+        }
+        float safeX=1,safeZ=-2; aura::clampStagePosition(aura::Biome::Extra,safeX,safeZ,aura::StageHalfExtent,1.2f);
+        check(safeX==1 && safeZ==-2,"Star boundary leaves an interior position unchanged");
+        safeX=100;safeZ=-100; aura::clampStagePosition(aura::Biome::Normal,safeX,safeZ,aura::StageHalfExtent,1.2f);
+        check(safeX==aura::StageWalkLimit && safeZ==-aura::StageWalkLimit,"Existing square planet limits are unchanged");
         check(!flight.active() && flight.start(aura::Biome::Volcano,aura::Biome::Ocean),"Arrival unlocks a new flight");
         check(!flight.update(NAN,1.f) && flight.progress()==0,"Invalid time cannot poison the travel clock");
         check(flight.update(2.f,1.f)==aura::Biome::Volcano && flight.arrived(),"A single long frame still applies its planet and arrives");
@@ -341,6 +376,7 @@ int main(int argc, char** argv) {
         aura::saveProgress(save,levels,defs);
         check(aura::loadProgress(save,defs).auraLevel(singularity,defs)==3,"Aura Level survives save via stable counts");
         auto historicalCatalog=defs;
+        for(auto& definition:historicalCatalog) if(aura::auraCategory(definition)==aura::AuraCategory::Extra) {definition.previewOnly=true; definition.denominator=0;}
         std::erase_if(historicalCatalog,[](const auto& d){return d.id=="illusionary" || d.id=="dune" || d.id=="mirage" || d.id=="pharaoh";});
         auto historicalRollable=historicalCatalog; std::erase_if(historicalRollable,[](const auto& d){return d.previewOnly;});
         auto previousCatalog=historicalRollable; previousCatalog.erase(previousCatalog.begin()+3);
@@ -408,7 +444,27 @@ int main(int argc, char** argv) {
         const auto desertRestored=aura::loadProgress(save,defs);
         check(desertRestored.rolls==3 && desertRestored.counts[dune]==1 && desertRestored.counts[mirage]==1 &&
             desertRestored.equipped==pharaoh && desertRestored.best==pharaoh,"New rollable desert inventory can be equipped, saved and restored");
-        check(aura::illusionaryPose(1.3f).fixed && aura::illusionaryPose(1.3f).lift>0,"Illusionary uses a floating fixed pose");
+        aura::Progress extraProgress(defs.size());
+        for(auto index:extraIndices) extraProgress.record(index,defs);
+        extraProgress.equipped=illusionary; aura::saveProgress(save,extraProgress,defs);
+        const auto extraRestored=aura::loadProgress(save,defs);
+        check(extraRestored.rolls==4 && extraRestored.discovered()==4 && extraRestored.equipped==illusionary &&
+            extraRestored.best==illusionary && extraRestored.counts==extraProgress.counts,
+            "Promoted Extra discoveries can be recorded, equipped, saved, and restored independently of the current planet");
+        auto oldPreviewCatalog=defs;
+        for(auto index:extraIndices) {oldPreviewCatalog[index].previewOnly=true; oldPreviewCatalog[index].denominator=0;}
+        aura::Progress oldPreviewProgress(oldPreviewCatalog.size());
+        oldPreviewProgress.record(dune,oldPreviewCatalog); oldPreviewProgress.record(pharaoh,oldPreviewCatalog);
+        oldPreviewProgress.record(singularity,oldPreviewCatalog); oldPreviewProgress.equipped=pharaoh; oldPreviewProgress.setRollCount(13579);
+        aura::saveProgress(save,oldPreviewProgress,oldPreviewCatalog);
+        const auto promotedSave=aura::loadProgress(save,defs);
+        check(promotedSave.rolls==13579 && promotedSave.equipped==pharaoh && promotedSave.best==singularity &&
+            promotedSave.counts==oldPreviewProgress.counts,
+            "The v0.1.11 save preserves desert discoveries, equipment, and its edited counter when four previews become obtainable");
+        const auto reclining=aura::illusionaryPose(1.3f);
+        check(reclining.fixed && reclining.lift>0 && std::abs(reclining.bodyRoll)>1.3f &&
+            reclining.legPitch[0]!=reclining.legPitch[1] && reclining.knee[0]!=reclining.knee[1],
+            "Illusionary reclines horizontally with asymmetric legs and a fixed shared-avatar pose");
         const auto levelCounts=levels.counts;
         presentation.preview=singularity; presentation.singularityLevel=1;
         check(presentation.level(levels,defs)==1 && levels.counts==levelCounts,"Debug Aura Level leaves inventory untouched");
@@ -517,8 +573,37 @@ int main(int argc, char** argv) {
         auto distance=[](const aura::AbsorbedStar& s){return std::sqrt(s.x*s.x+s.z*s.z+(s.y-5.7f)*(s.y-5.7f));};
         check(distance(starA)>distance(starB) && distance(starB)>distance(starC) && starA.size>starC.size,
             "Stars spiral toward the black hole and shrink before respawning");
+        std::vector<std::uint8_t> silence(48000*2);
+        const auto silentBass=aura::bassEnvelope(silence,48000,1);
+        check(silentBass.size()==100 && std::all_of(silentBass.begin(),silentBass.end(),[](float v){return v==0;}),
+            "A silent track produces no artificial camera beat");
+        check(aura::bassEnvelope(silence,999,1).empty() && aura::bassEnvelope(silence,48000,0).empty() &&
+            aura::bassEnvelope(std::span<const std::uint8_t>(silence).first(3),48000,1).empty(),
+            "Malformed audio dimensions cannot produce a bass timeline");
+        std::vector<std::uint8_t> frequencyTest(48000*2*2);
+        for(unsigned i=0;i<96000;++i) {
+            const double hz=i<48000?6000.:60.;
+            const auto sample=static_cast<std::int16_t>(std::sin(i*2*3.141592653589793*hz/48000)*16000);
+            const auto bits=static_cast<std::uint16_t>(sample);
+            frequencyTest[i*2]=static_cast<std::uint8_t>(bits&255);
+            frequencyTest[i*2+1]=static_cast<std::uint8_t>(bits>>8);
+        }
+        const auto measuredBass=aura::bassEnvelope(frequencyTest,48000,1);
+        const auto highPeak=*std::max_element(measuredBass.begin()+20,measuredBass.begin()+80);
+        const auto lowPeak=*std::max_element(measuredBass.begin()+120,measuredBass.begin()+180);
+        check(measuredBass.size()==200 && lowPeak>highPeak*4 &&
+            std::all_of(measuredBass.begin(),measuredBass.end(),[](float value){return std::isfinite(value) && value>=0 && value<=1;}),
+            "Measured low-frequency notes drive the camera while equal-volume high frequencies are suppressed");
+        const std::array<float,3> beats{0,1,0};
+        check(std::abs(aura::bassAt(beats,.005f)-.5f)<.0001f && aura::bassAt(beats,.01f)==1 &&
+            aura::bassAt(beats,-1)==0 && aura::bassAt(beats,NAN)==0 && aura::bassAt(beats,10)==0,
+            "Bass playback interpolates smoothly and safely ignores times outside the track");
         std::filesystem::remove_all(dir);
-        std::cout << "PASS: exact Common probability, distinct odds, fixed equipment, preview isolation, bilingual settings, shirt colors, cooldown wave, save/restore, UTF-8 CSV\n";
+        check(aura::tuning::cutscene::endingOpacity(10.1f,10.9f)==1 &&
+            std::abs(aura::tuning::cutscene::endingOpacity(10.5f,10.9f)-.5f)<.0001f &&
+            aura::tuning::cutscene::endingOpacity(10.9f,10.9f)==0,
+            "CutScene fade preserves the last frame and transitions smoothly to the aura");
+        std::cout << "PASS: exact stage odds, six planets, limited drops, fixed poses, preview isolation, bass envelope, schema migration, save/restore, UTF-8 CSV\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
 }

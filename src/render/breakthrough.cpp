@@ -59,7 +59,10 @@ float4 main(Input i):SV_TARGET {
 // 通常表示と描き方を分けているため、設定ヘッダーの柱の浮遊はこの演出に影響しない。
 // ここで柱のcenter.yに時間tを足さないことが「CutSceneの柱は静止」の要点。
 constexpr char CinematicShader[]=R"(
-cbuffer Cinematic:register(b0) { float4 screenAndTime; };
+cbuffer Cinematic:register(b0) {
+    float4 screenAndTime; float4 arrivals; float4 cameraTuning;
+    float4 pillarNear; float4 pillarFar;
+};
 struct Input { float4 p:SV_POSITION; float2 uv:TEXCOORD0; };
 float hash(float2 p) { float3 a=frac(float3(p.x,p.y,p.x)*.1031);a+=dot(a,a.yzx+33.33);return frac((a.x+a.y)*a.z); }
 float noise(float2 p) { float2 v=floor(p),u=frac(p);u=u*u*(3-2*u);return lerp(lerp(hash(v),hash(v+float2(1,0)),u.x),lerp(hash(v+float2(0,1)),hash(v+1),u.x),u.y); }
@@ -77,13 +80,23 @@ float4 main(Input i):SV_TARGET {
     float t=screenAndTime.x,aspect=screenAndTime.y;
     float2 raw=(i.uv-.5)*float2(aspect,1),q=raw;
     float yaw=.48,roll=0,distance=11,targetY=3.7,pitch=.10;
+    float sceneStart=0,arrival=arrivals.x;
+    bool monochrome=t>=cameraTuning.z && t<14.15;
     bool hidden=false;
     if(t<3.4) { distance=4.15;targetY=6.0;roll=-.30+.055*t;yaw=.24+t*.035;pitch=.12; }
-    else if(t<7.3) { distance=4.6;targetY=1.5;roll=-.48+(t-3.4)*.065;yaw=.45+(t-3.4)*.06;pitch=.12; }
-    else if(t<11.1) { distance=8.6;targetY=3.7;roll=-.22+(t-7.3)*.07;yaw=.36;pitch=.10; }
+    else if(t<7.3) { sceneStart=3.4;arrival=arrivals.y;distance=4.6;targetY=1.5;roll=-.48+(t-3.4)*.065;yaw=.45+(t-3.4)*.06;pitch=.12; }
+    else if(t<11.1) { sceneStart=7.3;arrival=arrivals.z;distance=8.6;targetY=3.7;roll=-.22+(t-7.3)*.07;yaw=.36;pitch=.10; }
     else if(t<14.15) { hidden=true;roll=.12; }
-    else if(t<15.05) { return float4(0,0,0,1); }
+    else if(t<15.05) { return float4(0,0,0,screenAndTime.z); }
     else {distance=12.2+(t-15.05)*.045;targetY=3.9;roll=.015*sin(t*.4);yaw=.28+.017*(t-15);pitch=.04;}
+    // 場面の始めは奥に置き、定位置へ滑らかに近づいてから字幕を出す。
+    // smoothstepの逆向きなので、到着時のカメラ速度が0になり急停止しない。
+    if(t<11.1) {
+        float remaining=1-smoothstep(sceneStart,arrival,t);
+        distance*=lerp(1,arrivals.w,remaining);
+        yaw+=cameraTuning.x*remaining;
+        roll+=cameraTuning.y*remaining;
+    }
     q=rot(q,roll);
     float3 target=float3(0,targetY,0),eye=target+float3(sin(yaw)*distance,sin(pitch)*distance,-cos(yaw)*distance);
     float3 forward=normalize(target-eye),right=normalize(cross(float3(0,1,0),forward)),up=cross(forward,right);
@@ -125,14 +138,46 @@ float4 main(Input i):SV_TARGET {
             color*=.72+.28*cloud(uv*18+t*.055);
         }
     }
+    // iv: 資料の赤い下描きに沿う、左手前から画面中央の奥へ伸びる一本の柱。
+    // 光る板ではなく箱との交差で立体を描くため、手前の端面と側面が見える。
+    // この場面だけ柱は白黒。中心フレアや稲妻は下で完全に止める。
+    if(monochrome) {
+        float3 nearPoint=pillarNear.xyz,farPoint=pillarFar.xyz;
+        float3 center=(nearPoint+farPoint)*.5;
+        float3 axis=normalize(farPoint-nearPoint);
+        float3 sideAxis=normalize(cross(float3(0,1,0),axis));
+        float3 topAxis=cross(axis,sideAxis);
+        float3 ray=normalize(float3(raw.x,-raw.y,1.6));
+        float3 localEye=float3(dot(-center,sideAxis),dot(-center,topAxis),dot(-center,axis));
+        float3 localRay=float3(dot(ray,sideAxis),dot(ray,topAxis),dot(ray,axis));
+        float3 bounds=float3(pillarNear.w,pillarFar.w,length(farPoint-nearPoint)*.5);
+        float hit=hitBox(localEye,localRay,bounds);
+        float background=.022+fog*.13;
+        color=background.xxx;
+        if(hit<9999) {
+            float3 surface=localEye+localRay*hit;
+            float3 face=abs(surface/bounds);
+            bool endFace=face.z>max(face.x,face.y)-.002;
+            bool topFace=face.y>face.x;
+            float2 uv=endFace?surface.xy/bounds.xy:
+                (topFace?float2(surface.x/bounds.x,surface.z/bounds.z):float2(surface.z/bounds.z,surface.y/bounds.y));
+            float2 grid=frac((uv*.5+.5)*float2(endFace?3:22,endFace?4:5));
+            float panel=hash(floor((uv*.5+.5)*float2(endFace?3:22,endFace?4:5)));
+            float panelSeam=step(.96,grid.x)+step(.94,grid.y);
+            float tone=(endFace?.19:(topFace?.74:.41))*(.55+.45*panel);
+            tone=lerp(tone,.025,saturate(panelSeam));
+            float edge=pow(saturate(max(face.x,face.y)),64)*.18;
+            color=saturate(tone+edge).xxx;
+        }
+    }
     float2 p=q-lightPos;
     float r=length(p),angle=atan2(p.y,p.x);
     float strength=t<15.05?.75:1.4;
     float glow=exp(-r*r*22)*.26;
     float flare=star(p,.19)*1.7+exp(-abs(p.y)*300)*exp(-abs(p.x)*.65)*.46;
-    color+=float3(.66,.70,1)*(flare+glow)*strength;
+    color+=float3(.66,.70,1)*(flare+glow)*strength*(monochrome?0:1);
     float litSmoke=pow(saturate(cloud(p*7+warp*1.8+float2(t*.043,-t*.031))-.22),1.5);
-    color+=float3(.19,.20,.38)*litSmoke*exp(-r*r*1.7)*strength;
+    color+=float3(.19,.20,.38)*litSmoke*exp(-r*r*1.7)*strength*(monochrome?0:1);
     // 画面の端から細い光を巻き込み、中心の強い光へつなげる。
     [unroll]for(int j=0;j<9;++j) {
         float offset=j*.6981;
@@ -141,29 +186,24 @@ float4 main(Input i):SV_TARGET {
         float band=abs(sin(angle+offset+wave+r*.8));
         float filament=exp(-band*max(90,r*110))*exp(-r*.66)*(1-exp(-r*22));
         float variation=.4+.6*turbulence;
-        color+=float3(.28,.31,.70)*filament*variation*(j<3?1.2:.48);
+        color+=float3(.28,.31,.70)*filament*variation*(j<3?1.2:.48)*(monochrome?0:1);
     }
     // 小さな光の粒を漂わせ、柱と霧が同じ空間にあるように見せる。
     float2 cells=floor(q*38),particle=frac(q*38)-.5;
     float seed=hash(cells);
     float dots=exp(-dot(particle,particle)*850)*step(.965,seed);
-    color+=float3(.65,.70,1)*dots*(.4+.6*sin(t+seed*40)*sin(t+seed*40));
+    color+=(monochrome?float3(.13,.13,.13):float3(.65,.70,1))*dots*(.4+.6*sin(t+seed*40)*sin(t+seed*40));
     float aperture=.395;
     if(t<3.4)aperture=.395*(1-smoothstep(3.16,3.4,t));
     else if(t<7.3)aperture=.395*smoothstep(3.4,3.58,t)*(1-smoothstep(7.02,7.3,t));
     else if(t<11.1)aperture=.395*smoothstep(7.3,7.48,t)*(1-smoothstep(10.85,11.1,t));
-    else if(t>=28.0)aperture=.395*(1-smoothstep(28.0,29.0,t));
     float mask=1-smoothstep(aperture,aperture+.0015,abs(i.uv.y-.5));
     float flash=exp(-pow((t-15.08)/.14,2));
-    float inversion=exp(-pow((t-13.47)/.06,2));
-    color=lerp(color,1-color,inversion);
     color=lerp(color,float3(.98,.98,1),flash);
     float desaturate=smoothstep(27.2,28.8,t)*.8;
     color=lerp(color,dot(color,float3(.299,.587,.114)).xxx,desaturate);
-    color*=mask*smoothstep(0,.25,t)*(1-smoothstep(28.9,29.0,t));
-    float endFlash=exp(-pow((t-29.05)/.045,2))*.68;
-    color+=endFlash;
-    return float4(saturate(color),1);
+    color*=mask*smoothstep(0,.25,t);
+    return float4(saturate(color),screenAndTime.z);
 })";
 
 float random(unsigned i,unsigned salt=0) {
@@ -184,7 +224,7 @@ void Renderer::createBreakthrough() {
     };
     shader(MaterialShader,sizeof(MaterialShader)-1,&breakthroughPs_,"breakthrough-material.hlsl");
     shader(CinematicShader,sizeof(CinematicShader)-1,&breakthroughCutscenePs_,"breakthrough-cutscene.hlsl");
-    D3D11_BUFFER_DESC constants{};constants.ByteWidth=16;constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC constants{};constants.ByteWidth=80;constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     constants.Usage=D3D11_USAGE_DEFAULT;
     checked(device_->CreateBuffer(&constants,nullptr,&breakthroughConstants_),"BreakThrough CutScene constants");
     D3D11_TEXTURE2D_DESC description{};description.Width=1024;description.Height=256;
@@ -325,10 +365,18 @@ void Renderer::buildBreakthrough(const Frame& f) {
 void Renderer::drawBreakthroughCutscene(const Frame& frame) {
     // 全画面の三角形1枚で専用HLSLを実行する。通常の柱モデルを再利用しないため浮遊しない。
     if(frame.cutsceneTime<0 || frame.cutsceneTime>BreakthroughCutsceneDuration)return;
-    const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,static_cast<float>(width_),static_cast<float>(height_)};
+    const auto& arrival=tuning::cutscene::BreakthroughCameraArrival;
+    const auto& pillarNear=tuning::cutscene::BreakthroughMonochromePillarNear;
+    const auto& pillarFar=tuning::cutscene::BreakthroughMonochromePillarFar;
+    const float opacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,BreakthroughCutsceneDuration);
+    const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,opacity,static_cast<float>(height_),
+        arrival[0],arrival[1],arrival[2],tuning::cutscene::BreakthroughCameraFarMultiplier,
+        tuning::cutscene::BreakthroughCameraSweepYaw,tuning::cutscene::BreakthroughCameraSweepRoll,tuning::cutscene::BreakthroughMonochromeStart,0,
+        pillarNear[0],pillarNear[1],pillarNear[2],tuning::cutscene::BreakthroughMonochromePillarHalfWidth,
+        pillarFar[0],pillarFar[1],pillarFar[2],tuning::cutscene::BreakthroughMonochromePillarHalfHeight};
     context_->UpdateSubresource(breakthroughConstants_.Get(),0,nullptr,constants,0,0);
     ID3D11RenderTargetView* target=target_.Get();context_->OMSetRenderTargets(1,&target,nullptr);
-    context_->OMSetDepthStencilState(effectDepth_.Get(),0);context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
+    context_->OMSetDepthStencilState(effectDepth_.Get(),0);context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
     D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};
     context_->RSSetViewports(1,&viewport);context_->RSSetState(raster_.Get());
     context_->IASetInputLayout(nullptr);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -341,21 +389,25 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     const float t=frame.cutsceneTime;
     if(t<0 || t>BreakthroughCutsceneDuration)return;
     const float factor=static_cast<float>(height_)/480,referenceWidth=static_cast<float>(width_)*480/height_;
+    const float ending=tuning::cutscene::endingOpacity(t,BreakthroughCutsceneDuration);
     D2D1_MATRIX_3X2_F previous;d2d_->GetTransform(&previous);
     auto caption=[&](std::wstring_view value,float x,float y,float angle,float opacity=1.f,float size=14.f) {
+        opacity*=ending;
+        const bool monochrome=t>=tuning::cutscene::BreakthroughMonochromeStart && t<14.15f;
+        const auto ink=D2D1::ColorF(.97f,.97f,monochrome?.97f:1.f,opacity);
         const float width=static_cast<float>(value.size())*size*.49f+14;
         d2d_->SetTransform(D2D1::Matrix3x2F::Rotation(angle,D2D1::Point2F(x,y))*D2D1::Matrix3x2F::Scale(factor,factor));
         rect(x-width*.5f,y-10,width,21,D2D1::ColorF(0,0,0,opacity*.94f));
-        brush_->SetColor(D2D1::ColorF(.97f,.97f,1.f,opacity));
+        brush_->SetColor(ink);
         if(size==14) d2d_->DrawText(value.data(),static_cast<UINT32>(value.size()),cutsceneFont_.Get(),
             D2D1::RectF(x-width*.5f+3,y-10,x+width*.5f-3,y+11),brush_.Get());
-        else text(std::wstring(value),x-width*.5f,y-9,width,21,size,D2D1::ColorF(.97f,.97f,1.f,opacity),false,true);
+        else text(std::wstring(value),x-width*.5f,y-9,width,21,size,ink,false,true);
     };
     const float center=referenceWidth*.5f;
     if(t>=1.12f && t<3.1f)caption(L"i - started with few",center-180,206,-3);
     if(t>=5.10f && t<7.0f)caption(L"ii - only less it gets..",center+162,307,2);
     if(t>=9.08f && t<10.85f)caption(L"iii - time by time, now empty",center,263,-17);
-    if(t>=13.0f && t<14.12f)caption(L"iv - and there was nothing left",center+91,327,-14);
+    if(t>=tuning::cutscene::BreakthroughMonochromeStart && t<14.12f)caption(L"iv - and there was nothing left",center+91,327,-14);
     if(t>=14.2f && t<15.0f) {
         d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
         text(L"get out of my head",center-160,228,320,24,11,D2D1::ColorF(.83f,.83f,.86f),false,true);
@@ -383,8 +435,8 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     }
     d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
     const bool japanese=frame.presentation.settings.language==Language::Japanese;
-    rect(referenceWidth-112,8,104,23,D2D1::ColorF(0,0,0,.40f),3);
-    text(japanese?L"Esc / スキップ":L"Esc / Skip",referenceWidth-108,12,96,17,10,D2D1::ColorF(1,1,1,.82f),false,true);
+    rect(referenceWidth-112,8,104,23,D2D1::ColorF(0,0,0,.40f*ending),3);
+    text(japanese?L"Esc / スキップ":L"Esc / Skip",referenceWidth-108,12,96,17,10,D2D1::ColorF(1,1,1,.82f*ending),false,true);
     d2d_->SetTransform(previous);
 }
 } // namespace aura

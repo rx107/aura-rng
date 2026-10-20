@@ -51,14 +51,35 @@ inline constexpr float FootRadius=1.53f;               // 足元のチェック�
 inline constexpr float FootCellHeight=.30f;
 inline constexpr unsigned FootColumns=16;              // 足元を一周するタイルの列数
 inline constexpr unsigned FootRows=3;
+// 外周の壁だけでなく、上面をこの市松模様で塞ぎます。上から見ても地面が透けません。
+inline constexpr float FloorCellSize=.51f;             // 小さくするとチェックの一マスが細かくなる
+inline constexpr unsigned FloorStrips=48;             // 円周を滑らかに切り抜く細い横列の数
+inline constexpr float FloorSelfLight=.95f;            // 床だけの明るさ。発光のぼかしはかからない
+inline constexpr std::array<float,3> FloorBlue={.025f,.065f,.94f};
+inline constexpr std::array<float,3> FloorWhite={.83f,.88f,1.f};
+
+// ── プレイヤーを回る 2 つの白い光 ──
+inline constexpr float OrbitLightRadius=1.92f;         // 大きくすると体から離れた所を周回する
+inline constexpr float OrbitLightHeight=2.30f;
+inline constexpr float OrbitLightSpeed=1.05f;          // ラジアン/秒。2 倍にすると周回が 2 倍速
+inline constexpr float OrbitLightBob=.28f;             // 周回しながら上下する幅
+inline constexpr float OrbitLightWidth=1.10f;
+inline constexpr float OrbitLightHeightSize=.48f;
+inline constexpr float OrbitLightBrightness=.76f;
+inline constexpr unsigned OrbitTrailSegments=14;
+inline constexpr float OrbitTrailAngle=.76f;           // 大きくすると後ろに残る白い軌跡が長くなる
 
 // ── 浮いている小さな画面と文字 ──
 inline constexpr unsigned WindowCount=7;
 inline constexpr float WindowRadius=3.38f;
 inline constexpr float TitleHeight=6.20f;
 inline constexpr float TitleSideOffset=-2.82f;          // 負=画面左、正=画面右
-inline constexpr float TitlePixelSize=.036f;           // 大きくすると ILLUSIONARY が大きくなる
-inline constexpr float CaptionPixelSize=.014f;
+inline constexpr float TitlePixelSize=.043f;           // 大きくすると ILLUSIONARY が大きくなる
+inline constexpr float CaptionPixelSize=.020f;
+// 文字は発光バッチへ入れず、白い画素として描くので輪郭がぼけません。黒い下地も不要です。
+inline constexpr float TextSelfLight=1.22f;             // 上げると文字だけが明るくなる。周囲の光は増えない
+inline constexpr float TextPixelFill=.94f;             // 1 で画素がつながる。少し小さくすると隙間ができる
+inline constexpr std::array<float,3> TextColor={.82f,.87f,1.f};
 
 // 参考の短い白黒フラッシュ。Period の秒数ごとに At の時刻で一瞬白くなります。
 // Strength を 0 にすると青のまま、1 にすると瞬間的にほぼ白になります。
@@ -72,6 +93,9 @@ static_assert(MotionSpeed>0 && RibbonSegments>=24 && RibbonSegments<=72);
 static_assert([] { for(const auto& r:Ribbons) if(r.radius<=0 || r.width<=0 || r.width>=r.radius) return false; return true; }());
 static_assert(RayCount>=8 && RayCount<=56 && ShardCount<=24 && SparkCount<=10 && ParticleCount<=64);
 static_assert(FootColumns>=8 && FootColumns<=20 && FootRows>=1 && FootRows<=3 && FootRadius>0);
+static_assert(FloorCellSize>=.3f && FloorStrips>=24 && FloorStrips<=64 && FloorSelfLight>=0);
+static_assert(OrbitLightRadius>0 && OrbitLightSpeed>0 && OrbitTrailSegments>=4 && OrbitTrailSegments<=20);
+static_assert(TextSelfLight>=0 && TextPixelFill>0 && TextPixelFill<=1);
 static_assert(WindowCount<=7 && CrownCells>=2 && CrownCells<=16);
 static_assert(FlashPeriod>0 && FlashDuration>0 && FlashDuration<FlashPeriod && FlashStrength>=0 && FlashStrength<=1);
 static_assert(TitlePixelSize>0 && CaptionPixelSize>0 && RibbonEdgeWidth>0);

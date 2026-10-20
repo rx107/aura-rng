@@ -21,6 +21,7 @@ public:
     // 再生できない場合は nullopt。MP4 の元時刻ではなく、切り出した音声の 0 秒から。
     // 1 回再生の終了時は指定したクリップ長以上を返し、映像も確実に終了させます。
     std::optional<float> playbackSeconds() const noexcept;
+    float bassPulse(float seconds) const;
     std::size_t decodedBytes() const { return pcm_.size(); }
     void reload() { clear(); attemptedLoad_=false; }
 private:
@@ -30,6 +31,7 @@ private:
     IXAudio2MasteringVoice* master_{};
     IXAudio2SourceVoice* voice_{};
     std::vector<BYTE> pcm_;
+    std::vector<float> bass_;
     std::filesystem::path attempted_;
     std::string status_{"No music selected"};
     bool mf_{},playing_{},attemptedLoad_{};

@@ -4,7 +4,7 @@
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.11-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.12-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -124,7 +124,7 @@ auratest,My Test Aura,0,1.0,0.3,0.7,32,1.5,0.7,1
 
 通常抽選へ追加するときは、すべての確率の合計を考える必要があります。詳しい条件は [aura-format.md](aura-format.md) にあります。最初は上のプレビュー行から始めると、確率計算を触らず絵作りに集中できます。
 
-Pixelation用の2曲はWindows版ZIPの`data/audio`からソース側の`data/audio`へコピーして利用できます。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
+許可済みの6音源はソースZIPにも同梱しています。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
 
 ## 7. 変わらない・ビルドできないとき
 

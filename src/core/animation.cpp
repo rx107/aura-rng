@@ -46,7 +46,9 @@ AvatarPose illusionaryPose(float time) {
     AvatarPose p; p.fixed=true;
     p.lift=pose::Lift+pose::BobAmplitude*std::sin(time*pose::BobFrequency);
     p.bodyPitch=pose::BodyPitch;
-    p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch; p.legPitch=pose::LegPitch; p.knee=pose::Knee;
+    p.bodyRoll=pose::BodyRoll;
+    p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch;
+    p.legPitch=pose::LegPitch; p.legOut=pose::LegOut; p.knee=pose::Knee;
     return p;
 }
 float pixelationMotionSpeed(unsigned level) {

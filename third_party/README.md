@@ -27,3 +27,7 @@ VRM models are selected locally and are not redistributed. The bundled track
 The program does not upload local files. `tests/make_vrm_fixture.py` generates
 an original 24-vertex, 10-joint test figure with a two-color texture and humanoid
 bone mapping for GPU skinning and animation tests.
+
+## stb_vorbis
+
+Ogg Vorbis decoder v1.22 from https://github.com/nothings/stb/blob/master/stb_vorbis.c. Upstream MIT / public-domain dual license is preserved in stb/LICENSE.txt and included in binary packages. Compiled into the game; no codec installation or runtime download is required.

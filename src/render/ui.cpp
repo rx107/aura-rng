@@ -27,7 +27,7 @@ bool inside(float x,float y,float rx,float ry,float w,float h) { return x>=rx &&
 std::optional<std::string> chooseAsset(HWND owner,bool vrm) {
     ComPtr<IFileOpenDialog> dialog;
     if(FAILED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))) return {};
-    const COMDLG_FILTERSPEC filter=vrm?COMDLG_FILTERSPEC{L"VRM avatar (*.vrm)",L"*.vrm"}:COMDLG_FILTERSPEC{L"Audio (*.mp3;*.mpeg;*.wav;*.m4a)",L"*.mp3;*.mpeg;*.wav;*.m4a"};
+    const COMDLG_FILTERSPEC filter=vrm?COMDLG_FILTERSPEC{L"VRM avatar (*.vrm)",L"*.vrm"}:COMDLG_FILTERSPEC{L"Audio (*.ogg;*.mp3;*.mpeg;*.wav;*.m4a)",L"*.ogg;*.mp3;*.mpeg;*.wav;*.m4a"};
     dialog->SetFileTypes(1,&filter); dialog->SetTitle(vrm?L"Select VRM avatar / VRMアバターを選択":L"Select aura BGM / オーラBGMを選択");
     dialog->SetOptions(FOS_FILEMUSTEXIST|FOS_PATHMUSTEXIST|FOS_FORCEFILESYSTEM|FOS_NOCHANGEDIR);
     if(FAILED(dialog->Show(owner))) return {};
@@ -196,7 +196,7 @@ void Renderer::debugUi(const Frame& f) {
             ImGui::Separator();
             ImGui::TextUnformatted(t("CURRENT ODDS / WITH LUCK","現在の排出確率 / Luck反映後"));
             for(std::size_t i=0;i<f.roller.catalog().size();++i) {
-                if(f.roller.catalog()[i].previewOnly) continue;
+                if(!availableInBiome(f.roller.catalog()[i],f.presentation.settings.biome)) continue;
                 const auto tickets=f.roller.tickets(i);
                 const double percent=100.*static_cast<double>(tickets)/TicketPool;
                 ImGui::Text("%s: %.9g%%",displayName(f.roller.catalog()[i],language).c_str(),percent);
@@ -231,12 +231,12 @@ void Renderer::debugUi(const Frame& f) {
                 "未所持のオーラも表示できます。選択時に自動ロールを停止し、所持数や履歴には追加しません。"));
             for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="illusionary") {
                 ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.11f,.13f,.42f,1));
-                if(ImGui::Button(t("Preview Illusionary / prototype","Illusionary を表示 / 試作"),{-1,36})) debugActions_.preview=i;
+                if(ImGui::Button(t("Preview Illusionary","Illusionary を表示"),{-1,36})) debugActions_.preview=i;
                 ImGui::PopStyleColor();
-                ImGui::TextWrapped("%s",t("Black orbiting ribbons, cobalt rays, checker fragments and floating glitch panels. Visual preview; no roll history is added.",
-                    "黒い回転リボンと青白い光線、市松模様の破片、浮遊パネル。表示試作で、選択しても履歴を増やしません。"));
+                ImGui::TextWrapped("%s",t("Extra Stage exclusive. Reclining avatar, solid checker floor and orbiting white flares. Preview adds no history.",
+                    "Extra Stage限定。横向きの浮遊、床のあるチェック模様、周回する白い光。プレビューは履歴を増やしません。"));
             }
-            ImGui::TextDisabled("%s",t("Desert auras / rollable in every planet","砂漠テーマのオーラ / 全惑星で抽選可能"));
+            ImGui::TextDisabled("%s",t("Desert auras / Desert stage only","砂漠テーマのオーラ / 砂漠ステージ限定"));
             for(std::size_t i=0;i<f.roller.catalog().size();++i) {
                 const auto& aura=f.roller.catalog()[i];
                 if(aura.id!="dune" && aura.id!="mirage" && aura.id!="pharaoh") continue;
@@ -254,8 +254,8 @@ void Renderer::debugUi(const Frame& f) {
                 ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.04f,.35f,.27f,1));
                 if(ImGui::Button(t("Preview Pixelation / prototype","Pixelation を表示 / 試作"),{-1,36})) debugActions_.preview=i;
                 ImGui::PopStyleColor();
-                ImGui::TextWrapped("%s",t("Animated pixel fragments, hologram panels and a rotating wireframe cube. Visual prototype: excluded from rolls.",
-                    "色が移り変わるピクセル片、ホログラムパネル、回転するワイヤー立方体。見た目の試作のため、ロールの抽選対象外です。"));
+                ImGui::TextWrapped("%s",t("Pixel fragments, holograms and a wireframe cube. Obtainable in Extra Stage.",
+                    "ピクセル片、ホログラム、ワイヤー立方体。Extra Stageで入手できます。"));
                 const auto actualPixelationLevel=f.progress.auraLevel(i,f.roller.catalog());
                 int pixelationLevel=static_cast<int>(f.presentation.pixelationLevel.value_or(actualPixelationLevel));
                 if(ImGui::SliderInt("Pixelation / Aura Level",&pixelationLevel,0,3)) debugActions_.pixelationLevel=static_cast<unsigned>(pixelationLevel);
@@ -266,8 +266,8 @@ void Renderer::debugUi(const Frame& f) {
             for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="equinox") {
                 ImGui::Separator();
                 if(ImGui::Button(t("Preview Equinox","Equinox を表示"),{-1,34})) debugActions_.preview=i;
-                ImGui::TextWrapped("%s",t("Cutscene-only playback does not equip or grant an aura. It stops AutoRoll and adds no roll history.",
-                    "カットシーンのみの再生ではオーラの装備や取得は行いません。自動ロールを止め、履歴には追加しません。"));
+                ImGui::TextWrapped("%s",t("The cutscene fades into an aura preview. No inventory or roll history is added; Collection equipment is preserved.",
+                    "終了時にオーラのプレビューへフェードします。所持数・履歴・Collectionの実装備は変更しません。"));
                 if(ImGui::Button(t("Play cutscene only##equinox","カットシーンのみ再生##equinox"))) debugActions_.playEquinoxCutscene=true;
                 ImGui::SameLine();
                 if(ImGui::Button(t("Stop cutscene##equinox","カットシーン停止##equinox"))) debugActions_.stopCutscene=true;
@@ -275,8 +275,8 @@ void Renderer::debugUi(const Frame& f) {
             for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="breakthrough") {
                 ImGui::Separator();
                 if(ImGui::Button(t("Preview BreakThrough","BreakThrough を表示"),{-1,34})) debugActions_.preview=i;
-                ImGui::TextWrapped("%s",t("Preview only. The cutscene does not equip, grant or log an aura. Esc skips playback.",
-                    "プレビュー専用。カットシーンでは装備・取得・履歴を変更しません。Escでスキップできます。"));
+                ImGui::TextWrapped("%s",t("Obtainable in Extra Stage. Cutscene preview adds no inventory or history. Esc restores the previous view.",
+                    "Extra Stageで入手可能です。演出プレビューは所持数と履歴を増やしません。Escで直前の表示へ戻ります。"));
                 if(ImGui::Button(t("Play cutscene only##breakthrough","カットシーンのみ再生##breakthrough"))) debugActions_.playBreakthroughCutscene=true;
                 ImGui::SameLine();
                 if(ImGui::Button(t("Stop cutscene##breakthrough","カットシーン停止##breakthrough"))) debugActions_.stopCutscene=true;
@@ -327,7 +327,7 @@ void Renderer::debugUi(const Frame& f) {
                 const auto& catalog=f.roller.catalog();
                 for (std::size_t i=0;i<catalog.size();++i) {
                     const auto& d=catalog[i];
-                    const auto row=displayName(d,language)+"  |  "+oddsLabel(catalog,i)+"  |  x"+
+                    const auto row=displayName(d,language)+"  |  "+oddsLabel(catalog,i,f.presentation.settings.biome)+"  |  x"+
                         formatNumber(f.progress.counts[i])+"###preview-"+d.id;
                     ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(d.color.r,d.color.g,d.color.b,1));
                     if (ImGui::Selectable(row.c_str(),f.presentation.shown(f.progress)==i)) debugActions_.preview=i;
@@ -357,6 +357,10 @@ void Renderer::debugUi(const Frame& f) {
                 ImGui::TextWrapped("%s",f.presentation.settings.pixelationFinalBgmPath.empty()?t("Default: Censored (bundled or local Downloads)",
                     "初期設定: Censored（同梱またはローカルDownloads）"):f.presentation.settings.pixelationFinalBgmPath.c_str());
                 if(ImGui::SmallButton(t("Use default track##pixelationFinal","初期設定の曲を使用##pixelationFinal"))) debugActions_.pixelationFinalBgmPath=std::string{};
+                ImGui::Separator(); ImGui::TextUnformatted("Illusionary");
+                if(ImGui::Button(t("Choose Illusionary BGM...","Illusionary BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.illusionaryBgmPath=*path;
+                ImGui::TextWrapped("%s",f.presentation.settings.illusionaryBgmPath.empty()?"The Weirdos / Ogg Vorbis":f.presentation.settings.illusionaryBgmPath.c_str());
+                if(ImGui::SmallButton(t("Use default track##illusionary","初期設定の曲を使用##illusionary"))) debugActions_.illusionaryBgmPath=std::string{};
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -436,20 +440,30 @@ void Renderer::ui(const Frame& f) {
     label(t("Auras discovered","発見したオーラ"),42,187,170,22,12,Muted);
     rect(42,220,180,3,Border,1);
     rect(42,220,collectionTotal?180*static_cast<float>(collectionDiscovered)/static_cast<float>(collectionTotal):0,3,Mint,1);
-    const int visible=std::max(1,static_cast<int>((h-430)/48));
-    const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(defs.size())-visible));
-    for (int row=0;row<visible && start+row<static_cast<int>(defs.size());++row) {
-        const auto i=static_cast<std::size_t>(start+row); const float y=242+row*48.f;
+    // フォルダーを切り替えて、長い一覧をテーマごとに読みやすくします。
+    constexpr const char* folders[]={"Normal","Desert","Extra","Administrator"};
+    for(unsigned category=0;category<4;++category) {
+        const float x=34+(category%2)*100.f,y=235+(category/2)*29.f;
+        const bool selected=static_cast<unsigned>(f.collectionCategory)==category;
+        rect(x,y,96,24,selected?D2D1::ColorF(.11f,.24f,.25f):D2D1::ColorF(.055f,.09f,.12f),5);
+        stroke(x,y,96,24,selected?Mint:Border,5);
+        label(folders[category],x+3,y+5,90,18,category==3?9.f:11.f,selected?Mint:Muted,selected,true);
+    }
+    const auto items=collectionItems(f);
+    const int visible=std::max(1,static_cast<int>((h-500)/48));
+    const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(items.size())-visible));
+    for (int row=0;row<visible && start+row<static_cast<int>(items.size());++row) {
+        const auto i=items[start+row]; const float y=306+row*48.f;
         const bool owned=!defs[i].previewOnly && f.progress.counts[i]!=0,selected=!defs[i].previewOnly && i==f.progress.equipped;
         if (selected) rect(34,y-5,196,43,D2D1::ColorF(.09f,.15f,.17f),6);
         star(47,y+11,7.5f,tint(defs[i].color,owned?1.f:.42f),owned);
         label(name(i),64,y,155,21,14,owned?White:Muted,selected);
-        label(oddsLabel(defs,i)+(defs[i].previewOnly?"":owned?"   x"+formatNumber(f.progress.counts[i]):"   "+t("LOCKED","未所持")),64,y+22,157,18,9,Muted);
+        label(oddsLabel(defs,i,f.presentation.settings.biome)+(defs[i].previewOnly?"":owned?"   x"+formatNumber(f.progress.counts[i]):"   "+t("LOCKED","未所持")),64,y+22,157,18,9,Muted);
     }
-    if (static_cast<int>(defs.size())>visible) {
-        rect(234,244,2,h-448,Border,1);
-        rect(234,244+(h-448)*static_cast<float>(start)/static_cast<float>(defs.size()),2,
-            (h-448)*static_cast<float>(visible)/static_cast<float>(defs.size()),Mint,1);
+    if (static_cast<int>(items.size())>visible) {
+        rect(234,306,2,h-510,Border,1);
+        rect(234,306+(h-510)*static_cast<float>(start)/static_cast<float>(items.size()),2,
+            (h-510)*static_cast<float>(visible)/static_cast<float>(items.size()),Mint,1);
     }
     stroke(256,96,w-596,h-280,Border,14);
     label(t("PLANET SANCTUARY","惑星のサンクチュアリ"),276,116,240,25,12,White,true);
@@ -461,7 +475,7 @@ void Renderer::ui(const Frame& f) {
     const float titleY=h-281;
     label(f.presentation.preview?t("DEBUG PREVIEW","デバッグプレビュー"):t("EQUIPPED AURA","装備中のオーラ"),276,titleY,300,20,10,Muted,true);
     label(name(shown),276,titleY+23,w-650,45,32,tint(equipped.color),true);
-    label(oddsLabel(defs,shown)+((equipped.id=="singularity" || equipped.id=="pixelation")?"   /   Aura Level "+std::to_string(f.presentation.level(f.progress,defs))+" / 3":""),276,titleY+67,w-650,25,12,Muted);
+    label(oddsLabel(defs,shown,f.presentation.settings.biome)+((equipped.id=="singularity" || equipped.id=="pixelation")?"   /   Aura Level "+std::to_string(f.presentation.level(f.progress,defs))+" / 3":""),276,titleY+67,w-650,25,12,Muted);
     if(nameplateVisible_) {
         d2d_->PushAxisAlignedClip(D2D1::RectF(258,172,w-342,h-294),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         const float width=std::min(440.f,w-624),x=std::clamp(nameplate_.x-width*.5f,264.f,w-348-width),y=nameplate_.y;
@@ -469,7 +483,7 @@ void Renderer::ui(const Frame& f) {
             label(name(shown),x+1,y+1,width,32,23,D2D1::ColorF(0,0,0,.8f),true,true);
             label(name(shown),x,y,width,32,23,tint(equipped.color),true,true);
         }
-        label(oddsInLabel(defs,shown),x,y+(equipped.id=="equinox"?0:31),width,25,14,White,false,true);
+        label(oddsInLabel(defs,shown,f.presentation.settings.biome),x,y+(equipped.id=="equinox"?0:31),width,25,14,White,false,true);
         if(equipped.id=="singularity" || equipped.id=="pixelation") label("Aura Level "+std::to_string(f.presentation.level(f.progress,defs)),x,y+56,width,24,12,Mint,true,true);
         d2d_->PopAxisAlignedClip();
     }
@@ -536,10 +550,10 @@ void Renderer::stageSelectUi(const Frame& f) {
     text(L"×",x+w-48,y+18,30,26,20,White,false,true);
     label(t("Choose your next planet. Your aura travels with you.","次の惑星を選んで出発。装備したオーラも一緒に移動します。"),x+22,y+60,w-44,23,12,Muted);
     label(t("DESTINATION","目的地"),x+24,y+89,w-48,18,9,Mint,true);
-    constexpr std::array<Color,StageCount> colors={Color{.34f,.85f,.62f},Color{.95f,.73f,.38f},Color{.22f,.68f,.95f},Color{.32f,.69f,.35f},Color{1.f,.35f,.15f}};
+    constexpr std::array<Color,StageCount> colors={Color{.34f,.85f,.62f},Color{.95f,.73f,.38f},Color{.22f,.68f,.95f},Color{.32f,.69f,.35f},Color{1.f,.35f,.15f},Color{1.f,.83f,.20f}};
     const std::array<std::string,StageCount> descriptions={
         t("A quiet garden beneath the stars","星空の下、穏やかな庭園"),t("Golden dunes and sunlit ruins","黄金の砂丘と、陽光に包まれた遺跡"),
-        t("Blue waves around a sandy island","青い波に囲まれた砂浜の島"),t("A woodland of towering green trees","大きな木々に囲まれた緑の森"),t("Volcanic rock and glowing lava","黒い岩と、赤く輝く溶岩")};
+        t("Blue waves around a sandy island","青い波に囲まれた砂浜の島"),t("A woodland of towering green trees","大きな木々に囲まれた緑の森"),t("Volcanic rock and glowing lava","黒い岩と、赤く輝く溶岩"),t("A golden star / four special aura drops","黄色い星の上 / 4種の特別なオーラ")};
     for(unsigned i=0;i<StageCount;++i) {
         const auto destination=static_cast<Biome>(i);
         const bool current=destination==f.presentation.settings.biome;
@@ -547,15 +561,18 @@ void Renderer::stageSelectUi(const Frame& f) {
         const bool hover=!current && inside(f.mouseX/scale_,f.mouseY/scale_,x+20,rowY,w-40,56);
         rect(x+20,rowY,w-40,56,hover?D2D1::ColorF(.08f,.17f,.20f):D2D1::ColorF(.043f,.080f,.105f),9);
         stroke(x+20,rowY,w-40,56,hover?Mint:current?D2D1::ColorF(.20f,.39f,.35f):Border,9);
+        if(destination==Biome::Extra) star(x+49,rowY+28,18,tint(colors[i]),true);
+        else {
         brush_->SetColor(tint(colors[i],.18f)); d2d_->FillEllipse(D2D1::Ellipse({x+49,rowY+28},20,20),brush_.Get());
         brush_->SetColor(tint(colors[i])); d2d_->FillEllipse(D2D1::Ellipse({x+49,rowY+28},13,13),brush_.Get());
         brush_->SetColor(D2D1::ColorF(.02f,.05f,.08f,.5f)); d2d_->FillEllipse(D2D1::Ellipse({x+54,rowY+24},10,13),brush_.Get());
         star(x+40,rowY+19,2.3f,White);
+        }
         label(stageDisplayName(destination,language),x+81,rowY+8,w-244,23,14,White,true);
         label(descriptions[i],x+81,rowY+33,w-244,18,10,Muted);
         label(current?t("YOU ARE HERE","現在地"):t("LAUNCH  >","出発  >"),x+w-149,rowY+19,104,23,11,current?Muted:Mint,true,true);
     }
-    label(t("M / ESC / CLOSE     ·     No roll or inventory changes during travel","M / ESC / 閉じる     ・     移動で所持オーラやロール回数は変わりません"),x+22,y+458,w-44,23,10,Muted,false,true);
+    label(t("M / ESC / CLOSE     ·     No roll or inventory changes during travel","M / ESC / 閉じる     ・     移動で所持オーラやロール回数は変わりません"),x+22,y+112+StageCount*64.f+20,w-44,23,10,Muted,false,true);
 }
 void Renderer::stageTravelUi(const Frame& f) {
     // 半分の時点でAppが惑星を交換します。その付近は背景を完全に覆い、切替を隠します。

@@ -35,6 +35,7 @@ Color stageSky(Biome biome) {
     case Biome::Ocean: return {.032f,.115f,.17f};
     case Biome::Forest: return {.022f,.075f,.054f};
     case Biome::Volcano: return {.10f,.028f,.025f};
+    case Biome::Extra: return {.024f,.014f,.075f};
     default: return {.028f,.046f,.066f};
     }
 }
@@ -44,6 +45,7 @@ Color stageFog(Biome biome) {
     case Biome::Ocean: return {.07f,.23f,.29f};
     case Biome::Forest: return {.031f,.12f,.079f};
     case Biome::Volcano: return {.15f,.046f,.032f};
+    case Biome::Extra: return {.075f,.045f,.16f};
     default: return {.042f,.069f,.098f};
     }
 }
@@ -228,11 +230,47 @@ void Renderer::world(const Frame& f) {
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const auto biome=f.presentation.settings.biome;
     const bool desert=biome==Biome::Desert, ocean=biome==Biome::Ocean;
-    const bool forest=biome==Biome::Forest, volcano=biome==Biome::Volcano;
+    const bool forest=biome==Biome::Forest, volcano=biome==Biome::Volcano, extra=biome==Biome::Extra;
     const float layout=tuning::world::PropLayoutScale;
     const float islandRadius=StageHalfExtent*tuning::stages::OceanIslandRadiusRatio;
     const Color baseColor=desert?Color{.38f,.23f,.13f}:ocean?Color{.045f,.17f,.23f}:
         forest?Color{.065f,.12f,.075f}:volcano?Color{.075f,.062f,.069f}:Color{.095f,.15f,.18f};
+    if(extra) {
+        // 初回だけ、丸い星の輪郭を水平に細かく切った床の寸法を計算します。
+        // 1枚の四角い床を残さないので、上から見ても横から見ても黄色い星の形になります。
+        // 形の変更は tuning/stages.hpp の ExtraOuter/InnerRadiusRatio が入口です。
+        static const auto slices=[] {
+            constexpr unsigned Points=320;
+            std::array<XMFLOAT2,Points> outline{};
+            for(unsigned i=0;i<Points;++i) {
+                const float a=i*2*Pi/Points,r=extraStageRadius(a,StageHalfExtent);
+                outline[i]={std::cos(a)*r,std::sin(a)*r};
+            }
+            std::vector<std::array<float,3>> result;
+            const float step=2*StageHalfExtent/tuning::stages::ExtraFloorSlices;
+            for(unsigned row=0;row<tuning::stages::ExtraFloorSlices;++row) {
+                const float z=-StageHalfExtent+(row+.5f)*step;
+                std::vector<float> crossings;
+                for(unsigned i=0;i<Points;++i) {
+                    const auto a=outline[i],b=outline[(i+1)%Points];
+                    if((a.y<=z && b.y>z) || (b.y<=z && a.y>z))
+                        crossings.push_back(a.x+(z-a.y)*(b.x-a.x)/(b.y-a.y));
+                }
+                std::sort(crossings.begin(),crossings.end());
+                for(std::size_t i=0;i+1<crossings.size();i+=2)
+                    result.push_back({(crossings[i]+crossings[i+1])*.5f,z,crossings[i+1]-crossings[i]});
+            }
+            return result;
+        }();
+        const float step=2*StageHalfExtent/tuning::stages::ExtraFloorSlices;
+        for(const auto& slice:slices) {
+            const float shade=.5f+.5f*std::cos(slice[1]*.055f);
+            box(slice[0],-.09f-tuning::stages::ExtraPlanetThickness*.5f,slice[1],slice[2],
+                tuning::stages::ExtraPlanetThickness,step+.002f,{.88f,.49f,.075f});
+            box(slice[0],-.03f,slice[1],slice[2],.12f,step+.002f,
+                {1.f,.79f+shade*.13f,.16f+shade*.12f},0,.17f);
+        }
+    } else {
     box(0,-.6f,0,StageHalfExtent*2,1.0f,StageHalfExtent*2,baseColor);
     box(0,ocean?-.25f:-.12f,0,StageHalfExtent*2-.3f,.10f,StageHalfExtent*2-.3f,
         desert?Color{.68f,.46f,.24f}:ocean?Color{.075f,.35f,.44f}:
@@ -262,10 +300,11 @@ void Renderer::world(const Frame& f) {
         else if(volcano) c=path?Color{.24f+checker,.21f+checker,.22f+checker}:Color{.105f+checker,.105f+checker,.135f+checker};
         box(tileX,tileY,tileZ,tuning::world::TileSize-.02f,.12f,tuning::world::TileSize-.02f,c);
     }
+    }
     // リスポーン台をロケットの発着台として共用。中心は stages.hpp から取得します。
     // 台を二重に描かないので、同じ高さの面がちらつくこともありません。
     box(tuning::stages::RespawnX,.07f,tuning::stages::RespawnZ,4.6f,.14f,4.6f,desert?Color{.56f,.38f,.24f}:ocean?Color{.51f,.46f,.30f}:
-        forest?Color{.23f,.30f,.22f}:volcano?Color{.25f,.22f,.25f}:Color{.20f,.29f,.32f});
+        forest?Color{.23f,.30f,.22f}:volcano?Color{.25f,.22f,.25f}:extra?Color{.91f,.67f,.20f}:Color{.20f,.29f,.32f});
     for (int i=0;i<4;++i) {
         const float a=i*Pi/2;
         box(tuning::stages::RespawnX+std::sin(a)*2.25f,.16f,tuning::stages::RespawnZ+std::cos(a)*2.25f,4.5f,.025f,.035f,d.color,a,1);
@@ -276,7 +315,7 @@ void Renderer::world(const Frame& f) {
     const float trees[][2]={{-6,-5},{6,5},{-6,6},{6,-6},{-8,1},{8,0},
         {-18,-18},{18,18},{-18,18},{18,-18},{-26,-8},{26,8},{-8,26},{8,-26},{-26,25},{26,-25},{-12,-24},{12,24}};
     for (const auto& p:trees) {
-        if(ocean || forest || volcano) break;
+        if(ocean || forest || volcano || extra) break;
         // 外周の木/サボテンもステージの広さに合わせて配置だけ拡大します。
         const float treeX=p[0]*tuning::world::PropLayoutScale;
         const float treeZ=p[1]*tuning::world::PropLayoutScale;
@@ -403,9 +442,32 @@ void Renderer::world(const Frame& f) {
             box(std::cos(a)*r+std::sin(f.time*.4f+i)*.35f,y,std::sin(a)*r,size,size*1.7f,size,{1.f,.43f,.09f},a,1.5f);
         }
     }
+    if(extra) {
+        // 小さな星は歩く場所をふさがない外側へ配置。少数の箱だけで漂う宇宙を作ります。
+        for(unsigned i=0;i<tuning::stages::ExtraSkyStarCount && sceneryRoom(3);++i) {
+            const float angle=i*2.399963f;
+            const float radius=extraStageRadius(angle,StageHalfExtent)+4.f+std::fmod(i*2.71f,10.f);
+            const float x=std::cos(angle)*radius,z=std::sin(angle)*radius;
+            const float y=1.2f+std::fmod(i*.71f,10.f)+std::sin(f.time*tuning::stages::ExtraSkyStarSpeed+i)*.35f;
+            const float size=.09f+std::fmod(i*.031f,.10f);
+            const Color color=i%3==0?Color{.74f,.79f,1.f}:Color{1.f,.91f,.50f};
+            box(x,y,z,size,size,size,color,angle,1.f);
+            box(x,y,z,size*2.8f,size*.26f,size*.26f,color,angle,.55f);
+            box(x,y,z,size*.26f,size*2.8f,size*.26f,color,angle,.55f);
+        }
+        // 星の5つの先端を小さな金の輪で示します。中央の大きいオーラを隠さない低い飾りです。
+        for(unsigned tip=0;tip<5;++tip) {
+            const float angle=Pi/2+tip*2*Pi/5,r=StageHalfExtent*.75f;
+            for(unsigned mark=0;mark<16 && sceneryRoom(1);++mark) {
+                const float a=mark*2*Pi/16;
+                box(std::cos(angle)*r+std::cos(a)*1.25f,.08f,std::sin(angle)*r+std::sin(a)*1.25f,
+                    .30f,.035f,.08f,{1.f,.96f,.63f},-a+Pi/2,.4f);
+            }
+        }
+    }
     for (float x : {-4.f,4.f}) for (float z : {-3.f,3.f}) {
         box(x,.55f,z,.5f,1.1f,.5f,{.31f,.37f,.39f});
-        box(x,1.15f,z,.56f,.14f,.56f,volcano?Color{1.f,.51f,.22f}:forest?Color{.79f,.96f,.46f}:Color{.50f,.94f,.80f},0,1);
+        box(x,1.15f,z,.56f,.14f,.56f,volcano?Color{1.f,.51f,.22f}:forest?Color{.79f,.96f,.46f}:extra?Color{1.f,.91f,.51f}:Color{.50f,.94f,.80f},0,1);
     }
     // 全惑星共通の小型ロケット。リスポーンと同じXZに置き、乗降スペースの上に機体を浮かべます。
     // tuning/stages.hpp の RespawnX / RespawnZ / RocketScale / RocketBoardingClearance が調整入口。
@@ -455,8 +517,10 @@ void Renderer::world(const Frame& f) {
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
     const float actionTime=f.actionTime>=0?f.actionTime:pixelationActionTime(f.time,pixelated?level:0);
     const auto pose=illusionary?illusionaryPose(f.time):pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
-    auto base=XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
-        XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift,f.avatarZ);
+    // 横向きのIllusionaryだけ胴の中心を軸に倒します。足元を軸にすると体が横へずれます。
+    const float posePivot=illusionary?1.45f:0.f;
+    auto base=XMMatrixTranslation(0,-posePivot,0)*XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
+        XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift+posePivot,f.avatarZ);
     auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,FXMMATRIX transform) {
         if(useVrm) return;
         Instance instance{};
@@ -465,8 +529,10 @@ void Renderer::world(const Frame& f) {
         if(pixelated) {const auto hue=pixelationColor(effectTime); lit={.45f+hue.r*.55f,.45f+hue.g*.55f,.45f+hue.b*.55f};}
         if(equinox) lit={.83f,.85f,.90f};
         if(breakthrough) lit={.65f,.71f,1.f};
-        if(illusionary) lit={.66f,.72f,1.f};
-        instance.color={lit.r,lit.g,lit.b,illusionary?1.1f:pixelated?1.8f:(equinox || breakthrough)?.65f:0.f}; instances_.push_back(instance);
+        // 元の服・肌・顔の濃淡を残し、横向きでも頭と手足を見分けられるようにします。
+        if(illusionary) lit={c.r*.76f,c.g*.82f,std::min(1.f,c.b*.82f+.16f)};
+        const bool faceDetail=illusionary && c.r<.30f && c.g<.22f;
+        instance.color={lit.r,lit.g,lit.b,illusionary?(faceDetail?0.f:.82f):pixelated?1.8f:(equinox || breakthrough)?.65f:0.f}; instances_.push_back(instance);
     };
     const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
     for(int side=0;side<2;++side) {
@@ -580,10 +646,14 @@ void Renderer::draw(const Frame& frame,bool present) {
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     if(frame.cutsceneTime>=0) {
+        const float cinematicOpacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,cutsceneDuration(frame.cutsceneKind));
+        if(cinematicOpacity<1) world(frame);
+        else {
         instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear();
         pixelationVisible_=equinoxVisible_=breakthroughVisible_=holeVisible_=false;
         nanallyVisible_=false;
         illusionaryVisible_=desertAuraVisible_=false;
+        }
         if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame); else drawCutscene(frame);
     } else world(frame);
     context_->OMSetRenderTargets(0,nullptr,nullptr);
@@ -613,10 +683,13 @@ Hit Renderer::hit(float px,float py,const Frame& f) const {
     if(inside(x,y,bx,by,210,62)) return {Action::Roll,0};
     if(inside(x,y,bx+228,by,134,62)) return {Action::Auto,0};
     if(inside(x,y,w-179,by,130,62)) return {Action::Logs,0};
-    const int visible=std::max(1,static_cast<int>((h-280-150)/48));
-    const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(f.roller.catalog().size())-visible));
-    for(int row=0;row<visible && start+row<static_cast<int>(f.progress.counts.size());++row)
-        if(inside(x,y,34,237+row*48.f,196,43)) return {Action::Equip,static_cast<std::size_t>(start+row)};
+    for(unsigned category=0;category<4;++category)
+        if(inside(x,y,34+(category%2)*100.f,235+(category/2)*29.f,96,24)) return {Action::CollectionCategory,category};
+    const auto items=collectionItems(f);
+    const int visible=std::max(1,static_cast<int>((h-500)/48));
+    const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(items.size())-visible));
+    for(int row=0;row<visible && start+row<static_cast<int>(items.size());++row)
+        if(inside(x,y,34,301+row*48.f,196,43)) return {Action::Equip,items[start+row]};
     return {};
 }
 int Renderer::region(float px,float py) const {

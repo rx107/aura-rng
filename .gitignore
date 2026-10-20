@@ -12,9 +12,7 @@
 /assets/
 *.vrm
 *.mp3
-!data/audio/Tides_of_the_Outer_Reach.mp3
-# Large user-approved tracks are included in release ZIPs, outside the source tree.
-/data/audio/Redline_Shift.mp3
-/data/audio/Censored.mp3.mpeg
+!data/audio/*.mp3
+# Music in data/audio is shared with the provider's permission.
 # Local reference recordings are never distributed.
 *.mp4

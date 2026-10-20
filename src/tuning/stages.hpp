@@ -22,6 +22,15 @@ inline constexpr float RocketBoardingClearance = 3.f;
 // 11.f → 13.f で、Illusionaryなどの光や顔にロケットが重なりにくくなります。
 inline constexpr float RocketEffectClearance = 11.f;
 
+// Extra: 丸い黄色の星の上にある特別な惑星。
+// Outerは先端、Innerは谷までの半径。Innerを大きくすると円に近い、ふっくらした星になります。
+inline constexpr float ExtraOuterRadiusRatio = .97f;
+inline constexpr float ExtraInnerRadiusRatio = .55f;
+inline constexpr unsigned ExtraFloorSlices = 240; // 星の床を横に分ける数。多いほど輪郭が滑らか。
+inline constexpr float ExtraPlanetThickness = 2.2f; // 床の厚み。増やすと横から見た黄色い星が厚くなる。
+inline constexpr unsigned ExtraSkyStarCount = 54; // 周囲に浮かぶ小さな星の数。
+inline constexpr float ExtraSkyStarSpeed = .24f; // 小さな星の上下の速さ。0なら静止。
+
 // 海: 島の半径はステージ半幅に対する割合。0.43f → 0.55fで砂浜が広くなります。
 inline constexpr float OceanIslandRadiusRatio = .43f;
 inline constexpr unsigned OceanWaveCount = 36; // 水面を流れる白い波の数。増やすほどにぎやか。
@@ -47,6 +56,9 @@ static_assert(TravelDurationSeconds >= 1.f && TravelDurationSeconds <= 12.f);
 static_assert(RocketScale >= .5f && RocketScale <= 1.5f);
 static_assert(RocketBoardingClearance >= 3.f && RocketBoardingClearance <= 8.f);
 static_assert(RocketX >= -12.f && RocketX <= 12.f && RocketZ >= -12.f && RocketZ <= 12.f);
+static_assert(ExtraOuterRadiusRatio <= 1.f && ExtraInnerRadiusRatio >= .4f && ExtraInnerRadiusRatio < ExtraOuterRadiusRatio);
+static_assert(ExtraFloorSlices >= 64 && ExtraFloorSlices <= 320 && ExtraPlanetThickness >= .5f && ExtraPlanetThickness <= 5.f);
+static_assert(ExtraSkyStarCount <= 72 && ExtraSkyStarSpeed >= 0.f);
 static_assert(OceanIslandRadiusRatio >= .3f && OceanIslandRadiusRatio <= .75f);
 static_assert(OceanWaveCount <= 64 && OceanWaveSpeed >= 0.f && OceanWaveHeight >= 0.f && OceanWaveHeight <= .2f);
 static_assert(ForestTreeCount >= 12 && ForestTreeCount <= 80 && ForestTreeHeight >= 2.f && ForestTreeHeight <= 8.f);

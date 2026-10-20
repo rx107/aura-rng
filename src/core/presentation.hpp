@@ -24,7 +24,7 @@ struct Settings {
     double luck{1};
     Avatar avatar{Avatar::Block};
     Biome biome{Biome::Normal};
-    std::string vrmPath, bgmPath, pixelationBgmPath, pixelationFinalBgmPath;
+    std::string vrmPath, bgmPath, pixelationBgmPath, pixelationFinalBgmPath, illusionaryBgmPath;
     std::string username{"Player"},discordApplicationId{"1560569853184573590"};
     bool discordEnabled{true};
     float volume{.55f};
@@ -60,7 +60,7 @@ struct DebugActions {
     std::optional<double> luck;
     std::optional<Avatar> avatar;
     std::optional<Biome> biome;
-    std::optional<std::string> vrmPath, bgmPath, pixelationBgmPath, pixelationFinalBgmPath;
+    std::optional<std::string> vrmPath, bgmPath, pixelationBgmPath, pixelationFinalBgmPath, illusionaryBgmPath;
     std::optional<float> volume;
     std::optional<std::string> username,discordApplicationId;
     std::optional<bool> discordEnabled;

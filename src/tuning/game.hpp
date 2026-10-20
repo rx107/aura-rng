@@ -28,7 +28,7 @@ inline constexpr float MaximumCameraPitch = 1.28f;
 // ホイール1目盛で変わる距離。大きくするとズームが速くなります。
 inline constexpr float ZoomStep = .6f;
 inline constexpr float MinimumCameraDistance = 6.f;
-inline constexpr float MaximumCameraDistance = 34.f;
+inline constexpr float MaximumCameraDistance = 80.f; // 星形ステージ全体を見たいときはホイールで引けます。
 // 視野角 [ラジアン]。大きくすると広く映ります（画面端の歪みも増えます）。
 inline constexpr float FieldOfView = .80f;
 
