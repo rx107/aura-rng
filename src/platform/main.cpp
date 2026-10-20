@@ -23,7 +23,7 @@ namespace {
 // 数値の改造は tuning/game.hpp、絵の作り方は render/*.cpp から始めてください。
 using Clock=std::chrono::steady_clock;
 struct Options {
-    bool smoke{},warp{},debug{};
+    bool smoke{},warp{},debug{},silent{};
     std::filesystem::path capture, report, saveDir;
     std::filesystem::path vrm,bgm,pixelationBgm,pixelationFinalBgm,illusionaryBgm;
     std::uint64_t seed{};
@@ -38,6 +38,7 @@ Options options() {
         if(a==L"--smoke-test") result.smoke=true;
         else if(a==L"--warp") result.warp=true;
         else if(a==L"--debug") result.debug=true;
+        else if(a==L"--silent") result.silent=true; // 音声デバイスのないCIでも描画を検証するための起動設定。
         else if(a.starts_with(L"--vrm=")) result.vrm=a.substr(6);
         else if(a.starts_with(L"--bgm=")) result.bgm=a.substr(6);
         else if(a.starts_with(L"--pixelation-bgm=")) result.pixelationBgm=a.substr(17);
@@ -215,7 +216,7 @@ private:
         cutsceneTime_=0; auto_=false; keys_.fill(false); movement_=0; dragging_=false;
         ReleaseCapture(); pending_.reset(); sfxBaseline_=false; stopCutsceneRequested_=false;
         std::error_code error;
-        cutsceneAudioAvailable_=!cutsceneAudioPath_.empty() && std::filesystem::is_regular_file(cutsceneAudioPath_,error);
+        cutsceneAudioAvailable_=!opts_.silent && !cutsceneAudioPath_.empty() && std::filesystem::is_regular_file(cutsceneAudioPath_,error);
         cutsceneMusic_.reload();
     }
     void stopCutscene(bool revealAura=false) {
@@ -385,12 +386,12 @@ private:
             audioPath_=level>=3?audioFile(s.pixelationFinalBgmPath,L"Censored.mp3.mpeg"):audioFile(s.pixelationBgmPath,L"Redline_Shift.mp3");
             musicActive=true;
         }
-        music_.update(audioPath_,musicActive,s.volume,dt);
+        music_.update(audioPath_,musicActive && !opts_.silent,s.volume,dt);
         // 最後の映像の透明度と同じカーブで音量も落とします。通常BGMは終了後に開始。
         const float cinematicGain=cutsceneActive()?aura::tuning::cutscene::endingOpacity(cutsceneTime_,aura::cutsceneDuration(cutsceneKind_)):0;
         cutsceneMusic_.update(cutsceneAudioPath_,cutsceneActive() && cutsceneAudioAvailable_,s.volume*cinematicGain,dt,
             cutsceneAudioStart_,aura::cutsceneDuration(cutsceneKind_));
-        if(!cutsceneActive() && id=="pixelation" && level>=2) {
+        if(!opts_.silent && !cutsceneActive() && id=="pixelation" && level>=2) {
             const auto volley=aura::pixelationVolley(actionTime());
             if(sfxBaseline_) {
                 if(volley.shotCycle>lastShotCycle_) sfx_.playShot(s.volume);
@@ -975,7 +976,7 @@ private:
             throw std::runtime_error("Illusionary preview isolation failed");
         const auto illusionaryInstances=renderer_->illusionaryCount();
         update(.1f);
-        if(!music_.playing() || !music_.decodedBytes()) throw std::runtime_error("Illusionary Ogg BGM failed: "+music_.status());
+        if(!opts_.silent && (!music_.playing() || !music_.decodedBytes())) throw std::runtime_error("Illusionary Ogg BGM failed: "+music_.status());
         const auto illusionaryAudioBytes=music_.decodedBytes();
         pitch_=1.25f; render(false); captureExtra(L"-illusionary-overhead");
         pitch_=.05f; yaw_=0; render(false); captureExtra(L"-illusionary-front");
@@ -1157,7 +1158,8 @@ private:
             out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview isolation, reclining pose, solid floor, orbit lights, movement, resize, cutscene restore and clean switching\n"
                <<"Desert auras: PASS / Dune 1 in 50, Mirage 1 in 5000, Pharaoh 1 in 250000, <=300 glow instances each, history isolation\n"
                <<"Rocket: PASS / shared respawn XZ, boarding clearance, all six planets\n";
-            out<<"Illusionary Ogg audio: PASS / "<<illusionaryAudioBytes<<" decoded PCM bytes, loop and stop\n";
+            if(opts_.silent) out<<"Audio: disabled by --silent; device playback verified separately on the development PC\n";
+            else out<<"Illusionary Ogg audio: PASS / "<<illusionaryAudioBytes<<" decoded PCM bytes, loop and stop\n";
             out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
                <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
