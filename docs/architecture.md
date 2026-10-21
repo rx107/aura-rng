@@ -32,13 +32,13 @@ CutSceneの映像はGPUシェーダーとD2D字幕で描き、動画を貼り付
 
 `Music::playbackSeconds()` のXAudio2出力サンプル数を映像の時計に使い、初回デコード待ちで音と映像が離れないようにします。再生末尾でSamplesPlayedが0へ戻っても終了時刻を保持し、CutSceneが最初へ戻らないようにしています。
 
-BreakThroughのカメラは`breakthroughCamera()`で計算します。iはローアングルの周回、iiはハイアングルの後退と画面の傾き、iiiはコアへの直進と加速、ivはホワイトアウトの後に広角で巨大な柱の間を前進します。ivの空間は11.1秒から自然終了まで継続し、構造物を動かさずカメラに小さな上下動を付けます。カメラ値は`src/tuning/cutscene.hpp`、GPU側の描画は`src/render/cutscene.cpp`が担当します。
+BreakThroughのカメラは`breakthroughCamera()`で計算します。i・iiは初実装v0.1.6の近接カメラを`BreakthroughOriginalI / BreakthroughOriginalII`として共有します。iiiはv0.1.13のコアへ加速して直進するカメラ、ivの11.1〜14.15秒は同版の広角・巨大な柱・閃光を維持します。14.15〜15.05秒は`blackout`で完全な黒にし、`get out of my head`だけを表示します。15.05秒以降は初実装の7本柱の全景と終盤の絞り・閃光へ戻します。`it wasn't gone`と`with only 5 fragments left`は`breakthroughCaptionDrift()`で同じ横移動を使います。カメラ値は`src/tuning/cutscene.hpp`、GPU側の描画は`src/render/breakthrough.cpp`が担当します。
 
 音声の読み込み時に `bassEnvelope()` が35〜180Hz付近の強さを10ms間隔で計測します。毎フレームは小さな表を補間するだけです。Equinoxの背景と字幕を同じ量だけ上下し、音声がなければ揺れは0です。
 
 Pixelationのキューブ用には、その低音表の立ち上がりの繰り返しを自己相関で調べ、`estimateBeatGrid()`がBPMと最初の拍の位置を推定します。先頭最大120秒を読み込み時に解析し、描画ごとに解析し直しません。推定は半分・倍のテンポを選ぶ場合があるため、F1で30〜300 BPMと-2〜+2秒の時差を上書きできます。`beatPulse()`は実際の再生サンプル時刻から0〜1の鼓動を作り、`Frame::auraBeat`で描画へ渡します。ループ曲は曲の長さで時刻を折り返し、非再生中は0にします。Motion時計の倍率を変えてもBPMは変わりません。
 
-`endingOpacity()` が最後0.8秒の映像透明度と音量を制御します。通常オーラを先に描き、CutSceneを標準アルファ合成で重ねます。自然終了は対応オーラの一時表示を残し、Esc/停止は直前のプレビューへ戻します。取得時は実際のロールだけを在庫へ記録し、演出再生は記録しません。
+`endingOpacity(elapsed, duration, instantSwitch)` が映像透明度と音量を制御します。Equinoxは最後0.8秒で下げ、通常オーラへ標準アルファ合成で重ねます。BreakThroughだけ第3引数を`true`にし、終端直前まで不透明・音量一定で、30秒になったら対応オーラへ即座に切り替えます。映像内では、冒頭0.25秒の導入、i・iiの絞り閉鎖と開口、iiiの冒頭の開口、終盤の絞りと閃光を保ちます。これらは通常画面へ重ねる終了フェードとは別の処理です。自然終了は対応オーラの一時表示を残し、Esc/停止は直前のプレビューへ戻します。取得時は実際のロールだけを在庫へ記録し、演出再生は記録しません。
 
 MP3 / M4A / WAVはWindows Media Foundation、Ogg Vorbisは同梱stb_vorbisでPCM16へ変換し、XAudio2で再生します。Pixelationの発射・衝突音は短いオリジナルPCMを合成します。
 

@@ -18,6 +18,8 @@ public:
     void update(const std::filesystem::path& path,bool active,float volume,float dt,float startSeconds=0,float durationSeconds=0);
     const std::string& status() const { return status_; }
     bool playing() const { return playing_; }
+    // 実際に音声へ設定した音量。カットシーン終端で勝手にフェードしていないか確認できます。
+    float outputVolume() const noexcept {float volume=0; if(voice_)voice_->GetVolume(&volume); return volume;}
     // 実際に出力したサンプル数から求める秒数。読み込み待ち時間を含めない時計です。
     // 再生できない場合は nullopt。MP4 の元時刻ではなく、切り出した音声の 0 秒から。
     // 1 回再生の終了時は指定したクリップ長以上を返し、映像も確実に終了させます。

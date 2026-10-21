@@ -1,4 +1,4 @@
-# Star's RNG — Alpha 0.1 / v0.1.13
+# Star's RNG — Alpha 0.1 / v0.1.14
 
 C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームです。
 
@@ -6,10 +6,9 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 
 ## 今回の変更
 
-- BreakThroughのCutSceneを4つのカメラに変更。iは見上げながら周回、iiは見下ろして後退、iiiは光のコアへ急接近、ivは閃光の後に巨大な柱の間をゆっくり前進します。通常表示のオーラ名も少し上げました。
-- Illusionaryは胸を大きく反らして真上を見る姿勢へ変更。片腕を肩の高さへ上げて肘を直角に曲げ、もう片腕を斜め下へ伸ばします。ブロックとVRMで共通です。
-- PixelationのPLAYER1/2を高速化し、上下する軌道と光の尾を追加。中央のキューブはBGMの拍に合わせて鼓動します。弾・爆発・アバター浮遊のLv2/3共通速度は維持しています。
-- F1の音楽設定に、キューブのBPM自動推定・手動指定・拍の時差を追加しました。推定が半分・倍のテンポに感じる場合も自分で調整できます。
+- BreakThroughのCutSceneのi・iiを、初実装のv0.1.6の映像・カメラへ戻しました。iiiのコアへの急接近とivの閃光・巨大な柱はv0.1.13のままです。
+- `get out of my head`は黒画面に戻し、そこから最後までを初実装の後半へ戻しました。`with only 5 fragments left`は、現在の`it wasn't gone`と同じ傾き・横移動のテロップにしました。
+- BreakThroughは演出終了時に映像と音を即座に切り替え、対応オーラを表示します。映像内の元の絞り切り替え・短い閃光は保ちます。Equinoxの最後0.8秒の映像・音声フェードはそのままです。
 
 見た目の調整方法は[Illusionary・Extraのガイド](docs/illusionary-and-extra-guide.md)、カメラと字幕は[CutScene調整](docs/stage-and-cutscene-guide.md)を参照してください。
 
@@ -58,7 +57,7 @@ Discordデスクトップ版を起動すると、ユーザー名とロール回�
 
 ## 初心者向けの改造入口
 
-[改造用ソースZIP v0.1.13](https://github.com/rx107/aura-rng/releases/download/v0.1.13-alpha.1/StarRng-v0.1.13-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
+[改造用ソースZIP v0.1.14](https://github.com/rx107/aura-rng/releases/download/v0.1.14-alpha.1/StarRng-v0.1.14-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
 
 1. `src/tuning` の数字を1つだけ変更して保存。
 2. ゲームを閉じて `Develop.cmd` を実行。

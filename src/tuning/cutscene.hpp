@@ -8,10 +8,11 @@
 // カメラやサイズを変えたら保存→Develop.cmdで再ビルドしてください。
 // BreakThroughの字幕の時刻だけはF1でも変更・保存でき、再ビルド不要です。
 namespace aura::tuning::cutscene {
-// 入手演出の終わりから、この秒数だけ「演出 → 実際のオーラ」を重ねて切り替えます。
-// 音量も同じ値を使います。大きくすると、画面と音の余韻が長くなります。
+// Equinoxは終わりに「演出 → 実際のオーラ」を重ね、音量も同じ曲線で下げます。
+// BreakThroughは instantSwitch=true を渡し、最後の1フレームまで表示して即切り替えます。
 inline constexpr float EndingFadeSeconds = .8f;
-inline constexpr float endingOpacity(float elapsed,float duration) {
+inline constexpr float endingOpacity(float elapsed,float duration,bool instantSwitch=false) {
+    if(instantSwitch) return elapsed<duration?1.f:0.f;
     const float progress=std::clamp((elapsed-(duration-EndingFadeSeconds))/EndingFadeSeconds,0.f,1.f);
     // smoothstep と同じ曲線。出始めと終わりの速度が0になり、切り替えが自然です。
     return 1-progress*progress*(3-2*progress);
@@ -23,7 +24,7 @@ inline constexpr float endingOpacity(float elapsed,float duration) {
 inline constexpr float EquinoxBassShakeHeight = .008f;
 
 inline constexpr float BreakthroughDuration = 30.f;
-// i～iiiのカメラ。距離は注視点からの長さ、角度はラジアンです。
+// iiiのカメラ。距離は注視点からの長さ、角度はラジアンです。
 // pitch<0で見上げ、pitch>0で見下ろします。rollは画面そのものの傾きです。
 // focalLengthを小さくすると広角になり、手前と奥の距離感が強くなります。
 struct BreakthroughShot {
@@ -32,18 +33,16 @@ struct BreakthroughShot {
     float yawFrom,yawTo,pitch;
     float targetHeight,rollFrom,rollTo,focalLength;
 };
-// i: 低い場所から見上げて回り込む。yawFrom/Toの差を大きくすると横移動が増えます。
-inline constexpr BreakthroughShot BreakthroughLowOrbit{
-    .start=0,.end=3.4f,
-    .distanceFrom=9.8f,.distanceTo=9.0f,
-    .yawFrom=-.32f,.yawTo=.27f,.pitch=-.40f,
-    .targetHeight=4.0f,.rollFrom=-.04f,.rollTo=.025f,.focalLength=1.18f};
-// ii: 高い場所から斜めに見下ろして遠ざかる。distanceToを増やすと後退量が増えます。
-inline constexpr BreakthroughShot BreakthroughHighPullback{
-    .start=3.4f,.end=7.3f,
-    .distanceFrom=9.1f,.distanceTo=13.5f,
-    .yawFrom=.56f,.yawTo=.78f,.pitch=.67f,
-    .targetHeight=3.7f,.rollFrom=-.30f,.rollTo=-.16f,.focalLength=1.28f};
+// i・iiは初実装 v0.1.6 の「柱の一部を近くから斜めに映す」カメラです。
+// targetHeightを上げると柱の高い場所へ、distanceを下げると柱へ近づきます。
+// yawSpeedは回り込む速さ、rollSpeedは画面が傾く速さです（ラジアン/秒）。
+struct BreakthroughOriginalShot {
+    float start,end,distance,targetHeight,yaw,yawSpeed,roll,rollSpeed,pitch;
+};
+inline constexpr BreakthroughOriginalShot BreakthroughOriginalI{
+    0,3.4f,4.15f,6.0f,.24f,.035f,-.30f,.055f,.12f};
+inline constexpr BreakthroughOriginalShot BreakthroughOriginalII{
+    3.4f,7.3f,4.6f,1.5f,.45f,.06f,-.48f,.065f,.12f};
 // iii: 向きを変えずに光へ急接近。yawFromとyawToを同じにすると一直線になります。
 inline constexpr BreakthroughShot BreakthroughCoreRush{
     .start=7.3f,.end=11.1f,
@@ -58,7 +57,10 @@ inline constexpr float BreakthroughCoreFlareDistance = 9.f;
 // iv: 閃光の後、巨大な柱の間を光源へ向かって直進します。
 // 例: StartDistance=24でより奥から、TravelDistance=6で前進量を増やします。
 inline constexpr float BreakthroughMonolithStart = 11.1f;
-inline constexpr float BreakthroughMonolithEnd = BreakthroughDuration;
+inline constexpr float BreakthroughMonolithEnd = 14.15f;
+// v0.1.13と同じ前進速度を保ったまま、ivの終わりで黒画面へ切ります。
+// TravelSecondsを短くすると、この短い場面の中でより速く前進します。
+inline constexpr float BreakthroughMonolithTravelSeconds = 18.9f;
 inline constexpr float BreakthroughMonolithStartDistance = 20.f;
 inline constexpr float BreakthroughMonolithTravelDistance = 3.8f;
 inline constexpr float BreakthroughMonolithEyeHeight = 1.05f;
@@ -69,6 +71,20 @@ inline constexpr float BreakthroughMonolithScale = 1.f;       // 全ての巨大
 inline constexpr float BreakthroughWhiteoutSeconds = .43f;    // 閃光から視界が戻るまでの秒数。
 // ivの文章の時刻は音楽との同期を維持します。カメラとは別に変更できます。
 inline constexpr float BreakthroughIvCaptionStart = 13.f;
+// 初実装の黒画面と、その後に戻る7本柱の全景。
+// 黒画面は薄く重ねず完全な黒にし、字幕だけを出します。
+inline constexpr float BreakthroughBlackoutStart = BreakthroughMonolithEnd;
+inline constexpr float BreakthroughBlackoutEnd = 15.05f;
+inline constexpr float BreakthroughFinalDistance = 12.2f;
+inline constexpr float BreakthroughFinalPullbackSpeed = .045f;
+inline constexpr float BreakthroughFinalYawSpeed = .017f;
+// it wasn't gone と with only 5 fragments left は同じ傾き・横移動にします。
+inline constexpr float BreakthroughFloatingCaptionAngle = -2.f;
+inline constexpr float BreakthroughFloatingCaptionSpeed = 6.f; // 基準画面480px高でのpx/秒。
+inline constexpr float BreakthroughFloatingCaptionMoveSeconds = 4.f;
+inline float breakthroughCaptionDrift(float elapsed,float start) {
+    return std::clamp(elapsed-start,0.f,BreakthroughFloatingCaptionMoveSeconds)*BreakthroughFloatingCaptionSpeed;
+}
 
 // GPUに渡すカメラの位置と向き。ゲームとテストが同じ計算を使います。
 struct BreakthroughCamera {
@@ -76,6 +92,7 @@ struct BreakthroughCamera {
     float roll=0,focalLength=1.6f;
     bool monolithSpace=false;
     float whiteout=0;
+    bool blackout=false;
 };
 inline BreakthroughCamera breakthroughCamera(float elapsed) {
     elapsed=std::clamp(elapsed,0.f,BreakthroughDuration);
@@ -93,12 +110,22 @@ inline BreakthroughCamera breakthroughCamera(float elapsed) {
         camera.roll=lerp(shot.rollFrom,shot.rollTo,u);
         camera.focalLength=shot.focalLength;
     };
-    if(elapsed<BreakthroughLowOrbit.end)orbit(BreakthroughLowOrbit);
-    else if(elapsed<BreakthroughHighPullback.end)orbit(BreakthroughHighPullback);
+    const auto original=[&](const BreakthroughOriginalShot& shot) {
+        const float local=elapsed-shot.start;
+        const float yaw=shot.yaw+local*shot.yawSpeed;
+        camera.target={0,shot.targetHeight,0};
+        // 元の式をそのまま共有します。横方向の距離をpitchで縮めない点も原版通りです。
+        camera.eye={std::sin(yaw)*shot.distance,
+            shot.targetHeight+std::sin(shot.pitch)*shot.distance,-std::cos(yaw)*shot.distance};
+        camera.roll=shot.roll+local*shot.rollSpeed;
+        camera.focalLength=1.6f;
+    };
+    if(elapsed<BreakthroughOriginalI.end)original(BreakthroughOriginalI);
+    else if(elapsed<BreakthroughOriginalII.end)original(BreakthroughOriginalII);
     else if(elapsed<BreakthroughMonolithStart)orbit(BreakthroughCoreRush,true);
-    else {
+    else if(elapsed<BreakthroughMonolithEnd) {
         const float local=elapsed-BreakthroughMonolithStart;
-        const float u=std::clamp(local/(BreakthroughMonolithEnd-BreakthroughMonolithStart),0.f,1.f);
+        const float u=std::clamp(local/BreakthroughMonolithTravelSeconds,0.f,1.f);
         const float bob=BreakthroughMonolithBobHeight*std::sin(local*BreakthroughMonolithBobSpeed);
         camera.eye={0,BreakthroughMonolithEyeHeight+bob,
             -BreakthroughMonolithStartDistance+BreakthroughMonolithTravelDistance*u};
@@ -107,6 +134,18 @@ inline BreakthroughCamera breakthroughCamera(float elapsed) {
         camera.monolithSpace=true;
         const float fade=std::clamp(local/BreakthroughWhiteoutSeconds,0.f,1.f);
         camera.whiteout=(1-fade)*(1-fade);
+    } else if(elapsed<BreakthroughBlackoutEnd) {
+        // 描画は黒になりますが、デバッグやテストで向きを調べても正常な視点を返します。
+        camera.eye={0,4.f,-12.f};camera.target={0,3.9f,0};
+        camera.blackout=true;
+    } else {
+        // 原版の後半: 7本柱の全景を少しずつ引きながら横へ回り込む。
+        const float distance=BreakthroughFinalDistance+(elapsed-BreakthroughBlackoutEnd)*BreakthroughFinalPullbackSpeed;
+        const float yaw=.28f+BreakthroughFinalYawSpeed*(elapsed-15.f);
+        camera.target={0,3.9f,0};
+        camera.eye={std::sin(yaw)*distance,3.9f+std::sin(.04f)*distance,-std::cos(yaw)*distance};
+        camera.roll=.015f*std::sin(elapsed*.4f);
+        camera.focalLength=1.6f;
     }
     return camera;
 }

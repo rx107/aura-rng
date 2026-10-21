@@ -80,6 +80,8 @@ float4 main(Input i):SV_TARGET {
     float2 raw=(i.uv-.5)*float2(aspect,1),q=raw;
     // カメラの経路はCPU側のtuning/cutscene.hppと共有。ここは渡された位置から光線を作るだけ。
     bool monolithSpace=sceneTuning.x>.5;
+    // get out of my head: 背景の光や霧を一切残さず、字幕用の完全な黒画面へ切る。
+    if(sceneTuning.x<-.5)return float4(0,0,0,screenAndTime.z);
     float focalLength=cameraEye.w;
     q=rot(q,cameraTarget.w);
     float3 target=cameraTarget.xyz,eye=cameraEye.xyz;
@@ -138,9 +140,10 @@ float4 main(Input i):SV_TARGET {
     }
     float2 p=q-lightPos;
     float r=length(p),angle=atan2(p.y,p.x);
-    float strength=monolithSpace?1.25:.75;
+    float strength=monolithSpace?1.25:(t>=15.05?1.4:.75);
     // コアへ接近した時は光も拡大する。柱の模様だけが拡大するズームにしないためです。
-    float coreScale=monolithSpace?1:clamp(sceneTuning.w/max(.1,length(target-eye)),1,6);
+    // 光の拡大はiiiだけ。原版へ戻したi/ii/後半の光は、元の大きさを使います。
+    float coreScale=t>=7.3 && t<11.1?clamp(sceneTuning.w/max(.1,length(target-eye)),1,6):1;
     float2 core=p/coreScale;
     float glow=exp(-dot(core,core)*22)*.26;
     float flare=star(core,.19)*1.7+exp(-abs(core.y)*300)*exp(-abs(core.x)*.65)*.46;
@@ -163,15 +166,22 @@ float4 main(Input i):SV_TARGET {
     float dots=exp(-dot(particle,particle)*850)*step(.965,seed);
     color+=float3(.65,.70,1)*dots*(.4+.6*sin(t+seed*40)*sin(t+seed*40));
     float aperture=.395;
+    // 初実装の「絞りを閉じる→次の構図へ切る」を復元。映像同士は重ねません。
+    // iiiの出始めもv0.1.13のまま。終了時に通常オーラへ重ねるフェードとは別の演出です。
     if(t<3.4)aperture=.395*(1-smoothstep(3.16,3.4,t));
     else if(t<7.3)aperture=.395*smoothstep(3.4,3.58,t)*(1-smoothstep(7.02,7.3,t));
     else if(t<11.1)aperture=.395*smoothstep(7.3,7.48,t);
+    else if(t>=28.0)aperture=.395*(1-smoothstep(28.0,29.0,t));
     float mask=1-smoothstep(aperture,aperture+.0015,abs(i.uv.y-.5));
     // iiiの急接近 → ivの白閃光 → 広い柱の空間。字幕と音楽は途切れずに続きます。
     color=lerp(color,float3(.98,.98,1),sceneTuning.y);
+    // 黒画面から原版の7本柱へ戻る瞬間の短い閃光。
+    float returnFlash=exp(-pow((t-15.08)/.14,2));
+    color=lerp(color,float3(.98,.98,1),returnFlash);
     float desaturate=smoothstep(27.2,28.8,t)*.8;
     color=lerp(color,dot(color,float3(.299,.587,.114)).xxx,desaturate);
-    color*=mask*smoothstep(0,.25,t);
+    color*=mask*smoothstep(0,.25,t)*(1-smoothstep(28.9,29.0,t));
+    color+=exp(-pow((t-29.05)/.045,2))*.68;
     return float4(saturate(color),screenAndTime.z);
 })";
 
@@ -335,11 +345,11 @@ void Renderer::drawBreakthroughCutscene(const Frame& frame) {
     // 全画面の三角形1枚で専用HLSLを実行する。通常の柱モデルを再利用しないため浮遊しない。
     if(frame.cutsceneTime<0 || frame.cutsceneTime>BreakthroughCutsceneDuration)return;
     const auto camera=tuning::cutscene::breakthroughCamera(frame.cutsceneTime);
-    const float opacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,BreakthroughCutsceneDuration);
+    const float opacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,BreakthroughCutsceneDuration,true);
     const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,opacity,static_cast<float>(height_),
         camera.eye[0],camera.eye[1],camera.eye[2],camera.focalLength,
         camera.target[0],camera.target[1],camera.target[2],camera.roll,
-        camera.monolithSpace?1.f:0.f,camera.whiteout,tuning::cutscene::BreakthroughMonolithScale,tuning::cutscene::BreakthroughCoreFlareDistance};
+        camera.blackout?-1.f:camera.monolithSpace?1.f:0.f,camera.whiteout,tuning::cutscene::BreakthroughMonolithScale,tuning::cutscene::BreakthroughCoreFlareDistance};
     context_->UpdateSubresource(breakthroughConstants_.Get(),0,nullptr,constants,0,0);
     ID3D11RenderTargetView* target=target_.Get();context_->OMSetRenderTargets(1,&target,nullptr);
     context_->OMSetDepthStencilState(effectDepth_.Get(),0);context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
@@ -355,7 +365,7 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     const float t=frame.cutsceneTime;
     if(t<0 || t>BreakthroughCutsceneDuration)return;
     const float factor=static_cast<float>(height_)/480,referenceWidth=static_cast<float>(width_)*480/height_;
-    const float ending=tuning::cutscene::endingOpacity(t,BreakthroughCutsceneDuration);
+    const float ending=tuning::cutscene::endingOpacity(t,BreakthroughCutsceneDuration,true);
     D2D1_MATRIX_3X2_F previous;d2d_->GetTransform(&previous);
     auto caption=[&](std::wstring_view value,float x,float y,float angle,float opacity=1.f,float size=14.f) {
         opacity*=ending;
@@ -377,8 +387,11 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
         d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
         text(L"get out of my head",center-160,228,320,24,11,D2D1::ColorF(.83f,.83f,.86f),false,true);
     }
-    if(t>=16.05f && t<25.4f)caption(L"it wasn't gone",center-210+std::min(t-16.05f,4.f)*6,285,-2);
-    if(t>=20.0f && t<26.0f)caption(L"with only 5 fragments left",center+175,300,7);
+    // 同じ傾き・ゆっくり横へ流れる動きを2つの字幕で共有。時刻と文章は原版のままです。
+    if(t>=16.05f && t<25.4f)caption(L"it wasn't gone",center-210+tuning::cutscene::breakthroughCaptionDrift(t,16.05f),
+        285,tuning::cutscene::BreakthroughFloatingCaptionAngle);
+    if(t>=20.0f && t<26.0f)caption(L"with only 5 fragments left",center+175+tuning::cutscene::breakthroughCaptionDrift(t,20.f),
+        300,tuning::cutscene::BreakthroughFloatingCaptionAngle);
     {
         // 音声の再生秒に、保存された「単語ごとの時刻 + 一括 Offset」を重ねる。
         // 等間隔の計算をやめ、サックスの各音に合わせた初出フレームを使います。

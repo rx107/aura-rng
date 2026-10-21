@@ -11,7 +11,7 @@
 | ロール間隔・移動・カメラ | [game.hpp](game.hpp) | `RollCooldownSeconds` を `1.4f → .7f`。待ち時間が半分。 |
 | ステージ・標準オーラ・Singularity | [world.hpp](world.hpp) | `HalfExtent` を `32.f → 40.f`。床・木・歩行範囲が一緒に広がる。 |
 | 惑星の景観・ロケット・Extraの星 | [stages.hpp](stages.hpp) | `ExtraInnerRadiusRatio` を `.55f → .65f`。星の谷が浅くなり、ふっくらする。 |
-| カットシーンのカメラ・揺れ・終了フェード | [cutscene.hpp](cutscene.hpp) | `EndingFadeSeconds` を `.8f → 1.2f`。映像と音がゆっくりオーラへ切り替わる。 |
+| カットシーンのカメラ・揺れ・Equinox終了フェード | [cutscene.hpp](cutscene.hpp) | `EndingFadeSeconds` を `.8f → 1.2f`。Equinoxの映像と音がゆっくりオーラへ切り替わる。BreakThroughは終了時に即切替。 |
 | BreakThroughの字幕 | [cutscene.hpp](cutscene.hpp) | `BreakthroughWordTimes` の各秒数。字幕の時差と単語の時刻はF1からも再ビルドなしで変更可能。 |
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |
@@ -45,7 +45,9 @@ CSV を変えた場合も元の `data/auras.csv` を保存し、Develop.cmd を�
 - **Pixelation は時計が 2 本**あります。`FinalMotionSpeed` は Lv3 の周囲の回転用、`BoostedSpeed` は Lv2 / Lv3 で共通の弾・爆発・浮遊用でもあります。機体だけの速さは`PlayerOrbitSpeed = 1.55`、上下幅は`PlayerBobAmplitude = .85`です。機体の速度を変えても弾が衝突する間隔は変わりません。
 - **Pixelationの光の尾**は`PlayerTrailDuration = .72f`で長さ、`PlayerTrailSegments = 28`で滑らかさを調整します。時間を長くすると飛んできた軌道を長く残し、分割数を増やすとカーブが滑らかになります。尾は機体と同じ3D軌道をたどります。
 - **キューブの鼓動はBGMの再生時刻**を使います。`CageBeatScale = .15f`は1拍で最大15%拡大、`CageBeatBrightness = .20f`は最大20%増光。0でそれぞれの変化を止めます。拍の速さと時差はF1 → 音楽 → キューブの鼓動から変更でき、再ビルド不要です。自動推定が半分・倍に感じる場合はBPMを30〜300で手動指定します。音楽を再生していない間とBGMのないLv0は鼓動しません。
-- **BreakThrough の通常表示と CutScene は独立**しています。`breakthrough.hpp`の柱設定を変えても、CutScene の柱は変わらず静止します。カメラは`cutscene.hpp`の`BreakthroughLowOrbit`・`BreakthroughHighPullback`・`BreakthroughCoreRush`でi〜iii、`BreakthroughMonolith`で始まる値でivを調整します。[4つの場面の説明](../../docs/stage-and-cutscene-guide.md#breakthroughの4つのカメラ)に値の意味をまとめています。
+- **BreakThrough の通常表示と CutScene は独立**しています。`breakthrough.hpp`の柱設定を変えても、CutScene の柱は変わらず静止します。`cutscene.hpp`の`BreakthroughOriginalI / BreakthroughOriginalII`は初実装のi・ii、`BreakthroughCoreRush`はiii、`BreakthroughMonolith`で始まる値はivを調整します。`BreakthroughBlackoutEnd`は黒画面が終わる時刻、`BreakthroughFinalDistance`・`BreakthroughFinalPullbackSpeed`・`BreakthroughFinalYawSpeed`は15.05秒以降の7本柱を映すカメラです。[場面と調整値の説明](../../docs/stage-and-cutscene-guide.md#breakthroughの場面とカメラ)に値の意味をまとめています。
+- **後半の2つのテロップは同じ動き**です。`BreakthroughFloatingCaptionAngle = -2.f`は傾きの度数、`BreakthroughFloatingCaptionSpeed = 6.f`は1秒ごとの横移動、`BreakthroughFloatingCaptionMoveSeconds = 4.f`は移動を続ける秒数です。`it wasn't gone`と`with only 5 fragments left`の両方に反映されます。
+- **BreakThroughは終端で即切り替え**ます。`endingOpacity()`に`instantSwitch=true`を渡すため、`EndingFadeSeconds`の変更はEquinoxだけに影響します。BreakThroughの映像内にある冒頭0.25秒の導入フェード、i・iiの絞り閉鎖・開口、iii冒頭の開口、最後の絞り閉鎖・短い閃光は保ちます。これらは通常画面へ重ねる終了フェードとは別の演出です。
 - **Illusionaryの天を仰ぐポーズ**は `avatar.hpp` の `illusionary`にあります。`BodyPitch`が全身の傾き、`TorsoPitch`が胸の反り、`HeadPitch`が首の反りです。`ElbowPitch`の片方だけを約1.5708にすると直角の肘になります。`illusionary.hpp`は光・帯・床・文字を担当し、姿勢とは分けています。
 - **文字と光の明るさは別々**に調整します。Illusionaryの `TextSelfLight`はにじまない文字用です。`White`を変えると白い光全体にも影響します。
 - **Equinoxの揺れは音声の低音から**求めます。`EquinoxBassShakeHeight`は画面高に対する割合で、`.008f`なら0.8%、`0.f`なら無効です。音声がない場合も揺れはありません。

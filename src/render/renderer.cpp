@@ -654,7 +654,8 @@ void Renderer::draw(const Frame& frame,bool present) {
     context_->ClearDepthStencilView(depth_.Get(),D3D11_CLEAR_DEPTH,1,0);
     ID3D11RenderTargetView* view=target_.Get(); context_->OMSetRenderTargets(1,&view,depth_.Get());
     if(frame.cutsceneTime>=0) {
-        const float cinematicOpacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,cutsceneDuration(frame.cutsceneKind));
+        const float cinematicOpacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,cutsceneDuration(frame.cutsceneKind),
+            frame.cutsceneKind==CutsceneKind::Breakthrough);
         if(cinematicOpacity<1) world(frame);
         else {
         instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear();

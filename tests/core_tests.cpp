@@ -336,22 +336,34 @@ int main(int argc, char** argv) {
         check(aura::tuning::cutscene::breakthroughWordVisible(29.f,7,lateWords) &&
             !aura::tuning::cutscene::breakthroughWordVisible(30.f,7,lateWords,4.f),"Late customized words keep their hold time within cutscene boundary");
         {
-            // 描画APIに頼らず、映像で必要な「移動方向」と「視点」を確認します。
+            // 復帰区間はv0.1.6公開版から計測した視点、維持区間は移動方向を確認します。
             using aura::tuning::cutscene::breakthroughCamera;
             const auto distanceToTarget=[](const auto& camera) {
                 const auto x=camera.eye[0]-camera.target[0],y=camera.eye[1]-camera.target[1],z=camera.eye[2]-camera.target[2];
                 return std::sqrt(x*x+y*y+z*z);
             };
-            const auto lowA=breakthroughCamera(.3f),lowB=breakthroughCamera(2.9f);
-            check(lowA.eye[1]<lowA.target[1]-2 && lowB.eye[1]<lowB.target[1]-2 &&
-                lowA.eye[0]<0 && lowB.eye[0]>0 && std::abs(distanceToTarget(lowA)-distanceToTarget(lowB))<1.f &&
-                !lowA.monolithSpace && !lowB.monolithSpace,
-                "BreakThrough i looks upward and slowly orbits around the same central structure");
-            const auto highA=breakthroughCamera(3.7f),highB=breakthroughCamera(6.9f);
-            check(highA.eye[1]>highA.target[1]+4 && highB.eye[1]>highB.target[1]+4 &&
-                distanceToTarget(highB)>distanceToTarget(highA)+3 && highB.roll>highA.roll+.08f &&
-                std::abs(highB.roll)>.1f,
-                "BreakThrough ii looks down diagonally, pulls backward, and gently rolls the camera");
+            struct OriginalView {float time;std::array<float,3> eye;float height,roll;};
+            constexpr OriginalView originalViews[]={
+                {0,{.98646590f,6.49680566f,-4.03105260f},6.f,-.30f},
+                {1.5f,{1.19663980f,6.49680566f,-3.97373290f},6.f,-.2175f},
+                {3.399f,{1.45791737f,6.49680566f,-3.88548284f},6.f,-.113055f},
+                {3.4f,{2.00084146f,2.05067615f,-4.14205667f},1.5f,-.48f},
+                {5.1f,{2.41219966f,2.05067615f,-3.91679624f},1.5f,-.3695f},
+                {7.299f,{2.90651815f,2.05067615f,-3.56541053f},1.5f,-.226565f},
+                {15.05f,{3.38150384f,4.38786988f,-11.72200630f},3.9f,-.00390236f},
+                {22.5f,{4.96791115f,4.40127630f,-11.50879452f},3.9f,.00618178f},
+                {29.999f,{6.56284504f,4.41477090f,-11.07409586f},3.9f,-.00805366f}};
+            for(const auto& view:originalViews) {
+                const auto camera=breakthroughCamera(view.time);
+                bool sameEye=true;
+                for(unsigned axis=0;axis<3;++axis)sameEye&=std::abs(camera.eye[axis]-view.eye[axis])<.00002f;
+                check(sameEye && std::abs(camera.target[1]-view.height)<.00001f &&
+                    std::abs(camera.roll-view.roll)<.00001f && camera.focalLength==1.6f &&
+                    !camera.monolithSpace && !camera.blackout && camera.whiteout==0,
+                    "BreakThrough i, ii and finale match the initial v0.1.6 camera instead of the new orbit or corridor");
+            }
+            check(breakthroughCamera(3.399f).target[1]==6.f && breakthroughCamera(3.4f).target[1]==1.5f,
+                "The original close shots change with a direct camera cut at 3.4 seconds");
             const auto rushA=breakthroughCamera(7.6f),rushB=breakthroughCamera(8.6f);
             const auto rushC=breakthroughCamera(9.8f),rushD=breakthroughCamera(10.8f);
             const float rushDistanceA=distanceToTarget(rushA),rushDistanceD=distanceToTarget(rushD);
@@ -366,17 +378,29 @@ int main(int argc, char** argv) {
                 "BreakThrough iii accelerates straight toward the bright core without orbiting or rolling");
             const float ivStart=aura::tuning::cutscene::BreakthroughMonolithStart;
             const auto flash=breakthroughCamera(ivStart),revealed=breakthroughCamera(ivStart+.7f);
-            const auto monolithLate=breakthroughCamera(28.f);
+            const auto monolithLate=breakthroughCamera(14.14f);
             check(flash.monolithSpace && flash.whiteout==1 && revealed.whiteout==0 && monolithLate.monolithSpace &&
-                revealed.focalLength<lowA.focalLength && revealed.focalLength<highA.focalLength &&
+                revealed.focalLength<1.6f &&
                 revealed.eye[0]==0 && monolithLate.eye[0]==0 && monolithLate.eye[2]>revealed.eye[2] &&
                 monolithLate.eye[2]<monolithLate.target[2],
-                "BreakThrough iv opens from whiteout into a persistent wide-angle monolith space and slowly tracks forward");
+                "BreakThrough iv retains the current whiteout and forward wide-angle monolith camera");
+            check(std::abs(revealed.eye[2]-(-20.f+3.8f*.7f/18.9f))<.00001f,
+                "Shortening the monolith scene does not speed up the preserved iv camera");
+            check(!breakthroughCamera(14.149f).blackout && breakthroughCamera(14.15f).blackout &&
+                breakthroughCamera(14.2f).blackout && breakthroughCamera(15.049f).blackout &&
+                !breakthroughCamera(15.05f).blackout && !breakthroughCamera(15.05f).monolithSpace &&
+                !breakthroughCamera(29.f).monolithSpace,
+                "Get out of my head appears on black before a direct cut back to the original seven-pillar finale");
+            check(aura::tuning::cutscene::breakthroughCaptionDrift(17.05f,16.05f)==
+                    aura::tuning::cutscene::breakthroughCaptionDrift(21.f,20.f) &&
+                aura::tuning::cutscene::breakthroughCaptionDrift(20.f,20.f)==0 &&
+                aura::tuning::cutscene::breakthroughCaptionDrift(30.f,20.f)==24.f,
+                "Both floating finale captions share their slow drift and stop after four seconds");
             for(unsigned frame=0;frame<=240;++frame) {
                 const auto camera=breakthroughCamera(frame*.125f);
                 check(std::all_of(camera.eye.begin(),camera.eye.end(),[](float value){return std::isfinite(value);}) &&
                     std::all_of(camera.target.begin(),camera.target.end(),[](float value){return std::isfinite(value);}) &&
-                    std::isfinite(camera.roll) && camera.focalLength>0 && distanceToTarget(camera)>0 &&
+                    std::isfinite(camera.roll) && camera.focalLength>0 && (camera.blackout || distanceToTarget(camera)>0) &&
                     camera.whiteout>=0 && camera.whiteout<=1,
                     "Every BreakThrough camera sample has a finite view and a bounded whiteout");
                 if(camera.monolithSpace) check(std::abs(camera.eye[1]-aura::tuning::cutscene::BreakthroughMonolithEyeHeight)<=
@@ -736,6 +760,10 @@ int main(int argc, char** argv) {
             std::abs(aura::tuning::cutscene::endingOpacity(10.5f,10.9f)-.5f)<.0001f &&
             aura::tuning::cutscene::endingOpacity(10.9f,10.9f)==0,
             "CutScene fade preserves the last frame and transitions smoothly to the aura");
+        check(aura::tuning::cutscene::endingOpacity(29.2f,30.f,true)==1 &&
+            aura::tuning::cutscene::endingOpacity(29.999f,30.f,true)==1 &&
+            aura::tuning::cutscene::endingOpacity(30.f,30.f,true)==0,
+            "BreakThrough stays opaque until the exact ending and then hard-cuts without crossfade");
         std::cout << "PASS: exact stage odds, six planets, limited drops, fixed poses, preview isolation, bass envelope, schema migration, save/restore, UTF-8 CSV\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }

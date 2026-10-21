@@ -398,8 +398,9 @@ private:
             musicActive=true;
         }
         music_.update(audioPath_,musicActive && !opts_.silent,s.volume,dt);
-        // 最後の映像の透明度と同じカーブで音量も落とします。通常BGMは終了後に開始。
-        const float cinematicGain=cutsceneActive()?aura::tuning::cutscene::endingOpacity(cutsceneTime_,aura::cutsceneDuration(cutsceneKind_)):0;
+        // Equinoxは映像と音をフェード。BreakThroughは終了直前まで保ち、stopCutsceneで即停止。
+        const float cinematicGain=cutsceneActive()?aura::tuning::cutscene::endingOpacity(cutsceneTime_,aura::cutsceneDuration(cutsceneKind_),
+            cutsceneKind_==aura::CutsceneKind::Breakthrough):0;
         cutsceneMusic_.update(cutsceneAudioPath_,cutsceneActive() && cutsceneAudioAvailable_,s.volume*cinematicGain,dt,
             cutsceneAudioStart_,aura::cutsceneDuration(cutsceneKind_));
         if(!opts_.silent && !cutsceneActive() && id=="pixelation" && level>=2) {
@@ -935,10 +936,11 @@ private:
         captionTuning.breakthroughWordTimes=aura::tuning::cutscene::BreakthroughWordTimes;
         applyDebugActions(captionTuning);
         cutsceneTime_=24.2f; render(false); captureExtra(L"-breakthrough-words");
-        constexpr float breakCutTimes[]={.4f,2.5f,3.7f,6.7f,7.6f,9.6f,10.85f,11.1f,11.7f,13.4f,20,28,29.5f};
+        constexpr float breakCutTimes[]={.4f,1.5f,2.5f,3.39f,3.4f,3.7f,6.7f,7.29f,7.3f,7.6f,9.6f,10.85f,
+            11.09f,11.1f,11.7f,13.4f,14.14f,14.15f,14.5f,15.04f,15.05f,16.5f,18,20,20.4f,21,24.2f,26,28,29.05f,29.5f};
         for(float second:breakCutTimes) {
             cutsceneTime_=second; render(false);
-            const auto suffix=L"-breakthrough-cutscene-"+std::to_wstring(static_cast<int>(second*10)); captureExtra(suffix.c_str());
+            const auto suffix=L"-breakthrough-cutscene-"+std::to_wstring(static_cast<int>(std::lround(second*1000))); captureExtra(suffix.c_str());
         }
         if(!opts_.warp && !opts_.capture.empty()) for(int i=0;i<100;++i) {
             cutsceneTime_=i*.3f; render(false);
@@ -946,9 +948,20 @@ private:
         }
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false); captureExtra(L"-breakthrough-cutscene-small");
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        cutsceneTime_=29.2f; update(.3f); render(false);
+        if(renderer_->breakthroughCount() || renderer_->instanceCount())
+            throw std::runtime_error("BreakThrough revealed world geometry before its hard cut");
+        if(cutsceneAudioAvailable_ && (!cutsceneMusic_.playing() ||
+            std::abs(cutsceneMusic_.outputVolume()-presentation_.settings.volume)>.0001f))
+            throw std::runtime_error("BreakThrough audio faded before the hard cut");
+        cutsceneTime_=aura::BreakthroughCutsceneDuration-.001f; render(false); captureExtra(L"-breakthrough-before-hard-cut");
+        if(renderer_->breakthroughCount() || renderer_->instanceCount())
+            throw std::runtime_error("World showed through the last BreakThrough cinematic frame");
         cutsceneTime_=aura::BreakthroughCutsceneDuration-.01f; update(.02f);
         if(cutsceneActive() || cutsceneMusic_.playing() || !renderer_->debugOpen() || presentation_.shown(progress_)!=breakthroughShown)
             throw std::runtime_error("BreakThrough timeout failed to restore display / debug");
+        render(false); captureExtra(L"-breakthrough-after-hard-cut");
+        if(!renderer_->breakthroughCount()) throw std::runtime_error("BreakThrough did not appear immediately after the hard cut");
         applyDebugActions(playBreakthrough); update(.05f);
         if(cutsceneAudioAvailable_ && (!cutsceneMusic_.playing() || cutsceneMusic_.decodedBytes()!=breakthroughAudioBytes))
             throw std::runtime_error("BreakThrough audio restart failed");
@@ -1204,7 +1217,8 @@ private:
             out<<"BreakThrough: PASS / preview isolation, AutoRoll stop, clean switching, resize, inventory/history unchanged\n"
                <<"BreakThrough instances: "<<breakthroughInstances<<"\nMean BreakThrough frame submission time: "<<meanBreakthroughMs
                <<" ms/frame (60 offscreen frames, no vsync)\n"
-               <<"BreakThrough cutscene: PASS / four camera shots, iv whiteout into wide monolith space, static pillar positions, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
+               <<"BreakThrough cutscene: PASS / original i/ii and finale, retained iii/iv, black get-out interlude, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n"
+               <<"BreakThrough hard cut: PASS / no underlying world through the final frame, full audio volume at 29.5s, immediate aura reveal and audio stop at the end\n";
             out<<"BreakThrough captions: PASS / eight measured word times, live offset/per-word changes saved during playback, reset to defaults\n";
             out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview isolation, arched torso/upward head/asymmetric elbow pose, solid floor, orbit lights, fixed during movement, resize, cutscene restore and clean switching\n"
                <<"Desert auras: PASS / Dune 1 in 50, Mirage 1 in 5000, Pharaoh 1 in 250000, <=300 glow instances each, history isolation\n"
