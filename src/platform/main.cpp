@@ -110,10 +110,16 @@ public:
         }
         const auto audioStatus=cutsceneActive()?(cutsceneAudioAvailable_?std::string("Cutscene: ")+cutsceneMusic_.status():std::string("Cutscene / visual only"))+
             " / Aura BGM: "+music_.status():music_.status();
+        const auto shown=presentation_.shown(progress_);
+        const bool pixelationMusic=!cutsceneActive() && roller_.catalog()[shown].id=="pixelation" &&
+            presentation_.level(progress_,roller_.catalog())>=1 && music_.playing();
+        // 通常プレイは音声出力サンプルの時計。検証時だけ固定時刻で同じ絵を再現します。
+        const float musicSecond=opts_.smoke?time_:music_.playbackSeconds().value_or(-1);
+        const float pulse=pixelationMusic?music_.beatPulse(musicSecond,presentation_.settings.pixelationBpm,presentation_.settings.pixelationBeatOffset):0;
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
             mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime(),
             stageSelectOpen_,stageTravel_.progress(),stageTravel_.target(),collectionCategory_,
-            cutsceneMusic_.bassPulse(cutsceneTime_)};
+            cutsceneMusic_.bassPulse(cutsceneTime_),pulse,music_.estimatedBpm()};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -336,8 +342,13 @@ private:
         if(commands.pixelationFinalBgmPath) {presentation_.settings.pixelationFinalBgmPath=*commands.pixelationFinalBgmPath; music_.reload();}
         if(commands.illusionaryBgmPath) {presentation_.settings.illusionaryBgmPath=*commands.illusionaryBgmPath; music_.reload();}
         if(commands.volume) presentation_.settings.volume=*commands.volume;
+        if(commands.pixelationBpm && std::isfinite(*commands.pixelationBpm) &&
+            (*commands.pixelationBpm==0 || (*commands.pixelationBpm>=30 && *commands.pixelationBpm<=300)))
+            presentation_.settings.pixelationBpm=*commands.pixelationBpm;
+        if(commands.pixelationBeatOffset && std::isfinite(*commands.pixelationBeatOffset))
+            presentation_.settings.pixelationBeatOffset=std::clamp(*commands.pixelationBeatOffset,-2.f,2.f);
         if(commands.username || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
-            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.illusionaryBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes) {
+            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.illusionaryBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes || commands.pixelationBpm || commands.pixelationBeatOffset) {
             savePlayerSettings();
         }
         if(commands.playEquinoxCutscene) startCutscene();
@@ -589,6 +600,7 @@ private:
         }
         std::array<std::size_t,4> pixelationLevelInstances{};
         std::size_t redlineDecoded=0,finalDecoded=0;
+        std::array<float,2> pixelationTempos{};
         aura::DebugActions speed; speed.pixelationLevel=0; applyDebugActions(speed); update(0);
         const float normalClock=effectClock_; update(.1f);
         if(std::abs(effectClock_-normalClock-.1f)>.0001f) throw std::runtime_error("Pixelation normal motion clock failed");
@@ -611,13 +623,38 @@ private:
             if(level>=1 && level<=2 && !opts_.pixelationBgm.empty()) {
                 if(audioPath_!=opts_.pixelationBgm || !music_.playing() || !music_.decodedBytes()) throw std::runtime_error("Pixelation Redline BGM failed: "+music_.status());
                 redlineDecoded=music_.decodedBytes();
+                pixelationTempos[0]=music_.estimatedBpm();
             }
             if(level==3 && !opts_.pixelationFinalBgm.empty()) {
                 if(audioPath_!=opts_.pixelationFinalBgm || !music_.playing() || !music_.decodedBytes()) throw std::runtime_error("Pixelation final BGM failed: "+music_.status());
                 finalDecoded=music_.decodedBytes();
+                pixelationTempos[1]=music_.estimatedBpm();
             }
             const auto suffix=L"-pixelation-level"+std::to_wstring(level); captureExtra(suffix.c_str());
         }
+        if((redlineDecoded && pixelationTempos[0]<=0) || (finalDecoded && pixelationTempos[1]<=0))
+            throw std::runtime_error("Pixelation music did not produce a valid beat grid");
+        // 実際にF1へ渡す操作を通し、BPMと拍位置が保存されることも確認します。
+        const auto beatRolls=progress_.rolls; const auto beatLogs=log_.size();
+        aura::DebugActions beatTuning; beatTuning.pixelationBpm=120.f; beatTuning.pixelationBeatOffset=.12f;
+        applyDebugActions(beatTuning);
+        const auto savedBeat=aura::loadSettings(saves_/L"settings.txt");
+        if(savedBeat.pixelationBpm!=120 || savedBeat.pixelationBeatOffset!=.12f ||
+            progress_.rolls!=beatRolls || log_.size()!=beatLogs || progress_.equipped!=chosen)
+            throw std::runtime_error("Beat tuning changed progress or was not saved");
+        if(music_.playing()) {
+            const float onset=music_.beatPulse(.5f,120,0),between=music_.beatPulse(.75f,120,0);
+            if(!std::isfinite(onset) || !std::isfinite(between) || std::abs(onset-between)<.001f)
+                throw std::runtime_error("Music beat did not change with the playback position");
+        }
+        // 時間を止めた同じ画角で、鼓動だけ0/1にして拡縮の最大幅を撮影します。
+        for(unsigned beat=0;beat<=1;++beat) {
+            auto beatFrame=frame(); beatFrame.auraBeat=static_cast<float>(beat);
+            renderer_->draw(beatFrame,false);
+            if(!opts_.capture.empty()) renderer_->capture(opts_.capture.parent_path()/
+                (beat?L"pixelation-beat1.png":L"pixelation-beat0.png"));
+        }
+        beatTuning.pixelationBpm=0.f; beatTuning.pixelationBeatOffset=0.f; applyDebugActions(beatTuning);
         aura::DebugActions volleyLevel; volleyLevel.pixelationLevel=2; applyDebugActions(volleyLevel);
         time_=0; update(0); const auto baselineSfx=sfx_.playCount();
         time_=.39f; update(0); render(false); captureExtra(L"-pixelation-before-impact");
@@ -898,7 +935,7 @@ private:
         captionTuning.breakthroughWordTimes=aura::tuning::cutscene::BreakthroughWordTimes;
         applyDebugActions(captionTuning);
         cutsceneTime_=24.2f; render(false); captureExtra(L"-breakthrough-words");
-        constexpr float breakCutTimes[]={1,4,9,13,14.5f,15.5f,18,22,26,28.5f,29.5f};
+        constexpr float breakCutTimes[]={.4f,2.5f,3.7f,6.7f,7.6f,9.6f,10.85f,11.1f,11.7f,13.4f,20,28,29.5f};
         for(float second:breakCutTimes) {
             cutsceneTime_=second; render(false);
             const auto suffix=L"-breakthrough-cutscene-"+std::to_wstring(static_cast<int>(second*10)); captureExtra(suffix.c_str());
@@ -980,6 +1017,7 @@ private:
         const auto illusionaryAudioBytes=music_.decodedBytes();
         pitch_=1.25f; render(false); captureExtra(L"-illusionary-overhead");
         pitch_=.05f; yaw_=0; render(false); captureExtra(L"-illusionary-front");
+        yaw_=1.5707963f; distance_=6; render(false); captureExtra(L"-illusionary-side");
         pitch_=.23f;
         for(float angle:{-.9f,.9f,2.8f}) {yaw_=angle; render(false);}
         yaw_=.15f;
@@ -1042,11 +1080,22 @@ private:
             render(false); captureExtra(L"-vrm-nanally");
             if(!renderer_->nanallyCount() || !renderer_->vrmReady()) throw std::runtime_error("Nanally VRM preview failed");
             applyDebugActions(illusionaryPreview); x_=8; z_=-2; movement_=0; walk_=0; time_=.35f; render(false); captureExtra(L"-vrm-illusionary");
+            if(renderer_->vrmVertices()==32) {
+                const auto head=renderer_->vrmBone(8),spine=renderer_->vrmBone(9);
+                if(std::abs(head.x)>.0001f || std::abs(head.y-1.1836360f)>.0001f || std::abs(head.z-.2352093f)>.0001f ||
+                    std::abs(spine.y-.8f)>.0001f)
+                    throw std::runtime_error("Illusionary head/spine hierarchy did not arch the fixture");
+            }
             const auto illusionaryFixedA=renderer_->vrmBone(4);
             movement_=1; walk_=2; render(false); const auto illusionaryFixedB=renderer_->vrmBone(4);
             if(!renderer_->illusionaryCount() || std::abs(illusionaryFixedA.x-illusionaryFixedB.x)+
                 std::abs(illusionaryFixedA.y-illusionaryFixedB.y)+std::abs(illusionaryFixedA.z-illusionaryFixedB.z)>.00001f)
                 throw std::runtime_error("Moving changed fixed Illusionary VRM pose");
+            movement_=0; walk_=0;
+            const float poseYaw=yaw_,poseDistance=distance_;
+            distance_=6; yaw_=0; render(false); captureExtra(L"-vrm-illusionary-front");
+            yaw_=1.5707963f; render(false); captureExtra(L"-vrm-illusionary-side");
+            yaw_=poseYaw; distance_=poseDistance;
             aura::DebugActions common; common.preview=0; applyDebugActions(common);
             movement_=0; walk_=0; distance_=7; pitch_=.20f; yaw_=.15f;
             render(false); captureExtra(L"-vrm");
@@ -1142,6 +1191,8 @@ private:
                <<"Pixelation instances: "<<pixelationInstances<<"\nMean Pixelation frame submission time: "<<meanPixelationMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
             out<<"Pixelation levels: PASS / 0..3, split motion/action clocks; Lv2/Lv3 matching collision/explosion/float timing, fixed launch anchor during level switch; synchronized collision, one sound event per cycle\n"
+               <<"Pixelation aircraft: PASS / faster shared 3D path, rising/falling orbit, continuous trails; beat0/1 render, F1 BPM/offset save without progress mutation\n"
+               <<"Pixelation detected BPM: "<<pixelationTempos[0]<<" / "<<pixelationTempos[1]<<" (0 when --silent)\n"
                <<"Pixelation level instances: "<<pixelationLevelInstances[0]<<", "<<pixelationLevelInstances[1]<<", "<<pixelationLevelInstances[2]<<", "<<pixelationLevelInstances[3]
                <<"\nSFX: "<<sfx_.shotCount()<<" shots / "<<sfx_.impactCount()<<" impacts / "<<sfx_.status()<<"\n"
                <<"Equinox: PASS / preview, clean switching, no progress/history mutation\n"
@@ -1153,9 +1204,9 @@ private:
             out<<"BreakThrough: PASS / preview isolation, AutoRoll stop, clean switching, resize, inventory/history unchanged\n"
                <<"BreakThrough instances: "<<breakthroughInstances<<"\nMean BreakThrough frame submission time: "<<meanBreakthroughMs
                <<" ms/frame (60 offscreen frames, no vsync)\n"
-               <<"BreakThrough cutscene: PASS / static pillar positions, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
+               <<"BreakThrough cutscene: PASS / four camera shots, iv whiteout into wide monolith space, static pillar positions, 30 seconds, input suppression, timeout, Escape, debug stop, kind switch, restored display\n";
             out<<"BreakThrough captions: PASS / eight measured word times, live offset/per-word changes saved during playback, reset to defaults\n";
-            out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview isolation, reclining pose, solid floor, orbit lights, movement, resize, cutscene restore and clean switching\n"
+            out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview isolation, arched torso/upward head/asymmetric elbow pose, solid floor, orbit lights, fixed during movement, resize, cutscene restore and clean switching\n"
                <<"Desert auras: PASS / Dune 1 in 50, Mirage 1 in 5000, Pharaoh 1 in 250000, <=300 glow instances each, history isolation\n"
                <<"Rocket: PASS / shared respawn XZ, boarding clearance, all six planets\n";
             if(opts_.silent) out<<"Audio: disabled by --silent; device playback verified separately on the development PC\n";

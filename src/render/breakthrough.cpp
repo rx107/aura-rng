@@ -60,8 +60,7 @@ float4 main(Input i):SV_TARGET {
 // ここで柱のcenter.yに時間tを足さないことが「CutSceneの柱は静止」の要点。
 constexpr char CinematicShader[]=R"(
 cbuffer Cinematic:register(b0) {
-    float4 screenAndTime; float4 arrivals; float4 cameraTuning;
-    float4 pillarNear; float4 pillarFar;
+    float4 screenAndTime; float4 cameraEye; float4 cameraTarget; float4 sceneTuning;
 };
 struct Input { float4 p:SV_POSITION; float2 uv:TEXCOORD0; };
 float hash(float2 p) { float3 a=frac(float3(p.x,p.y,p.x)*.1031);a+=dot(a,a.yzx+33.33);return frac((a.x+a.y)*a.z); }
@@ -79,43 +78,38 @@ float hitBox(float3 ro,float3 rd,float3 halfSize) {
 float4 main(Input i):SV_TARGET {
     float t=screenAndTime.x,aspect=screenAndTime.y;
     float2 raw=(i.uv-.5)*float2(aspect,1),q=raw;
-    float yaw=.48,roll=0,distance=11,targetY=3.7,pitch=.10;
-    float sceneStart=0,arrival=arrivals.x;
-    bool monochrome=t>=cameraTuning.z && t<14.15;
-    bool hidden=false;
-    if(t<3.4) { distance=4.15;targetY=6.0;roll=-.30+.055*t;yaw=.24+t*.035;pitch=.12; }
-    else if(t<7.3) { sceneStart=3.4;arrival=arrivals.y;distance=4.6;targetY=1.5;roll=-.48+(t-3.4)*.065;yaw=.45+(t-3.4)*.06;pitch=.12; }
-    else if(t<11.1) { sceneStart=7.3;arrival=arrivals.z;distance=8.6;targetY=3.7;roll=-.22+(t-7.3)*.07;yaw=.36;pitch=.10; }
-    else if(t<14.15) { hidden=true;roll=.12; }
-    else if(t<15.05) { return float4(0,0,0,screenAndTime.z); }
-    else {distance=12.2+(t-15.05)*.045;targetY=3.9;roll=.015*sin(t*.4);yaw=.28+.017*(t-15);pitch=.04;}
-    // 場面の始めは奥に置き、定位置へ滑らかに近づいてから字幕を出す。
-    // smoothstepの逆向きなので、到着時のカメラ速度が0になり急停止しない。
-    if(t<11.1) {
-        float remaining=1-smoothstep(sceneStart,arrival,t);
-        distance*=lerp(1,arrivals.w,remaining);
-        yaw+=cameraTuning.x*remaining;
-        roll+=cameraTuning.y*remaining;
-    }
-    q=rot(q,roll);
-    float3 target=float3(0,targetY,0),eye=target+float3(sin(yaw)*distance,sin(pitch)*distance,-cos(yaw)*distance);
+    // カメラの経路はCPU側のtuning/cutscene.hppと共有。ここは渡された位置から光線を作るだけ。
+    bool monolithSpace=sceneTuning.x>.5;
+    float focalLength=cameraEye.w;
+    q=rot(q,cameraTarget.w);
+    float3 target=cameraTarget.xyz,eye=cameraEye.xyz;
     float3 forward=normalize(target-eye),right=normalize(cross(float3(0,1,0),forward)),up=cross(forward,right);
-    float3 rd=normalize(forward*1.6+right*q.x-up*q.y);
+    float3 rd=normalize(forward*focalLength+right*q.x-up*q.y);
     float2 warp=float2(noise(q*3.5+t*.021),noise(q*3.5+19-t*.017));
     float fog=pow(saturate(cloud(q*3.9+warp*2.4+float2(t*.019,-t*.012))-.16),1.3);
     float3 color=float3(.006,.008,.024)+fog*float3(.16,.17,.34);
     float2 lightPos=float2(0,0);
-    if(!hidden) {
-        float3 toLight=float3(0,3.9,0)-eye;
-        lightPos=float2(dot(toLight,right),-dot(toLight,up))*1.6/max(.01,dot(toLight,forward));
+    {
+        float3 lightWorld=monolithSpace?float3(0,3.9,15):float3(0,3.9,0);
+        float3 toLight=lightWorld-eye;
+        lightPos=float2(dot(toLight,right),-dot(toLight,up))*focalLength/max(.01,dot(toLight,forward));
         float nearest=10000;float3 surface=0;float columnID=0;float3 halfSize=0;
-        [unroll]for(int n=0;n<7;++n) {
+        [unroll]for(int n=0;n<12;++n) {
+            if(!monolithSpace && n>=7)continue;
             float side=n==1 || n==3 || n==5?-1:1;
             float3 center;float3 bounds;float tilt;
             if(n==0){center=float3(0,4.05,.30);bounds=float3(.43,3.65,.38);tilt=0;}
             else if(n<3){center=float3(side*2.15,1.95,.35);bounds=float3(.35,1.95,.32);tilt=-side*.42;}
             else if(n<5){center=float3(side*1.35,3.35,1.25);bounds=float3(.24,1.75,.25);tilt=-side*.10;}
             else {center=float3(side*.96,2.2,-.20);bounds=float3(.22,1.15,.25);tilt=side*.13;}
+            if(monolithSpace) {
+                // 同じ柱を大きくした板ではなく、深さの違う12本を立体として配置します。
+                // 前景の端が画面外へ切れる柱と遠景の小さい柱が、広角の奥行きを強調します。
+                float lane=floor(n*.5),side=(n&1)==0?-1:1;
+                center=float3(side*(5.4+lane*.95),2.5+sin(n*2.1)*3.0,-7+lane*8.0);
+                bounds=float3(.90+hash(float2(n,3))*.70,4.8+hash(float2(n,8))*5.5,.95+hash(float2(n,4))*.75)*sceneTuning.z;
+                tilt=side*(.08+hash(float2(n,5))*.38);
+            }
             // CutSceneの柱の位置は固定。カメラ・霧・光だけを動かす。
             float3 localEye=eye-center,localRay=rd;
             localEye.xy=rot(localEye.xy,-tilt);localRay.xy=rot(localRay.xy,-tilt);
@@ -134,50 +128,25 @@ float4 main(Input i):SV_TARGET {
             float seams=exp(-min(g.x,1-g.x)*110)*.13+exp(-min(g.y,1-g.y)*100)*.06;
             float rim=exp(-min(uv.x,1-uv.x)*90)*.52+exp(-min(uv.y,1-uv.y)*190)*1.2;
             color=float3(.20,.23,.46)*(glass+seams)+rim*float3(.64,.69,1);
-            color+=pow(noise(uv*float2(18,120)+columnID*3),9)*1.2;
+            color+=pow(saturate(noise(uv*float2(18,120)+columnID*3)),9)*1.2;
             color*=.72+.28*cloud(uv*18+t*.055);
-        }
-    }
-    // iv: 資料の赤い下描きに沿う、左手前から画面中央の奥へ伸びる一本の柱。
-    // 光る板ではなく箱との交差で立体を描くため、手前の端面と側面が見える。
-    // この場面だけ柱は白黒。中心フレアや稲妻は下で完全に止める。
-    if(monochrome) {
-        float3 nearPoint=pillarNear.xyz,farPoint=pillarFar.xyz;
-        float3 center=(nearPoint+farPoint)*.5;
-        float3 axis=normalize(farPoint-nearPoint);
-        float3 sideAxis=normalize(cross(float3(0,1,0),axis));
-        float3 topAxis=cross(axis,sideAxis);
-        float3 ray=normalize(float3(raw.x,-raw.y,1.6));
-        float3 localEye=float3(dot(-center,sideAxis),dot(-center,topAxis),dot(-center,axis));
-        float3 localRay=float3(dot(ray,sideAxis),dot(ray,topAxis),dot(ray,axis));
-        float3 bounds=float3(pillarNear.w,pillarFar.w,length(farPoint-nearPoint)*.5);
-        float hit=hitBox(localEye,localRay,bounds);
-        float background=.022+fog*.13;
-        color=background.xxx;
-        if(hit<9999) {
-            float3 surface=localEye+localRay*hit;
-            float3 face=abs(surface/bounds);
-            bool endFace=face.z>max(face.x,face.y)-.002;
-            bool topFace=face.y>face.x;
-            float2 uv=endFace?surface.xy/bounds.xy:
-                (topFace?float2(surface.x/bounds.x,surface.z/bounds.z):float2(surface.z/bounds.z,surface.y/bounds.y));
-            float2 grid=frac((uv*.5+.5)*float2(endFace?3:22,endFace?4:5));
-            float panel=hash(floor((uv*.5+.5)*float2(endFace?3:22,endFace?4:5)));
-            float panelSeam=step(.96,grid.x)+step(.94,grid.y);
-            float tone=(endFace?.19:(topFace?.74:.41))*(.55+.45*panel);
-            tone=lerp(tone,.025,saturate(panelSeam));
-            float edge=pow(saturate(max(face.x,face.y)),64)*.18;
-            color=saturate(tone+edge).xxx;
+            if(monolithSpace) {
+                float depthFog=1-exp(-nearest*.012);
+                color=lerp(color,float3(.035,.043,.092),depthFog*.65);
+            }
         }
     }
     float2 p=q-lightPos;
     float r=length(p),angle=atan2(p.y,p.x);
-    float strength=t<15.05?.75:1.4;
-    float glow=exp(-r*r*22)*.26;
-    float flare=star(p,.19)*1.7+exp(-abs(p.y)*300)*exp(-abs(p.x)*.65)*.46;
-    color+=float3(.66,.70,1)*(flare+glow)*strength*(monochrome?0:1);
+    float strength=monolithSpace?1.25:.75;
+    // コアへ接近した時は光も拡大する。柱の模様だけが拡大するズームにしないためです。
+    float coreScale=monolithSpace?1:clamp(sceneTuning.w/max(.1,length(target-eye)),1,6);
+    float2 core=p/coreScale;
+    float glow=exp(-dot(core,core)*22)*.26;
+    float flare=star(core,.19)*1.7+exp(-abs(core.y)*300)*exp(-abs(core.x)*.65)*.46;
+    color+=float3(.66,.70,1)*(flare+glow)*strength;
     float litSmoke=pow(saturate(cloud(p*7+warp*1.8+float2(t*.043,-t*.031))-.22),1.5);
-    color+=float3(.19,.20,.38)*litSmoke*exp(-r*r*1.7)*strength*(monochrome?0:1);
+    color+=float3(.19,.20,.38)*litSmoke*exp(-r*r*1.7)*strength;
     // 画面の端から細い光を巻き込み、中心の強い光へつなげる。
     [unroll]for(int j=0;j<9;++j) {
         float offset=j*.6981;
@@ -186,20 +155,20 @@ float4 main(Input i):SV_TARGET {
         float band=abs(sin(angle+offset+wave+r*.8));
         float filament=exp(-band*max(90,r*110))*exp(-r*.66)*(1-exp(-r*22));
         float variation=.4+.6*turbulence;
-        color+=float3(.28,.31,.70)*filament*variation*(j<3?1.2:.48)*(monochrome?0:1);
+        color+=float3(.28,.31,.70)*filament*variation*(j<3?1.2:.48);
     }
     // 小さな光の粒を漂わせ、柱と霧が同じ空間にあるように見せる。
     float2 cells=floor(q*38),particle=frac(q*38)-.5;
     float seed=hash(cells);
     float dots=exp(-dot(particle,particle)*850)*step(.965,seed);
-    color+=(monochrome?float3(.13,.13,.13):float3(.65,.70,1))*dots*(.4+.6*sin(t+seed*40)*sin(t+seed*40));
+    color+=float3(.65,.70,1)*dots*(.4+.6*sin(t+seed*40)*sin(t+seed*40));
     float aperture=.395;
     if(t<3.4)aperture=.395*(1-smoothstep(3.16,3.4,t));
     else if(t<7.3)aperture=.395*smoothstep(3.4,3.58,t)*(1-smoothstep(7.02,7.3,t));
-    else if(t<11.1)aperture=.395*smoothstep(7.3,7.48,t)*(1-smoothstep(10.85,11.1,t));
+    else if(t<11.1)aperture=.395*smoothstep(7.3,7.48,t);
     float mask=1-smoothstep(aperture,aperture+.0015,abs(i.uv.y-.5));
-    float flash=exp(-pow((t-15.08)/.14,2));
-    color=lerp(color,float3(.98,.98,1),flash);
+    // iiiの急接近 → ivの白閃光 → 広い柱の空間。字幕と音楽は途切れずに続きます。
+    color=lerp(color,float3(.98,.98,1),sceneTuning.y);
     float desaturate=smoothstep(27.2,28.8,t)*.8;
     color=lerp(color,dot(color,float3(.299,.587,.114)).xxx,desaturate);
     color*=mask*smoothstep(0,.25,t);
@@ -224,7 +193,7 @@ void Renderer::createBreakthrough() {
     };
     shader(MaterialShader,sizeof(MaterialShader)-1,&breakthroughPs_,"breakthrough-material.hlsl");
     shader(CinematicShader,sizeof(CinematicShader)-1,&breakthroughCutscenePs_,"breakthrough-cutscene.hlsl");
-    D3D11_BUFFER_DESC constants{};constants.ByteWidth=80;constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC constants{};constants.ByteWidth=64;constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     constants.Usage=D3D11_USAGE_DEFAULT;
     checked(device_->CreateBuffer(&constants,nullptr,&breakthroughConstants_),"BreakThrough CutScene constants");
     D3D11_TEXTURE2D_DESC description{};description.Width=1024;description.Height=256;
@@ -365,15 +334,12 @@ void Renderer::buildBreakthrough(const Frame& f) {
 void Renderer::drawBreakthroughCutscene(const Frame& frame) {
     // 全画面の三角形1枚で専用HLSLを実行する。通常の柱モデルを再利用しないため浮遊しない。
     if(frame.cutsceneTime<0 || frame.cutsceneTime>BreakthroughCutsceneDuration)return;
-    const auto& arrival=tuning::cutscene::BreakthroughCameraArrival;
-    const auto& pillarNear=tuning::cutscene::BreakthroughMonochromePillarNear;
-    const auto& pillarFar=tuning::cutscene::BreakthroughMonochromePillarFar;
+    const auto camera=tuning::cutscene::breakthroughCamera(frame.cutsceneTime);
     const float opacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,BreakthroughCutsceneDuration);
     const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,opacity,static_cast<float>(height_),
-        arrival[0],arrival[1],arrival[2],tuning::cutscene::BreakthroughCameraFarMultiplier,
-        tuning::cutscene::BreakthroughCameraSweepYaw,tuning::cutscene::BreakthroughCameraSweepRoll,tuning::cutscene::BreakthroughMonochromeStart,0,
-        pillarNear[0],pillarNear[1],pillarNear[2],tuning::cutscene::BreakthroughMonochromePillarHalfWidth,
-        pillarFar[0],pillarFar[1],pillarFar[2],tuning::cutscene::BreakthroughMonochromePillarHalfHeight};
+        camera.eye[0],camera.eye[1],camera.eye[2],camera.focalLength,
+        camera.target[0],camera.target[1],camera.target[2],camera.roll,
+        camera.monolithSpace?1.f:0.f,camera.whiteout,tuning::cutscene::BreakthroughMonolithScale,tuning::cutscene::BreakthroughCoreFlareDistance};
     context_->UpdateSubresource(breakthroughConstants_.Get(),0,nullptr,constants,0,0);
     ID3D11RenderTargetView* target=target_.Get();context_->OMSetRenderTargets(1,&target,nullptr);
     context_->OMSetDepthStencilState(effectDepth_.Get(),0);context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
@@ -393,8 +359,7 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     D2D1_MATRIX_3X2_F previous;d2d_->GetTransform(&previous);
     auto caption=[&](std::wstring_view value,float x,float y,float angle,float opacity=1.f,float size=14.f) {
         opacity*=ending;
-        const bool monochrome=t>=tuning::cutscene::BreakthroughMonochromeStart && t<14.15f;
-        const auto ink=D2D1::ColorF(.97f,.97f,monochrome?.97f:1.f,opacity);
+        const auto ink=D2D1::ColorF(.97f,.97f,1.f,opacity);
         const float width=static_cast<float>(value.size())*size*.49f+14;
         d2d_->SetTransform(D2D1::Matrix3x2F::Rotation(angle,D2D1::Point2F(x,y))*D2D1::Matrix3x2F::Scale(factor,factor));
         rect(x-width*.5f,y-10,width,21,D2D1::ColorF(0,0,0,opacity*.94f));
@@ -407,7 +372,7 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     if(t>=1.12f && t<3.1f)caption(L"i - started with few",center-180,206,-3);
     if(t>=5.10f && t<7.0f)caption(L"ii - only less it gets..",center+162,307,2);
     if(t>=9.08f && t<10.85f)caption(L"iii - time by time, now empty",center,263,-17);
-    if(t>=tuning::cutscene::BreakthroughMonochromeStart && t<14.12f)caption(L"iv - and there was nothing left",center+91,327,-14);
+    if(t>=tuning::cutscene::BreakthroughIvCaptionStart && t<14.12f)caption(L"iv - and there was nothing left",center+91,327,-14);
     if(t>=14.2f && t<15.0f) {
         d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
         text(L"get out of my head",center-160,228,320,24,11,D2D1::ColorF(.83f,.83f,.86f),false,true);

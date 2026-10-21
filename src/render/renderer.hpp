@@ -38,6 +38,7 @@ struct Frame {
     Biome stageTravelTarget{Biome::Normal};
     AuraCategory collectionCategory{AuraCategory::Normal};
     float cutsceneBass{}; // 再生音声から計測した低音0〜1。音声がなければ0。
+    float auraBeat{},musicBpm{}; // BGMの実再生時刻に同期した拍0〜1と、推定BPM。
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory };
 struct Hit { Action action{Action::None}; std::size_t index{}; };

@@ -70,7 +70,7 @@ inline constexpr float dustBrightness=.63f;
 
 // 頭上の名前。heightを増やすと上へ、forwardを増やすとカメラ側へ。
 // 例: titleHeight=3.9で少し上へ。titleWidth/titleTextHeightで文字だけの大きさを変更。
-inline constexpr float titleHeight=3.55f;
+inline constexpr float titleHeight=3.85f;
 inline constexpr float titleForward=1.8f;
 inline constexpr float titleWidth=3.30f;
 inline constexpr float titleTextHeight=.35f;

@@ -58,18 +58,20 @@ inline constexpr std::array<float,2> ArmPitch={-.15f,-.15f};
 inline constexpr std::array<float,2> LegOut={.03f,.03f};
 }
 namespace illusionary {
-// 横向きに寝そべる固定ポーズ。頭が右、脚が左で、片脚だけ軽く曲げます。
-// renderer.cpp は胴の中心を支点に回すため、横倒しでもオーラの中央に収まります。
-// ブロックと VRM がこの値を共有し、移動しても歩行の手足振りは混ざりません。
-inline constexpr float Lift=.90f; // 大きくすると姿勢全体が上がる。床を抜けるなら少し増やす。
+// 胸を大きく反らし、天を仰ぐ固定ポーズ。アバターの正面は Z マイナス側です。
+// 角度は全てラジアン。ブロックと VRM が同じ設定を使い、歩行中も形は固定します。
+inline constexpr float Lift=.90f; // 全身の高さ。増やすとチェック床から高く浮く。
 inline constexpr float BobAmplitude=.07f, BobFrequency=1.1f;
-inline constexpr float BodyPitch=-.12f; // 顔が少しカメラへ向く角度。
-inline constexpr float BodyRoll=-1.48f; // 約 -1.57 = 頭が右になる完全な横向き。
-inline constexpr std::array<float,2> ArmOut={.14f,.34f}; // 腕は胴の両脇。増やすと体から離れる。
-inline constexpr std::array<float,2> ArmPitch={-.12f,-.40f};
-inline constexpr std::array<float,2> LegPitch={.08f,-.52f}; // 右側の脚だけ手前へ出す。
-inline constexpr std::array<float,2> LegOut={.04f,.15f};
-inline constexpr std::array<float,2> Knee={-.08f,-.82f}; // 2 番目を負へ増やすと曲がった脚が強調される。
+inline constexpr float BodyPitch=.26f; // 全身の後傾。正へ増やすと頭側が後ろへ傾く。
+inline constexpr float BodyRoll=0.f; // 横倒しにせず、顔を真上へ向ける。
+inline constexpr float TorsoPitch=.55f; // 腰から上の反り。脚を残して胸・肩・頭を後方へ反らす。
+inline constexpr float HeadPitch=.7607963f; // 首の反り。3つの Pitch の合計が約π/2で真上を見る。
+inline constexpr std::array<float,2> ArmOut={1.45f,.40f}; // 1 番目の上腕を肩の高さまで持ち上げる。
+inline constexpr std::array<float,2> ArmPitch={-.81f,-.38f}; // 胸の反りを打ち消し、伸ばした腕は斜め下・手前へ向ける。
+inline constexpr std::array<float,2> ElbowPitch={1.5707963f,0.f}; // 片肘だけ直角。もう片方は真っすぐ。
+inline constexpr std::array<float,2> LegPitch={-.18f,.18f};
+inline constexpr std::array<float,2> LegOut={.08f,.15f};
+inline constexpr std::array<float,2> Knee={-.10f,-.45f}; // 脚は浮遊したまま軽く左右差を付ける。
 }
 static_assert(walking::GaitFrequency>0 && walking::IdleFrequency>0);
 static_assert(singularity::BobFrequency>0 && pixelation::BobFrequency>0 && equinox::BobFrequency>0);

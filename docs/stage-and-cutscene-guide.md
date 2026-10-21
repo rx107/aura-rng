@@ -32,22 +32,40 @@
 
 同梱音声がない場合は、手元のDownloadsの`EquinoxReworkedCutscene.mp4.mp4`または`BreakthroughCutsceneV2.mp4.mp4`から音声を探します。BreakThroughの元動画を使う場合だけ、4.5秒を開始位置として読み飛ばします。同梱音声はその区間を切り出し済みなので、0秒から使います。音声が見つからない場合も映像は再生できますが、Equinoxの低音に合わせた揺れは発生しません。
 
-## BreakThroughのカメラと白黒の場面
+## BreakThroughの4つのカメラ
 
-`i / ii / iii`は、カメラが奥から近づいて定位置に着いた後に文章が出ます。`iv`の文章が出るタイミングでは、発光の演出を止めて白黒の画面へ切り替えます。手前の左側から画面中央の奥へ伸びる、白黒の柱もこの場面に表示します。
+同じカメラを繰り返す構成から、文章ごとに次の動きへ変更しました。柱・構造物の浮遊は止め、カメラの動きで奥行きを出します。
+
+| 場面 | 時間 | カメラの動き |
+| --- | --- | --- |
+| i — started with few | 0〜3.4秒 | 巨大な構造物を下から見上げ、中央を見たままゆっくり周囲へ回り込む |
+| ii — only less it gets. | 3.4〜7.3秒 | 斜め上から見下ろし、遠ざかりながら画面をわずかに傾ける |
+| iii — time by time, now empty | 7.3〜11.1秒 | 中央の光のコアへ一直線に接近。後半ほど加速する |
+| iv — and there was nothing left.〜 | 11.1秒〜終了 | ホワイトアウトから視界が戻り、巨大な直方体が複数ある空間へ。広角で光源へゆっくり直進し、カメラだけが少し上下する |
+
+ivの文章は13秒から表示します。巨大な柱の空間は、文章が消えてもカットシーンの自然終了まで続きます。最後0.8秒のオーラへのフェードは共通です。
 
 この動きの初期値は `src/tuning/cutscene.hpp` にあります。以下の値はソース側の設定なので、保存後に `Develop.cmd` で再ビルドしてください。字幕のF1調整と違い、実行中のゲームには保存だけでは反映されません。
 
 | 値 | 初期値 | 数字を変えたとき |
 | --- | --- | --- |
-| `BreakthroughCameraArrival` | `{1.f, 4.98f, 8.96f}` | i・ii・iiiで定位置に着く時刻が変わる。単位はカットシーン開始からの秒 |
-| `BreakthroughCameraFarMultiplier` | `2.15f` | 大きくすると遠くから近づいてくる |
-| `BreakthroughCameraSweepYaw` | `.32f` | 横へ回り込みながら近づく量。0なら横の回り込みをなくす |
-| `BreakthroughCameraSweepRoll` | `-.24f` | 近づくときの画面の傾き。0なら傾けない |
-| `BreakthroughMonochromeStart` | `13.f` | ivの白黒へ切り替わる時刻 |
-| `BreakthroughMonochromePillarNear` | `{-1.20f, -.40f, 3.f}` | 白黒の柱の手前側。左右・上下・奥行きの順 |
+| `BreakthroughLowOrbit` の `yawFrom / yawTo` | `-.32f / .27f` | iの周回角。差を広げると横へ回り込む量が増える |
+| 同じ値の `pitch` | `-.40f` | iの上下角。負なら見上げ、正なら見下ろす |
+| `BreakthroughHighPullback` の `distanceFrom / distanceTo` | `9.1f / 13.5f` | iiの最初と最後の距離。最後を大きくすると、より遠くへ後退する |
+| 同じ値の `rollFrom / rollTo` | `-.30f / -.16f` | iiの画面の傾き。両方0なら傾けない |
+| `BreakthroughCoreRush` の `distanceFrom / distanceTo` | `15.f / .72f` | iiiの最初と最後の距離。最後を小さくするとコアへ深く近づく |
+| `BreakthroughRushAcceleration` | `1.65f` | 大きいほどiiiの後半へ加速を寄せる。1なら等速で近づく |
+| `BreakthroughCoreFlareDistance` | `9.f` | コアの光が拡大し始める距離。大きいほど早く光に包まれる |
+| `BreakthroughWhiteoutSeconds` | `.43f` | ivの閃光から視界が戻る時間。大きいほど白い画面が長く残る |
+| `BreakthroughMonolithStartDistance` | `20.f` | ivの開始位置。大きいほど手前から奥を見る |
+| `BreakthroughMonolithTravelDistance` | `3.8f` | ivの前進量。大きいほど光源へ近づく |
+| `BreakthroughMonolithFocalLength` | `.83f` | 小さいほど広角になり、手前と奥の距離感が強くなる |
+| `BreakthroughMonolithBobHeight` | `.055f` | ivのカメラの上下幅。0なら上下動なし |
+| `BreakthroughMonolithScale` | `1.f` | ivの巨大な柱全体の倍率。大きいほど圧迫感が増す |
 
-柱の奥側は `BreakthroughMonochromePillarFar`、太さは `BreakthroughMonochromePillarHalfWidth` / `HalfHeight`で調整できます。最初は手前側の左右だけを少し変えると、どの方向へ動くか分かりやすくなります。
+`BreakthroughShot`の各項目名と、`BreakthroughLowOrbit`などの数値の並び順は、設定ファイルの冒頭にあります。距離はゲーム内単位、角度はラジアン、`start / end`はカットシーン開始からの秒です。最初は距離1個だけを変え、F1から再生して比較してください。
+
+通常表示で頭上の名前だけを上げたい場合は、別ファイルの`src/tuning/breakthrough.hpp`にある`titleHeight`を使います。初期値は`3.85f`で、`4.1f`にすると0.25だけ上がります。この値はCutSceneのカメラには影響しません。
 
 ## Equinoxの低音に合わせた揺れ
 

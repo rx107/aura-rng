@@ -36,21 +36,26 @@ def quad(x0, y0, x1, y1, bone):
     index_values.extend([start, start+2, start+1, start+1, start+2, start+3])
 
 
-quad(-.24, .65, .24, 1.15, 0)  # torso
+# 元のノード番号・関節番号を保ち、末尾に spine だけ追加します。
+# 胴と頭・両肩が spine を継承するので、腰の反りが GPU スキニングまで届くか確認できます。
+quad(-.24, .65, .24, 1.15, 10)  # torso, weighted to the new spine joint
 quad(-.18, 1.15, .18, 1.50, 9)  # head
-quad(-.70, 1.02, -.24, 1.15, 1)  # left arm, exported in T pose
-quad(.24, 1.02, .70, 1.15, 3)  # right arm
+# 腕を上腕・前腕に分割。前腕を別の関節へ割り当てると、肘の曲がりが画面にも現れます。
+quad(-.48, 1.02, -.24, 1.15, 1)  # left upper arm, exported in T pose
+quad(-.70, 1.02, -.48, 1.15, 2)  # left forearm
+quad(.24, 1.02, .48, 1.15, 3)  # right upper arm
+quad(.48, 1.02, .70, 1.15, 4)  # right forearm
 quad(-.23, 0, -.03, .65, 5)  # left leg
 quad(.03, 0, .23, .65, 7)  # right leg
 vertex_count = len(positions) // 3
 pos = accessor(positions, 'f', 'VEC3', 5126)
 normal = accessor([0, 0, -1] * vertex_count, 'f', 'VEC3', 5126)
-uv = accessor([0, 1, 1, 1, 0, 0, 1, 0] * 6, 'f', 'VEC2', 5126)
+uv = accessor([0, 1, 1, 1, 0, 0, 1, 0] * (vertex_count // 4), 'f', 'VEC2', 5126)
 joints = accessor(joint_values, 'H', 'VEC4', 5123)
 weights = accessor([1, 0, 0, 0] * vertex_count, 'f', 'VEC4', 5126)
 indices = accessor(index_values, 'H', 'SCALAR', 5123)
 rest_positions = [(0, .65), (-.24, 1.08), (-.48, 1.08), (.24, 1.08), (.48, 1.08),
-                  (-.13, .65), (-.13, .30), (.13, .65), (.13, .30), (0, 1.25)]
+                  (-.13, .65), (-.13, .30), (.13, .65), (.13, .30), (0, 1.25), (0, .80)]
 inverse_values = []
 for x, y in rest_positions:
     inverse_values.extend([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -x, -y, 0, 1])
@@ -68,24 +73,26 @@ png += chunk(b'IEND', b'')
 image = view(png)
 j = dict(asset=dict(version='2.0'), scene=0, scenes=[dict(nodes=[0])],
          nodes=[dict(children=[1, 2]), dict(mesh=0, skin=0),
-                dict(name='Hips', translation=[0, .65, 0], children=[3, 5, 7, 9, 11]),
-                dict(name='UpperArm.L', translation=[-.24, .43, 0], children=[4]),
+                dict(name='Hips', translation=[0, .65, 0], children=[7, 9, 12]),
+                dict(name='UpperArm.L', translation=[-.24, .28, 0], children=[4]),
                 dict(name='LowerArm.L', translation=[-.24, 0, 0]),
-                dict(name='UpperArm.R', translation=[.24, .43, 0], children=[6]),
+                dict(name='UpperArm.R', translation=[.24, .28, 0], children=[6]),
                 dict(name='LowerArm.R', translation=[.24, 0, 0]),
                 dict(name='UpperLeg.L', translation=[-.13, 0, 0], children=[8]),
                 dict(name='LowerLeg.L', translation=[0, -.35, 0]),
                 dict(name='UpperLeg.R', translation=[.13, 0, 0], children=[10]),
                 dict(name='LowerLeg.R', translation=[0, -.35, 0]),
-                dict(name='Head', translation=[0, .60, 0])],
+                dict(name='Head', translation=[0, .45, 0]),
+                dict(name='Spine', translation=[0, .15, 0], children=[3, 5, 11])],
          meshes=[dict(weights=[1], primitives=[dict(attributes=dict(POSITION=pos, NORMAL=normal, TEXCOORD_0=uv, JOINTS_0=joints, WEIGHTS_0=weights), indices=indices, material=0, targets=[dict(POSITION=morph)])])],
-         skins=[dict(joints=list(range(2, 12)), inverseBindMatrices=bind)],
+         skins=[dict(joints=list(range(2, 13)), inverseBindMatrices=bind)],
          materials=[dict(pbrMetallicRoughness=dict(baseColorTexture=dict(index=0), metallicFactor=0))],
          textures=[dict(source=0)], images=[dict(bufferView=image, mimeType='image/png')],
          accessors=accessors, bufferViews=views, buffers=[dict(byteLength=len(binary))],
          extensionsUsed=['VRM'], extensions=dict(VRM=dict(specVersion='0.0', meta=dict(title='Original animated VRM test figure'),
             humanoid=dict(humanBones=[dict(bone=name, node=node) for name, node in [
-                ('hips', 2), ('head', 11), ('leftUpperArm', 3), ('rightUpperArm', 5),
+                ('hips', 2), ('head', 11), ('spine', 12),
+                ('leftUpperArm', 3), ('rightUpperArm', 5), ('leftLowerArm', 4), ('rightLowerArm', 6),
                 ('leftUpperLeg', 7), ('rightUpperLeg', 9), ('leftLowerLeg', 8), ('rightLowerLeg', 10)]]))))
 document = json.dumps(j, separators=(',', ':')).encode()
 document += b' ' * (-len(document) % 4)
@@ -96,4 +103,4 @@ glb += struct.pack('<II', len(binary), 0x004E4942) + binary
 destination = pathlib.Path(sys.argv[1])
 destination.parent.mkdir(parents=True, exist_ok=True)
 destination.write_bytes(glb)
-print(f'VRM fixture: {len(glb)} bytes / {vertex_count} vertices / 10 joints')
+print(f'VRM fixture: {len(glb)} bytes / {vertex_count} vertices / {len(j["skins"][0]["joints"])} joints')

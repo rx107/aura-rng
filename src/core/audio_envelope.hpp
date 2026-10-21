@@ -12,9 +12,13 @@ namespace aura {
 inline constexpr float BassEnvelopeHz=100.f;
 inline std::vector<float> bassEnvelope(std::span<const std::uint8_t> pcm,unsigned rate,unsigned channels) {
     if(rate<1000 || channels==0 || channels>8 || pcm.size()%(channels*2)) return {};
-    const unsigned step=std::max(1u,rate/100);
     const auto frames=pcm.size()/(channels*2);
-    std::vector<float> result((frames+step-1)/step);
+    constexpr auto EnvelopeRate=static_cast<unsigned>(BassEnvelopeHz);
+    std::vector<float> result((frames*EnvelopeRate+rate-1)/rate);
+    // 例: 22050Hz は10ms=220.5サンプル。220個ずつに丸め続けると音と時計がずれます。
+    // 各10ms境界を元のサンプル位置から求め、220個・221個を交互に使って100Hzを保ちます。
+    // 44100Hz/48000Hzのように割り切れる場合は、従来と同じ441個/480個です。
+    std::size_t bin=0,nextBoundary=rate/EnvelopeRate;
     std::array<double,8> low{},sub{};
     const double a=1-std::exp(-2*3.141592653589793*180/rate);
     const double b=1-std::exp(-2*3.141592653589793*35/rate);
@@ -28,8 +32,10 @@ inline std::vector<float> bassEnvelope(std::span<const std::uint8_t> pcm,unsigne
             const double bass=low[c]-sub[c]; energy+=bass*bass;
         }
         ++count;
-        if(count==step || i+1==frames) {
-            result[i/step]=static_cast<float>(std::sqrt(energy/(count*channels)));
+        if(i+1>=nextBoundary || i+1==frames) {
+            result[bin]=static_cast<float>(std::sqrt(energy/(count*channels)));
+            ++bin;
+            nextBoundary=(bin+1)*rate/EnvelopeRate;
             energy=0; count=0;
         }
     }
@@ -49,5 +55,62 @@ inline float bassAt(std::span<const float> envelope,float seconds) {
     const auto i=static_cast<std::size_t>(index);
     const float next=envelope[std::min(i+1,envelope.size()-1)];
     return envelope[i]+(next-envelope[i])*(index-static_cast<float>(i));
+}
+
+// 音楽の拍の設計図。BPM=1分間の拍数、offset=最初の拍の位置[秒]です。
+// 低音の立ち上がりの繰り返しから推定します。曲によって半拍/倍拍に解釈されるため、
+// F1のBPMと時差でも調整できます。曲の読み込み時だけ計算し、描画中は再解析しません。
+struct BeatGrid { float bpm{},offset{},confidence{}; };
+inline BeatGrid estimateBeatGrid(std::span<const float> envelope) {
+    const auto n=std::min<std::size_t>(envelope.size(),12000); // 解析は先頭120秒まで。
+    if(n<400) return {};
+    std::vector<float> attacks(n);
+    double energy=0;
+    for(std::size_t i=2;i<n;++i) {
+        attacks[i]=std::max(0.f,envelope[i]-envelope[i-2]-.008f);
+        energy+=attacks[i]*attacks[i];
+    }
+    if(energy<.001) return {};
+    float bestBpm=0,bestScore=0,rawCorrelation=0;
+    for(unsigned tenth=600;tenth<=2400;++tenth) {
+        const float bpm=tenth*.1f,lag=6000.f/bpm;
+        const auto whole=static_cast<std::size_t>(lag); const float part=lag-static_cast<float>(whole);
+        double correlation=0;
+        for(std::size_t i=whole+1;i<n;++i)
+            correlation+=attacks[i]*(attacks[i-whole]*(1-part)+attacks[i-whole-1]*part);
+        const float normalized=static_cast<float>(correlation/energy);
+        // 同じリズムの倍/半分が並ぶ場合だけ、極端なテンポを選びにくくする軽い重み。
+        const float octave=std::log(bpm/150.f);
+        const float score=normalized*(1+.06f*std::exp(-octave*octave/.4f));
+        if(score>bestScore) {bestScore=score;bestBpm=bpm;rawCorrelation=normalized;}
+    }
+    if(rawCorrelation<.06f) return {};
+    const float period=60.f/bestBpm;
+    constexpr unsigned PhaseBins=200;
+    std::array<float,PhaseBins> phase{};
+    for(std::size_t i=0;i<n;++i) {
+        const float cycles=static_cast<float>(i)/BassEnvelopeHz/period;
+        const auto bin=std::min(PhaseBins-1,static_cast<unsigned>((cycles-std::floor(cycles))*PhaseBins));
+        phase[bin]+=attacks[i];
+    }
+    unsigned bestPhase=0; float phaseScore=0;
+    for(unsigned b=0;b<PhaseBins;++b) {
+        float score=0;
+        for(int d=-3;d<=3;++d)score+=phase[(static_cast<int>(b)+d+PhaseBins)%PhaseBins]*(4-std::abs(d));
+        if(score>phaseScore){phaseScore=score;bestPhase=b;}
+    }
+    return {bestBpm,period*bestPhase/PhaseBins,std::clamp(rawCorrelation,0.f,1.f)};
+}
+inline float beatPulse(float seconds,BeatGrid grid,float bpmOverride=0,float offset=0) {
+    if(!std::isfinite(seconds) || seconds<0 || !std::isfinite(offset) || !std::isfinite(bpmOverride) ||
+        bpmOverride<0 || !std::isfinite(grid.offset)) return 0;
+    const float bpm=bpmOverride>0?bpmOverride:grid.bpm;
+    if(!std::isfinite(bpm) || bpm<30 || bpm>300) return 0;
+    const float beat=(seconds-grid.offset-offset)*bpm/60.f;
+    const float phase=beat-std::floor(beat);
+    // 拍の直前に少し膨らみ、直後に素早く縮みます。両端の値は同じなので飛びません。
+    const float attack=phase>.90f?(phase-.90f)/.10f:0;
+    const float release=std::max(0.f,1-phase/.36f);
+    return std::max(attack*attack,release*release);
 }
 }

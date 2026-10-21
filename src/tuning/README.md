@@ -15,9 +15,9 @@
 | BreakThroughの字幕 | [cutscene.hpp](cutscene.hpp) | `BreakthroughWordTimes` の各秒数。字幕の時差と単語の時刻はF1からも再ビルドなしで変更可能。 |
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |
-| Pixelation | [pixelation.hpp](pixelation.hpp) | `FinalMotionSpeed` を `3.f → 4.f`。Lv3 の周囲だけ高速化。 |
+| Pixelationの機体・尾・キューブ | [pixelation.hpp](pixelation.hpp) | `PlayerBobAmplitude` を `.85 → .4`。PLAYERの上下移動が小さくなる。 |
 | Equinox | [equinox.hpp](equinox.hpp) | `floorGlyphSize` を `3.2f → 2.8f`。床の「衡」が小さくなる。 |
-| BreakThrough の通常表示 | [breakthrough.hpp](breakthrough.hpp) | `titleHeight` を `3.55f → 3.9f`。名前を上に移動。 |
+| BreakThrough の通常表示 | [breakthrough.hpp](breakthrough.hpp) | `titleHeight` を `3.85f → 4.1f`。名前を上に移動。 |
 | Nanally | [nanally.hpp](nanally.hpp) | `HeadWidth` を `6.35f → 7.0f`。頭が横に広がる。 |
 | Illusionaryの床・白い光・文字 | [illusionary.hpp](illusionary.hpp) | `OrbitLightRadius` を `1.92f → 2.2f`。白い光が体から離れた場所を回る。 |
 | 砂漠テーマ3種類 | [desert.hpp](desert.hpp) | Dune / Mirage / Pharaohそれぞれの半径・速度・粒子数を変更。 |
@@ -42,9 +42,11 @@ CSV を変えた場合も元の `data/auras.csv` を保存し、Develop.cmd を�
 
 ## 速度と範囲について
 
-- **Pixelation は時計が 2 本**あります。`FinalMotionSpeed` は Lv3 の周囲の回転用、`BoostedSpeed` は Lv2 / Lv3 で共通の弾・爆発・浮遊用でもあります。詳細は `pixelation.hpp` の冒頭へ。
-- **BreakThrough の通常表示と CutScene は独立**しています。このフォルダーの柱設定を変えても、CutScene の柱は変わらず静止します。
-- **Illusionaryの横向きポーズ**は `avatar.hpp` の `illusionary`にあります。`BodyRoll`が横倒しの角度、`Knee`が膝の曲がりです。`illusionary.hpp`は光・帯・床・文字を担当し、姿勢とは分けています。
+- **Pixelation は時計が 2 本**あります。`FinalMotionSpeed` は Lv3 の周囲の回転用、`BoostedSpeed` は Lv2 / Lv3 で共通の弾・爆発・浮遊用でもあります。機体だけの速さは`PlayerOrbitSpeed = 1.55`、上下幅は`PlayerBobAmplitude = .85`です。機体の速度を変えても弾が衝突する間隔は変わりません。
+- **Pixelationの光の尾**は`PlayerTrailDuration = .72f`で長さ、`PlayerTrailSegments = 28`で滑らかさを調整します。時間を長くすると飛んできた軌道を長く残し、分割数を増やすとカーブが滑らかになります。尾は機体と同じ3D軌道をたどります。
+- **キューブの鼓動はBGMの再生時刻**を使います。`CageBeatScale = .15f`は1拍で最大15%拡大、`CageBeatBrightness = .20f`は最大20%増光。0でそれぞれの変化を止めます。拍の速さと時差はF1 → 音楽 → キューブの鼓動から変更でき、再ビルド不要です。自動推定が半分・倍に感じる場合はBPMを30〜300で手動指定します。音楽を再生していない間とBGMのないLv0は鼓動しません。
+- **BreakThrough の通常表示と CutScene は独立**しています。`breakthrough.hpp`の柱設定を変えても、CutScene の柱は変わらず静止します。カメラは`cutscene.hpp`の`BreakthroughLowOrbit`・`BreakthroughHighPullback`・`BreakthroughCoreRush`でi〜iii、`BreakthroughMonolith`で始まる値でivを調整します。[4つの場面の説明](../../docs/stage-and-cutscene-guide.md#breakthroughの4つのカメラ)に値の意味をまとめています。
+- **Illusionaryの天を仰ぐポーズ**は `avatar.hpp` の `illusionary`にあります。`BodyPitch`が全身の傾き、`TorsoPitch`が胸の反り、`HeadPitch`が首の反りです。`ElbowPitch`の片方だけを約1.5708にすると直角の肘になります。`illusionary.hpp`は光・帯・床・文字を担当し、姿勢とは分けています。
 - **文字と光の明るさは別々**に調整します。Illusionaryの `TextSelfLight`はにじまない文字用です。`White`を変えると白い光全体にも影響します。
 - **Equinoxの揺れは音声の低音から**求めます。`EquinoxBassShakeHeight`は画面高に対する割合で、`.008f`なら0.8%、`0.f`なら無効です。音声がない場合も揺れはありません。
 - **数は少しずつ増やす**と試しやすくなります。粒子や線の数を増やすと描画量も増えます。各ファイルの範囲チェックを残したまま試してください。

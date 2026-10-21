@@ -133,13 +133,16 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
     if(!data->scene) throw std::runtime_error("VRM has no default scene");
     for(std::size_t i=0;i<data->scene->nodes_count;++i) mark(data->scene->nodes[i],0);
     for(std::size_t i=0;i<data->nodes_count;++i) world(&data->nodes[i],0);
-    const char* roleNames[]={"leftUpperArm","rightUpperArm","leftUpperLeg","rightUpperLeg","leftLowerLeg","rightLowerLeg"};
+    // 0〜5 は従来の公開番号。追加分は 6/7=肘、8=頭、9=腰から上です。
+    // VRM 0.x / 1.0 の正式な humanoid 定義から探し、同名の服ボーンにも適用します。
+    const char* roleNames[]={"leftUpperArm","rightUpperArm","leftUpperLeg","rightUpperLeg","leftLowerLeg","rightLowerLeg",
+        "leftLowerArm","rightLowerArm","head","spine"};
     std::unordered_map<std::string,int> roles; std::vector<int> directRoles(data->nodes_count,-1);
     if(extension.contains("humanoid") && extension["humanoid"].contains("humanBones")) {
         const auto& humanBones=extension["humanoid"]["humanBones"];
         auto addRole=[&](const std::string& name,int index) {
             if(index<0 || static_cast<std::size_t>(index)>=data->nodes_count) return;
-            for(int role=0;role<6;++role) if(name==roleNames[role]) {
+            for(int role=0;role<10;++role) if(name==roleNames[role]) {
                 directRoles[index]=role;
                 if(data->nodes[index].name) roles[boneKey(data->nodes[index].name)]=role;
             }
@@ -314,13 +317,20 @@ void VrmAvatar::animate(const AvatarPose& pose) {
         auto& node=nodes_[i]; if(node.parent>=0) self(self,static_cast<std::size_t>(node.parent));
         auto local=XMLoadFloat4x4(&node.local);
         if(node.role>=0) {
-            float pitch=0,roll=0; const int side=(legacy_?-node.side:node.side)<0?0:1;
+            float pitch=0,roll=0,yaw=0; const int side=(legacy_?-node.side:node.side)<0?0:1;
             if(node.role<2) {pitch=pose.armPitch[side]*pitchSign; roll=-node.side*(XM_PIDIV2-pose.armOut[side]);}
             else if(node.role<4) {pitch=pose.legPitch[side]*pitchSign; roll=node.side*pose.legOut[side];}
-            else pitch=pose.knee[side]*pitchSign;
+            else if(node.role<6) pitch=pose.knee[side]*pitchSign;
+            // VRM の初期姿勢は T ポーズなので、前腕は X 方向へ伸びています。
+            // この段階の Y 軸で肘を曲げ、その後で親の肩の回転を継承します。
+            // X 軸だけで曲げると前腕自身の軸回転になり、肘が曲がりません。
+            else if(node.role<8) yaw=node.side*pose.elbowPitch[side]*pitchSign;
+            else if(node.role==8) pitch=pose.headPitch*pitchSign;
+            else if(node.role==9) pitch=pose.torsoPitch*pitchSign;
             const auto& rest=node.rest;
             local=XMLoadFloat4x4(&rest)*XMMatrixTranslation(-rest._41,-rest._42,-rest._43)*
-                XMMatrixRotationZ(roll)*XMMatrixRotationX(pitch)*XMMatrixTranslation(rest._41,rest._42,rest._43)*XMLoadFloat4x4(&node.parentInverse);
+                XMMatrixRotationZ(roll)*XMMatrixRotationX(pitch)*XMMatrixRotationY(yaw)*
+                XMMatrixTranslation(rest._41,rest._42,rest._43)*XMLoadFloat4x4(&node.parentInverse);
         }
         XMStoreFloat4x4(&node.animated,local*(node.parent<0?XMMatrixIdentity():XMLoadFloat4x4(&nodes_[node.parent].animated)));
         poseState_[i]=1;

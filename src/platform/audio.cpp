@@ -26,9 +26,13 @@ namespace aura {
 using Microsoft::WRL::ComPtr;
 void Music::clear() {
     if(voice_) { voice_->DestroyVoice(); voice_=nullptr; }
-    pcm_.clear(); bass_.clear(); playing_=false; gain_=0; sampleRate_=0; playbackEndSeconds_=0;
+    pcm_.clear(); bass_.clear(); beat_={}; playing_=false; gain_=0; sampleRate_=0; playbackEndSeconds_=0;
 }
 float Music::bassPulse(float seconds) const {return bassAt(bass_,seconds);}
+float Music::beatPulse(float seconds,float bpmOverride,float offset) const {
+    if(playbackEndSeconds_>0 && clipDuration_==0) seconds=std::fmod(seconds,playbackEndSeconds_);
+    return aura::beatPulse(seconds,beat_,bpmOverride,offset);
+}
 std::optional<float> Music::playbackSeconds() const noexcept {
     if(!voice_ || !playing_ || !sampleRate_)return std::nullopt;
     XAUDIO2_VOICE_STATE state{};
@@ -120,6 +124,7 @@ void Music::load(const std::filesystem::path& path,float startSeconds,float dura
         }
     }
     bass_=bassEnvelope(pcm_,wave->nSamplesPerSec,wave->nChannels);
+    beat_=estimateBeatGrid(bass_);
     checked(engine_->CreateSourceVoice(&voice_,wave),"BGM source voice");
     checked(voice_->SetVolume(0),"BGM initial volume");
     XAUDIO2_BUFFER buffer{}; buffer.AudioBytes=static_cast<UINT32>(pcm_.size()); buffer.pAudioData=pcm_.data();

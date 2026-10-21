@@ -248,6 +248,7 @@ int main(int argc, char** argv) {
         settings.pixelationBgmPath="C:/音楽/Pixelation base.mp3";
         settings.pixelationFinalBgmPath="C:/Music/Pixelation \"final\".mp3";
         settings.illusionaryBgmPath="C:/音楽/The Weirdos \"loop\".ogg";
+        settings.pixelationBpm=179.2f; settings.pixelationBeatOffset=-.17f;
         settings.username="星の \"Player\" 🌟"; settings.discordEnabled=false; settings.discordApplicationId="12345678901234567890";
         aura::saveSettings(settingsPath,settings); const auto loadedSettings=aura::loadSettings(settingsPath);
         check(loadedSettings.language==aura::Language::Japanese && std::abs(loadedSettings.shirt.r-.95f)<.0001f,
@@ -257,6 +258,8 @@ int main(int argc, char** argv) {
             loadedSettings.pixelationBgmPath==settings.pixelationBgmPath && loadedSettings.pixelationFinalBgmPath==settings.pixelationFinalBgmPath,
             "Extended settings / UTF-8 audio paths / quoted names round trip");
         check(loadedSettings.illusionaryBgmPath==settings.illusionaryBgmPath,"Schema 6 preserves the Illusionary OGG path and quoted Unicode names");
+        check(loadedSettings.pixelationBpm==179.2f && loadedSettings.pixelationBeatOffset==-.17f,
+            "Schema 7 preserves custom BPM and beat alignment");
         check(loadedSettings.username==settings.username && !loadedSettings.discordEnabled && loadedSettings.discordApplicationId==settings.discordApplicationId,
             "Schema 4 preserves Unicode/quoted usernames and Discord preferences");
         settings.breakthroughCaptionOffset=-.18f;
@@ -278,6 +281,14 @@ int main(int argc, char** argv) {
         aura::saveSettings(settingsPath,settings);
         {
             std::ifstream oldSettings(settingsPath); std::string all((std::istreambuf_iterator<char>(oldSettings)),{});
+            all.replace(all.find("STARS_RNG_SETTINGS 7"),20,"STARS_RNG_SETTINGS 6");
+            const auto beatRow=all.find("pixelation_beat ");
+            check(beatRow!=std::string::npos,"New settings contain the beat alignment field");
+            all.erase(beatRow,all.find('\n',beatRow)-beatRow+1);
+            {std::ofstream legacySettings(settingsPath); legacySettings<<all;}
+            const auto migratedV6=aura::loadSettings(settingsPath);
+            check(migratedV6.illusionaryBgmPath==settings.illusionaryBgmPath && migratedV6.pixelationBpm==0 && migratedV6.pixelationBeatOffset==0,
+                "Schema 6 keeps audio paths and defaults to automatic beat detection");
             all.replace(all.find("STARS_RNG_SETTINGS 6"),20,"STARS_RNG_SETTINGS 5");
             const auto musicRow=all.find("illusionary_bgm ");
             check(musicRow!=std::string::npos,"New settings contain the named Illusionary music field");
@@ -324,6 +335,58 @@ int main(int argc, char** argv) {
         auto lateWords=words; lateWords.back()=28.5f;
         check(aura::tuning::cutscene::breakthroughWordVisible(29.f,7,lateWords) &&
             !aura::tuning::cutscene::breakthroughWordVisible(30.f,7,lateWords,4.f),"Late customized words keep their hold time within cutscene boundary");
+        {
+            // 描画APIに頼らず、映像で必要な「移動方向」と「視点」を確認します。
+            using aura::tuning::cutscene::breakthroughCamera;
+            const auto distanceToTarget=[](const auto& camera) {
+                const auto x=camera.eye[0]-camera.target[0],y=camera.eye[1]-camera.target[1],z=camera.eye[2]-camera.target[2];
+                return std::sqrt(x*x+y*y+z*z);
+            };
+            const auto lowA=breakthroughCamera(.3f),lowB=breakthroughCamera(2.9f);
+            check(lowA.eye[1]<lowA.target[1]-2 && lowB.eye[1]<lowB.target[1]-2 &&
+                lowA.eye[0]<0 && lowB.eye[0]>0 && std::abs(distanceToTarget(lowA)-distanceToTarget(lowB))<1.f &&
+                !lowA.monolithSpace && !lowB.monolithSpace,
+                "BreakThrough i looks upward and slowly orbits around the same central structure");
+            const auto highA=breakthroughCamera(3.7f),highB=breakthroughCamera(6.9f);
+            check(highA.eye[1]>highA.target[1]+4 && highB.eye[1]>highB.target[1]+4 &&
+                distanceToTarget(highB)>distanceToTarget(highA)+3 && highB.roll>highA.roll+.08f &&
+                std::abs(highB.roll)>.1f,
+                "BreakThrough ii looks down diagonally, pulls backward, and gently rolls the camera");
+            const auto rushA=breakthroughCamera(7.6f),rushB=breakthroughCamera(8.6f);
+            const auto rushC=breakthroughCamera(9.8f),rushD=breakthroughCamera(10.8f);
+            const float rushDistanceA=distanceToTarget(rushA),rushDistanceD=distanceToTarget(rushD);
+            bool sameRushDirection=true;
+            for(unsigned axis=0;axis<3;++axis)
+                sameRushDirection=sameRushDirection && std::abs(
+                    (rushA.eye[axis]-rushA.target[axis])/rushDistanceA-
+                    (rushD.eye[axis]-rushD.target[axis])/rushDistanceD)<.0001f;
+            check(sameRushDirection && rushA.target==rushD.target && rushA.roll==rushD.roll &&
+                rushDistanceD<rushDistanceA*.25f &&
+                distanceToTarget(rushC)-rushDistanceD>distanceToTarget(rushA)-distanceToTarget(rushB),
+                "BreakThrough iii accelerates straight toward the bright core without orbiting or rolling");
+            const float ivStart=aura::tuning::cutscene::BreakthroughMonolithStart;
+            const auto flash=breakthroughCamera(ivStart),revealed=breakthroughCamera(ivStart+.7f);
+            const auto monolithLate=breakthroughCamera(28.f);
+            check(flash.monolithSpace && flash.whiteout==1 && revealed.whiteout==0 && monolithLate.monolithSpace &&
+                revealed.focalLength<lowA.focalLength && revealed.focalLength<highA.focalLength &&
+                revealed.eye[0]==0 && monolithLate.eye[0]==0 && monolithLate.eye[2]>revealed.eye[2] &&
+                monolithLate.eye[2]<monolithLate.target[2],
+                "BreakThrough iv opens from whiteout into a persistent wide-angle monolith space and slowly tracks forward");
+            for(unsigned frame=0;frame<=240;++frame) {
+                const auto camera=breakthroughCamera(frame*.125f);
+                check(std::all_of(camera.eye.begin(),camera.eye.end(),[](float value){return std::isfinite(value);}) &&
+                    std::all_of(camera.target.begin(),camera.target.end(),[](float value){return std::isfinite(value);}) &&
+                    std::isfinite(camera.roll) && camera.focalLength>0 && distanceToTarget(camera)>0 &&
+                    camera.whiteout>=0 && camera.whiteout<=1,
+                    "Every BreakThrough camera sample has a finite view and a bounded whiteout");
+                if(camera.monolithSpace) check(std::abs(camera.eye[1]-aura::tuning::cutscene::BreakthroughMonolithEyeHeight)<=
+                    aura::tuning::cutscene::BreakthroughMonolithBobHeight+.0001f,
+                    "Monolith-space camera bob remains subtle instead of jumping up and down");
+            }
+            check(breakthroughCamera(-1).eye==breakthroughCamera(0).eye &&
+                breakthroughCamera(40).eye==breakthroughCamera(30).eye,
+                "Camera debug times outside the cutscene clamp to the first or last view");
+        }
         {std::ofstream o(settingsPath); o<<"STARS_RNG_SETTINGS 1\nlanguage ja\nshirt 0.5 0.7 0.9\n";}
         const auto migrated=aura::loadSettings(settingsPath);
         check(migrated.language==aura::Language::Japanese && migrated.luck==1 && migrated.avatar==aura::Avatar::Block &&
@@ -354,6 +417,14 @@ int main(int argc, char** argv) {
         settings.vrmPath="bad\npath"; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.vrmPath.clear();
         settings.pixelationBgmPath="bad\npath"; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.pixelationBgmPath.clear();
         settings.pixelationFinalBgmPath="bad\rpath"; rejects([&]{aura::saveSettings(settingsPath,settings);}); settings.pixelationFinalBgmPath.clear();
+        for(float invalidTempo:{NAN,INFINITY,-1.f,29.f,301.f}) {
+            settings.pixelationBpm=invalidTempo; rejects([&]{aura::saveSettings(settingsPath,settings);});
+        }
+        settings.pixelationBpm=0;
+        for(float invalidAlignment:{NAN,INFINITY,-2.1f,2.1f}) {
+            settings.pixelationBeatOffset=invalidAlignment; rejects([&]{aura::saveSettings(settingsPath,settings);});
+        }
+        settings.pixelationBeatOffset=0;
         settings.shirt.g=NAN; rejects([&] { aura::saveSettings(settingsPath,settings); });
         check(aura::displayName(defs[0],aura::Language::Japanese)=="コモン","Japanese aura names");
         check(aura::displayName(defs[pixelation],aura::Language::Japanese)=="ピクセレーション","Japanese Pixelation name");
@@ -461,10 +532,22 @@ int main(int argc, char** argv) {
         check(promotedSave.rolls==13579 && promotedSave.equipped==pharaoh && promotedSave.best==singularity &&
             promotedSave.counts==oldPreviewProgress.counts,
             "The v0.1.11 save preserves desert discoveries, equipment, and its edited counter when four previews become obtainable");
-        const auto reclining=aura::illusionaryPose(1.3f);
-        check(reclining.fixed && reclining.lift>0 && std::abs(reclining.bodyRoll)>1.3f &&
-            reclining.legPitch[0]!=reclining.legPitch[1] && reclining.knee[0]!=reclining.knee[1],
-            "Illusionary reclines horizontally with asymmetric legs and a fixed shared-avatar pose");
+        const auto reclining=aura::illusionaryPose(1.3f),recliningLater=aura::illusionaryPose(2.9f);
+        constexpr float halfPi=1.57079632679f;
+        check(reclining.fixed && reclining.lift>0 && std::abs(reclining.bodyRoll)<.2f &&
+            reclining.bodyPitch+reclining.torsoPitch>.65f && reclining.headPitch>.5f &&
+            std::abs(reclining.bodyPitch+reclining.torsoPitch+reclining.headPitch-halfPi)<.025f,
+            "Illusionary arches the torso backward and looks straight upward instead of rolling sideways");
+        check(std::abs(reclining.elbowPitch[0]-halfPi)<.025f && std::abs(reclining.elbowPitch[1])<.05f &&
+            reclining.armOut[0]>1.2f && reclining.armOut[0]>reclining.armOut[1]+.5f &&
+            reclining.armPitch[0]!=reclining.armPitch[1],
+            "Illusionary raises one arm with a right-angle elbow while the opposite arm stays straight and asymmetric");
+        check(recliningLater.fixed && reclining.bodyPitch==recliningLater.bodyPitch &&
+            reclining.torsoPitch==recliningLater.torsoPitch && reclining.headPitch==recliningLater.headPitch &&
+            reclining.armPitch==recliningLater.armPitch && reclining.armOut==recliningLater.armOut &&
+            reclining.elbowPitch==recliningLater.elbowPitch && reclining.legPitch==recliningLater.legPitch &&
+            reclining.knee==recliningLater.knee,
+            "The shared block and VRM Illusionary pose preserves all joint angles while floating");
         const auto levelCounts=levels.counts;
         presentation.preview=singularity; presentation.singularityLevel=1;
         check(presentation.level(levels,defs)==1 && levels.counts==levelCounts,"Debug Aura Level leaves inventory untouched");
@@ -519,6 +602,32 @@ int main(int argc, char** argv) {
         auto pointDistance=[](const aura::EffectPoint& a,const aura::EffectPoint& b) {
             return std::sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z));
         };
+        {
+            namespace pixel=aura::tuning::pixelation;
+            float lowest=1000,highest=-1000;
+            for(unsigned frame=0;frame<1000;++frame) for(unsigned player=0;player<2;++player) {
+                const auto aircraft=aura::pixelationPlayer(frame*.031f,player);
+                const float radius=std::sqrt(aircraft.x*aircraft.x+aircraft.z*aircraft.z);
+                check(std::isfinite(aircraft.y) && std::abs(radius-pixel::PlayerOrbitRadius)<.0001 &&
+                    aircraft.y>=pixel::PlayerHeight-pixel::PlayerBobAmplitude-.0001 &&
+                    aircraft.y<=pixel::PlayerHeight+pixel::PlayerBobAmplitude+.0001,
+                    "Both aircraft climb and descend on a finite constant-radius three-dimensional orbit");
+                lowest=std::min(lowest,aircraft.y); highest=std::max(highest,aircraft.y);
+            }
+            check(highest-lowest>pixel::PlayerBobAmplitude*1.95 && pixel::PlayerOrbitSpeed>1.0,
+                "Aircraft use the restored fast orbit and cover the full vertical flight range");
+            check(pointDistance(aura::pixelationPlayer(NAN,0),aura::pixelationPlayer(0,0))==0 &&
+                pointDistance(aura::pixelationPlayer(-1,1),aura::pixelationPlayer(0,1))==0,
+                "Invalid aircraft clocks safely start at the first point of the trajectory");
+            for(unsigned cycle=0;cycle<10;++cycle) {
+                const float action=cycle*aura::PixelationVolleyPeriod+.2f,orbit=action*1.875f,launchOrbit=orbit-.375f;
+                const auto volley=aura::pixelationVolley(action,orbit,launchOrbit);
+                for(unsigned player=0;player<2;++player)
+                    check(pointDistance(volley.players[player],aura::pixelationPlayer(orbit,player))==0 &&
+                        pointDistance(volley.launches[player],aura::pixelationPlayer(launchOrbit,player))==0,
+                        "Current aircraft and projectile launch anchors share the same rising and falling trajectory");
+            }
+        }
         for(unsigned cycle=0;cycle<20;++cycle) {
             const float launchTime=cycle*aura::PixelationVolleyPeriod;
             const auto launch=aura::pixelationVolley(launchTime+.0001f);
@@ -598,6 +707,30 @@ int main(int argc, char** argv) {
         check(std::abs(aura::bassAt(beats,.005f)-.5f)<.0001f && aura::bassAt(beats,.01f)==1 &&
             aura::bassAt(beats,-1)==0 && aura::bassAt(beats,NAN)==0 && aura::bassAt(beats,10)==0,
             "Bass playback interpolates smoothly and safely ignores times outside the track");
+        // 一定の間隔のキックを模した低音表。曲名を決め打ちせず拍を検出できることを確かめます。
+        std::vector<float> kicks(3000);
+        for(unsigned i=13;i<kicks.size();i+=50) {
+            kicks[i]=1; kicks[i+1]=.7f; kicks[i+2]=.3f;
+        }
+        const auto beatGrid=aura::estimateBeatGrid(kicks);
+        check(std::abs(beatGrid.bpm-120)<.2f && std::abs(beatGrid.offset-.13f)<.015f && beatGrid.confidence>.8f,
+            "Repeated bass onsets recover 120 BPM and their actual starting phase");
+        const aura::BeatGrid exactBeat{120,.13f,1};
+        check(aura::beatPulse(.13f,exactBeat)>.999f && aura::beatPulse(.63f,exactBeat)>.999f &&
+            aura::beatPulse(.38f,exactBeat)==0 && aura::beatPulse(.23f,exactBeat,0,.1f)>.999f &&
+            aura::beatPulse(.38f,exactBeat,240)>.999f,
+            "Cube peaks repeat with BPM, manual tempo and positive delay shift the peak correctly");
+        check(std::abs(aura::beatPulse(.629999f,exactBeat)-aura::beatPulse(.630001f,exactBeat))<.001f &&
+            aura::beatPulse(-1,exactBeat)==0 && aura::beatPulse(NAN,exactBeat)==0 &&
+            aura::beatPulse(1,exactBeat,NAN)==0 && aura::beatPulse(1,exactBeat,0,NAN)==0 &&
+            aura::beatPulse(1,{})==0,
+            "Beat wrapping is continuous and malformed playback cannot create a pulse");
+        check(aura::estimateBeatGrid(std::vector<float>(500)).bpm==0 && aura::estimateBeatGrid(beats).bpm==0,
+            "Silent or too-short music does not invent a BPM");
+        // 22050Hzは10msで割り切れません。端数を切り捨て続けると拍が次第にずれます。
+        const auto oddRateBass=aura::bassEnvelope(std::vector<std::uint8_t>(22050*2*10),22050,1);
+        check(oddRateBass.size()==1000 && std::all_of(oddRateBass.begin(),oddRateBass.end(),[](float v){return v==0;}),
+            "A non-divisible audio rate still produces exactly 100 envelope bins per second");
         std::filesystem::remove_all(dir);
         check(aura::tuning::cutscene::endingOpacity(10.1f,10.9f)==1 &&
             std::abs(aura::tuning::cutscene::endingOpacity(10.5f,10.9f)-.5f)<.0001f &&

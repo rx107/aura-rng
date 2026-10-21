@@ -82,6 +82,9 @@ void validate(const Settings& s) {
         throw std::runtime_error("Invalid avatar or biome");
     if(!std::isfinite(s.breakthroughCaptionOffset) || std::abs(s.breakthroughCaptionOffset)>5.f)
         throw std::runtime_error("Caption offset must be between -5 and 5 seconds");
+    if(!std::isfinite(s.pixelationBpm) || (s.pixelationBpm!=0 && (s.pixelationBpm<30 || s.pixelationBpm>300)) ||
+        !std::isfinite(s.pixelationBeatOffset) || std::abs(s.pixelationBeatOffset)>2)
+        throw std::runtime_error("Beat settings require BPM=0 or 30..300, offset=-2..2 seconds");
     float previous=-1;
     for(const float second:s.breakthroughWordTimes) {
         if(!std::isfinite(second) || second<0 || second>=BreakthroughCutsceneDuration || second<=previous)
@@ -105,7 +108,7 @@ Settings loadSettings(const std::filesystem::path& path) {
     std::getline(input, header);
     int version{};
     std::istringstream headerInput(header); std::string magic,headerExtra;
-    if (!(headerInput>>magic>>version) || magic!="STARS_RNG_SETTINGS" || version<1 || version>6 || (headerInput>>headerExtra))
+    if (!(headerInput>>magic>>version) || magic!="STARS_RNG_SETTINGS" || version<1 || version>7 || (headerInput>>headerExtra))
         throw std::runtime_error("Invalid settings header");
     if (!(input >> kind >> language) || kind != "language" || (language != "en" && language != "ja"))
         throw std::runtime_error("Invalid language setting");
@@ -140,6 +143,8 @@ Settings loadSettings(const std::filesystem::path& path) {
         }
         if(version>=6 && (!(input>>kind>>std::quoted(s.illusionaryBgmPath)) || kind!="illusionary_bgm"))
             throw std::runtime_error("Invalid Illusionary audio setting");
+        if(version>=7 && (!(input>>kind>>s.pixelationBpm>>s.pixelationBeatOffset) || kind!="pixelation_beat"))
+            throw std::runtime_error("Invalid Pixelation beat setting");
     }
     if (input>>extra) throw std::runtime_error("Unexpected settings data");
     validate(s); return s;
@@ -149,7 +154,7 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     auto temporary = path; temporary += ".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    out << "STARS_RNG_SETTINGS 6\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
+    out << "STARS_RNG_SETTINGS 7\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
         << "\nshirt " << std::setprecision(17) << settings.shirt.r << ' ' << settings.shirt.g << ' ' << settings.shirt.b
         << "\nluck "<<settings.luck<<"\navatar "<<static_cast<int>(settings.avatar)<<"\nbiome "<<static_cast<int>(settings.biome)
         <<"\nvolume "<<settings.volume<<"\nvrm "<<std::quoted(settings.vrmPath)<<"\nbgm "<<std::quoted(settings.bgmPath)
@@ -159,7 +164,8 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
         <<"\ndiscord_application_id "<<std::quoted(settings.discordApplicationId)
         <<"\nbreakthrough_caption_offset "<<settings.breakthroughCaptionOffset<<"\nbreakthrough_word_times";
     for(const float second:settings.breakthroughWordTimes) out<<' '<<second;
-    out<<"\nillusionary_bgm "<<std::quoted(settings.illusionaryBgmPath)<<'\n';
+    out<<"\nillusionary_bgm "<<std::quoted(settings.illusionaryBgmPath)
+        <<"\npixelation_beat "<<settings.pixelationBpm<<' '<<settings.pixelationBeatOffset<<'\n';
     out.flush();
     if (!out) throw std::runtime_error("Cannot write settings");
     out.close();

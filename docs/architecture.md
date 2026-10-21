@@ -18,7 +18,9 @@ Win32入力 → Appが操作を検証 → Rollerで抽選 → Progressで所持�
 
 ## ポーズと描画
 
-`animation.cpp` がブロックとVRMで共通の姿勢を計算します。通常は歩行、Singularity・Pixelation・Equinox・BreakThrough・Illusionaryは固定ポーズ。Illusionaryは胴中心を支点に横向きへ倒し、片脚を曲げます。固定中は移動量で手足を振りません。
+`animation.cpp` がブロックとVRMで共通の姿勢を計算します。通常は歩行、Singularity・Pixelation・Equinox・BreakThrough・Illusionaryは固定ポーズ。Illusionaryは全身の傾きに胸の反りと首の反りを重ね、真上を仰ぎます。肩と肘も別に曲げ、一方の腕だけを直角にして前へ出します。固定中は移動量で手足を振りません。
+
+Pixelationの`pixelationPlayer()`は、現在のPLAYER1/2・弾の発射位置・光の尾で共有する3D軌道です。描画側だけで上下位置を変えないため、機体から弾が離れて発射されるずれを防ぎます。発射時の周回時計を固定し、飛行中に機体が移動したりLevelを変更したりしても、弾の出発点を保ちます。2発は同じAction時計を使って共通の衝突点へ到着します。機体や周囲のMotion時計とは分離しています。
 
 共有キューブ、専用クアッド、インスタンス描画で描画回数を抑えます。特殊オーラの光だけHDRブルームを通します。Illusionaryの黒い帯、チェック床、文字は不透明バッチへ分け、床は深度を書き込み、文字はブルームを通しません。
 
@@ -30,7 +32,11 @@ CutSceneの映像はGPUシェーダーとD2D字幕で描き、動画を貼り付
 
 `Music::playbackSeconds()` のXAudio2出力サンプル数を映像の時計に使い、初回デコード待ちで音と映像が離れないようにします。再生末尾でSamplesPlayedが0へ戻っても終了時刻を保持し、CutSceneが最初へ戻らないようにしています。
 
+BreakThroughのカメラは`breakthroughCamera()`で計算します。iはローアングルの周回、iiはハイアングルの後退と画面の傾き、iiiはコアへの直進と加速、ivはホワイトアウトの後に広角で巨大な柱の間を前進します。ivの空間は11.1秒から自然終了まで継続し、構造物を動かさずカメラに小さな上下動を付けます。カメラ値は`src/tuning/cutscene.hpp`、GPU側の描画は`src/render/cutscene.cpp`が担当します。
+
 音声の読み込み時に `bassEnvelope()` が35〜180Hz付近の強さを10ms間隔で計測します。毎フレームは小さな表を補間するだけです。Equinoxの背景と字幕を同じ量だけ上下し、音声がなければ揺れは0です。
+
+Pixelationのキューブ用には、その低音表の立ち上がりの繰り返しを自己相関で調べ、`estimateBeatGrid()`がBPMと最初の拍の位置を推定します。先頭最大120秒を読み込み時に解析し、描画ごとに解析し直しません。推定は半分・倍のテンポを選ぶ場合があるため、F1で30〜300 BPMと-2〜+2秒の時差を上書きできます。`beatPulse()`は実際の再生サンプル時刻から0〜1の鼓動を作り、`Frame::auraBeat`で描画へ渡します。ループ曲は曲の長さで時刻を折り返し、非再生中は0にします。Motion時計の倍率を変えてもBPMは変わりません。
 
 `endingOpacity()` が最後0.8秒の映像透明度と音量を制御します。通常オーラを先に描き、CutSceneを標準アルファ合成で重ねます。自然終了は対応オーラの一時表示を残し、Esc/停止は直前のプレビューへ戻します。取得時は実際のロールだけを在庫へ記録し、演出再生は記録しません。
 
@@ -40,7 +46,7 @@ MP3 / M4A / WAVはWindows Media Foundation、Ogg Vorbisは同梱stb_vorbisでPCM
 
 進行schema 2は編集可能な `rolls` と実在庫合計 `collected` を分けます。所持数は安定したIDで保存し、削除したIDも引退在庫として保持します。旧schema 1、旧カタログ、旧プレビューから抽選対象へ変わったオーラも移行できます。
 
-設定schema 6は言語・服・Luck・惑星・VRM/BGMパス・音量・プロフィール・Discord・字幕時刻を保存し、schema 1〜5も読みます。総回数のF1変更は在庫や既存CSVを変えません。プレビューとデバッグLevelは保存しません。
+設定schema 7は言語・服・Luck・惑星・VRM/BGMパス・音量・プロフィール・Discord・字幕時刻・PixelationのBPMと拍の時差を保存し、schema 1〜6も読みます。旧設定のBPMは自動推定、時差は0秒で始めます。総回数のF1変更は在庫や既存CSVを変えません。プレビューとデバッグLevelは保存しません。
 
 Discordはローカル名前付きパイプを専用ワーカーで扱い、ユーザー名・総回数をRich Presenceへ送ります。公開Application IDだけを用い、トークンは扱いません。実Discordのプロフィール表示は未検証です。[連携の説明](discord.md)
 

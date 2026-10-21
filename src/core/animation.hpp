@@ -9,7 +9,10 @@ struct AvatarPose {
     // 手足の値はラジアンです。
     bool fixed{};
     float lift{},bodyPitch{},bodyRoll{};
-    std::array<float,2> armPitch{},armOut{},legPitch{},legOut{},knee{};
+    // torsoPitch は腰から上、headPitch は首から上の追加角度。
+    // 0 のままなら元の姿勢を保ち、Illusionary のような反り返る姿勢だけで使います。
+    float torsoPitch{},headPitch{};
+    std::array<float,2> armPitch{},armOut{},legPitch{},legOut{},knee{},elbowPitch{};
 };
 // 姿勢を計算するだけの処理。描画は renderer.cpp / vrm.cpp が担当します。
 // ブロックと VRM で共通。見た目を調整する入口は tuning/avatar.hpp です。
@@ -22,6 +25,7 @@ float pixelationMotionTime(float elapsed,unsigned level);
 float pixelationActionSpeed(unsigned level);
 float pixelationActionTime(float elapsed,unsigned level);
 struct EffectPoint { float x{},y{},z{}; };
+EffectPoint pixelationPlayer(float orbitTime,unsigned player);
 // 呼び出し元・テストで使う公開名。実際の編集先は tuning/pixelation.hpp です。
 inline constexpr float PixelationVolleyPeriod=tuning::pixelation::VolleyPeriod;
 inline constexpr float PixelationVolleyFlight=tuning::pixelation::VolleyFlight;

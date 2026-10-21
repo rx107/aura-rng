@@ -31,17 +31,23 @@ inline constexpr float ProjectileCoreSize=.18f;
 inline constexpr unsigned ProjectileTrailCount=6; // 1〜6。増やすと玉の残像が増える
 inline constexpr float ProjectileTrailStep=.025f; // 残像同士の時間差。大きいほど尾が長い
 
-// PLAYER の周回。double は既存の計算精度を保つためです。
-inline constexpr double PlayerOrbitSpeed=.95;   // Motion 時計 1 秒あたりの回転角
+// PLAYER1/2（戦闘機のように飛ぶ画面）の周回。double は長時間放置時の精度用です。
+// この速度だけを上げても、弾がぶつかる間隔・爆発・アバターの浮遊速度は変わりません。
+inline constexpr double PlayerOrbitSpeed=1.55;  // Motion 時計 1 秒あたりの回転角。大きくすると速く飛ぶ
 inline constexpr double PlayerOrbitPhase=.3;
 inline constexpr double PlayerOrbitRadius=2.45; // 大きくすると PLAYER が外側を回る
 inline constexpr double PlayerHeight=2.5;
-inline constexpr double PlayerBobAmplitude=.36;
-inline constexpr double PlayerBobFrequency=1.4;
+inline constexpr double PlayerBobAmplitude=.85; // 上下移動の幅。0 にすると水平な軌道になる
+inline constexpr double PlayerBobFrequency=1.4; // 周回角に対する上下の回数。大きくすると頻繁に昇降する
 inline constexpr float PlayerScreenWidth=1.35f;
 inline constexpr float PlayerScreenHeight=.88f;
 inline constexpr unsigned PlayerOrbitSegments=64; // 大きくすると画面の輪郭がなめらか（描画量も増える）
 inline constexpr unsigned TetherSegments=16;     // PLAYER とアバター間のギザギザ線の分割数
+// トレイルは過去の同じ3D軌道をたどる光の尾。直線でつなぐため、上下のカーブにも追従します。
+inline constexpr unsigned PlayerTrailSegments=28; // 多いほどカーブが滑らか（1 機につきこの本数を描く）
+inline constexpr float PlayerTrailDuration=.72f;   // Motion 時計で何秒前まで残すか。大きいほど長い尾になる
+inline constexpr float PlayerTrailWidth=.13f;      // 尾の根元の太さ。先端に向かって細くなる
+inline constexpr float PlayerTrailBrightness=.62f; // 0 にすると尾を非表示にする
 
 // ── 衝突の爆発 ── Lv3 は規模だけ拡大。経過時間は Lv2 と共有します。
 inline constexpr float ImpactDuration=.65f;     // 長くすると爆発が残る時間が延びる
@@ -63,6 +69,9 @@ inline constexpr unsigned CageCount=3;
 inline constexpr float CageSize=2.6f;           // 大きくするとアバターを囲む立方体が大きくなる
 inline constexpr float CageSizeStep=.14f;
 inline constexpr float CageHeight=2.55f;        // 立方体の中心の高さ
+// BGM の再生位置から来る拍の強さで鼓動。回転速度や弾の時計には影響しません。
+inline constexpr float CageBeatScale=.15f;      // 1 拍で最大 15% 膨らむ。0 でサイズの鼓動を止める
+inline constexpr float CageBeatBrightness=.20f; // 1 拍で最大 20% 明るくする。0 で明るさを一定にする
 
 // ── 周囲の粒子・名前 ──
 inline constexpr unsigned FragmentCount=180;   // 増やすと周囲の四角い粒子が増える
@@ -90,4 +99,7 @@ static_assert(ImpactWaveCount>0 && ImpactWaveCount<=2,"衝撃波は 1〜2 枚で
 static_assert(FloorRingSegments>=3 && PlayerOrbitSegments>=3 && TetherSegments>0,"円は 3 分割以上、線は 1 分割以上必要です");
 static_assert(FloorPillarCount>0 && CageCount>0 && FragmentCount>0 && ImpactShardCount>0);
 static_assert(FragmentRiseRange>0 && CageSize>0 && PlayerOrbitRadius>0);
+static_assert(PlayerOrbitSpeed>0 && PlayerBobAmplitude>=0 && PlayerHeight>PlayerBobAmplitude);
+static_assert(PlayerTrailSegments>0 && PlayerTrailSegments<=64 && PlayerTrailDuration>0 && PlayerTrailWidth>0);
+static_assert(PlayerTrailBrightness>=0 && CageBeatScale>=0 && CageBeatScale<=.5f && CageBeatBrightness>=0);
 } // namespace aura::tuning::pixelation

@@ -4,7 +4,7 @@
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.12-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.13-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -54,18 +54,26 @@ inline constexpr float HeadWidth = 7.0f;
 | UIの色を変える | `src/tuning/ui.hpp` → `Accent` | `{1.f,.55f,.20f}` で共通のミント色をオレンジへ |
 | 無重力ポーズを高くする | `src/tuning/avatar.hpp` → `singularity` の `Lift` | `.55f` → `.85f`。ブロックとVRMが少し高く浮く |
 | Pixelation Lv3の周囲だけ速くする | `src/tuning/pixelation.hpp` → `FinalMotionSpeed` | `3.f` → `4.f`。弾と浮遊の速さは変えない |
+| PixelationのPLAYERを速くする | 同上 → `PlayerOrbitSpeed` | `1.55` → `1.8`。2機の周回と尾だけが速くなり、弾がぶつかる間隔は変わらない |
+| PLAYERの上下移動を弱める | 同上 → `PlayerBobAmplitude` | `.85` → `.4`。軌道が平らに近づく。`0`なら水平になる |
+| PLAYERの光の尾を長くする | 同上 → `PlayerTrailDuration` | `.72f` → `1.f`。過去の軌道を長く残す。`PlayerTrailSegments`はカーブの滑らかさ |
+| キューブの鼓動を大きくする | 同上 → `CageBeatScale` | `.15f` → `.22f`。1拍で膨らむ最大量が15%から22%へ。拍の速さは変わらない |
+| キューブの拍を曲へ合わせる | F1 → 音楽 → キューブの鼓動 | 自動推定を外してBPMを指定。時差`+.10`で0.1秒遅らせる。再ビルド不要 |
 | Equinoxの床文字を小さくする | `src/tuning/equinox.hpp` → `floorGlyphSize` | `3.2f` → `2.8f` |
-| BreakThroughの名前を上げる | `src/tuning/breakthrough.hpp` → `titleHeight` | `3.55f` → `3.9f` |
+| BreakThroughの名前を上げる | `src/tuning/breakthrough.hpp` → `titleHeight` | `3.85f` → `4.1f`。名前と確率が上へ移動する |
 | Nanallyの電撃を太くする | `src/tuning/nanally.hpp` → `ElectricWidth` | `.12f` → `.18f`。小さな稲妻の線が太くなる |
 | Illusionaryの回転をゆっくりにする | `src/tuning/illusionary.hpp` → `MotionSpeed` | `1.f` → `.7f`。リボンと放射光の動きがゆっくりになる |
+| Illusionaryの胸の反りを弱める | `src/tuning/avatar.hpp` → `illusionary::TorsoPitch` | `.55f` → `.35f`。腰より上を起こす。首だけなら`HeadPitch`を調整 |
 | 砂漠オーラの砂を広げる | `src/tuning/desert.hpp` → `DuneRadius` | `1.75f` → `2.2f`。砂のらせんが外側へ広がる |
 | ロケットの乗降空間を高くする | `src/tuning/stages.hpp` → `RocketBoardingClearance` | `3.f` → `4.f`。機体だけ1単位上へ移動。発着地点は中央のまま |
 
 `HalfExtent`は全幅の**半分**です。32なら全幅64。処理を軽く保つため、範囲チェックでは12〜48を指定できるようにしています。
 
-Pixelationには時計が2本あります。**Motion**は周囲の粒子・立方体・PLAYERの回転、**Action**は弾・衝突・爆発・アバター浮遊です。Lv2/3のActionは同じ設定を使うので、同じ速さを保ちます。
+Pixelationには時計が2本あります。**Motion**は周囲の粒子・立方体・PLAYERの回転、**Action**は弾・衝突・爆発・アバター浮遊です。Lv2/3のActionは同じ設定を使うので、同じ速さを保ちます。キューブの鼓動だけは別で、BGMの再生時刻を使います。回転を速くしても曲のBPMは変えません。
 
-BreakThroughの調整ファイルは**通常表示用**です。柱の浮遊幅や位置を変えても、別の処理で描くCutSceneの柱は変更されません。CutSceneでは柱を静止させています。
+**BPMは1分間の拍数**です。120なら0.5秒ごと、150なら0.4秒ごとに鼓動します。音楽の自動推定は、低音の立ち上がりの繰り返しを探すため、曲によって半分・倍の値を選ぶことがあります。F1から30〜300の手動BPMと-2〜+2秒の時差で合わせられます。正の時差で遅く、負の時差で早くなります。曲が再生されていない間は鼓動せず、BGMのないLevel 0も同様です。
+
+BreakThroughの`breakthrough.hpp`は**通常表示用**です。柱の浮遊幅や位置を変えても、別の処理で描くCutSceneの柱は変更されません。CutSceneの構造物は静止し、周回・後退・急接近・前進するカメラは`cutscene.hpp`で調整します。[4つの場面の調整表](stage-and-cutscene-guide.md#breakthroughの4つのカメラ)を参照してください。
 
 ## 4. コードの記号を少しだけ読む
 
@@ -133,6 +141,8 @@ auratest,My Test Aura,0,1.0,0.3,0.7,32,1.5,0.7,1
 | 保存したのに変わらない | Ctrl+Sしたか、Develop.cmdで作り直したか、古いEXEを開いていないか |
 | Nanallyの設定を変えたのに出ない | F1からNanallyを選ぶ。プレビューなのでロールでは出ない |
 | ポーズの設定を変えたのに違いがない | 対象オーラと同じレベルで見比べる。歩行用と固定ポーズ用は別 |
+| キューブが鼓動しない | PixelationのLevel 1〜3でBGMが再生されているか確認。自動推定が0なら手動BPMを指定。Level 0にはBGMがない |
+| キューブの鼓動が半分・倍に感じる | F1 → 音楽から自動推定を外し、BPMを手動指定。少しのずれは拍の時差で調整 |
 | ファイルを上書きできない | ゲームを閉じてから再ビルド |
 | C++のエラーが出る | 最初のエラーを見る。変更した1行を元に戻し、`;`や`,`や`f`を確認 |
 | `static_assert`と出る | 設定が指定範囲外。直前のコメントとチェックの範囲へ戻す |
@@ -151,7 +161,8 @@ auratest,My Test Aura,0,1.0,0.3,0.7,32,1.5,0.7,1
 | 同じファイルの `applyDebugActions()` | F1から届いた変更をゲーム状態へ反映 |
 | `src/core/aura.cpp` | CSV読込、チケット抽選、Luck、進行データの保存復元 |
 | `src/core/presentation.cpp` | 表示用のプレビュー、訳名、設定の保存復元 |
-| `src/core/animation.cpp` | 手足の姿勢、弾が衝突する位置などの計算 |
+| `src/core/animation.cpp` | 手足・胸・頭・肘の姿勢、PLAYERの軌道、弾が衝突する位置などの計算 |
+| `src/core/audio_envelope.hpp` | 音声の低音を計測し、BPMの推定と拍の強さを計算。描画中は計算済みの表を使う |
 | `src/render/renderer.cpp` の `world()` | ステージ → アバター → オーラを組み立て、GPUへ渡す |
 | `src/render/nanally.cpp` など | それぞれの特殊オーラの形・発光・粒子を作る |
 | `src/render/ui.cpp` の `debugUi()` | F1のImGuiパネル。命令を作り、main.cppに処理を依頼する |

@@ -47,7 +47,9 @@ AvatarPose illusionaryPose(float time) {
     p.lift=pose::Lift+pose::BobAmplitude*std::sin(time*pose::BobFrequency);
     p.bodyPitch=pose::BodyPitch;
     p.bodyRoll=pose::BodyRoll;
+    p.torsoPitch=pose::TorsoPitch; p.headPitch=pose::HeadPitch;
     p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch;
+    p.elbowPitch=pose::ElbowPitch;
     p.legPitch=pose::LegPitch; p.legOut=pose::LegOut; p.knee=pose::Knee;
     return p;
 }
@@ -78,6 +80,17 @@ AvatarPose equinoxPose(float time) {
     p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch; p.legOut=pose::LegOut;
     return p;
 }
+EffectPoint pixelationPlayer(float orbitTime,unsigned player) {
+    namespace effect=tuning::pixelation;
+    constexpr double Pi=3.14159265358979323846;
+    // 現在の機体・発射時の機体・光の尾の3つが必ず同じ軌道を使います。
+    // 描画側だけで上下位置を足すと、発射する弾が機体から離れるので、ここでまとめて計算します。
+    const double clock=std::isfinite(orbitTime)?std::clamp(static_cast<double>(orbitTime),0.,1.e12):0.;
+    const double angle=clock*effect::PlayerOrbitSpeed+(player%2)*Pi+effect::PlayerOrbitPhase;
+    return {static_cast<float>(std::cos(angle)*effect::PlayerOrbitRadius),
+        static_cast<float>(effect::PlayerHeight+effect::PlayerBobAmplitude*std::sin(angle*effect::PlayerBobFrequency)),
+        static_cast<float>(std::sin(angle)*effect::PlayerOrbitRadius)};
+}
 PixelationVolley pixelationVolley(float effectTime) {
     const double time=std::isfinite(effectTime)?std::clamp(static_cast<double>(effectTime),0.,1.e12):0.;
     const auto cycle=std::floor(time/PixelationVolleyPeriod);
@@ -87,8 +100,6 @@ PixelationVolley pixelationVolley(float actionTime,float orbitTime,float shotOrb
     constexpr float Pi=3.14159265359f;
     // 壊れた時計値を先に制限し、サイクル番号の整数変換を安全にします。
     const double time=std::isfinite(actionTime)?std::clamp(static_cast<double>(actionTime),0.,1.e12):0.;
-    const double orbit=std::isfinite(orbitTime)?std::clamp(static_cast<double>(orbitTime),0.,1.e12):0.;
-    const double launchOrbit=std::isfinite(shotOrbitTime)?std::clamp(static_cast<double>(shotOrbitTime),0.,1.e12):0.;
     const auto cycle=static_cast<std::int64_t>(std::floor(time/PixelationVolleyPeriod));
     const double shotTime=static_cast<double>(cycle)*PixelationVolleyPeriod;
     PixelationVolley volley;
@@ -99,17 +110,9 @@ PixelationVolley pixelationVolley(float actionTime,float orbitTime,float shotOrb
     volley.impactCycle=volley.flightVisible?cycle-1:cycle;
     if (volley.impactCycle>=0) volley.impactAge=static_cast<float>(time-
         (static_cast<double>(volley.impactCycle)*PixelationVolleyPeriod+PixelationVolleyFlight));
-    auto player=[](double clock,unsigned i) {
-        namespace effect=tuning::pixelation;
-        constexpr double Pi=3.14159265358979323846;
-        const double angle=clock*effect::PlayerOrbitSpeed+i*Pi+effect::PlayerOrbitPhase;
-        return EffectPoint{static_cast<float>(std::cos(angle)*effect::PlayerOrbitRadius),
-            static_cast<float>(effect::PlayerHeight+effect::PlayerBobAmplitude*std::sin(angle*effect::PlayerBobFrequency)),
-            static_cast<float>(std::sin(angle)*effect::PlayerOrbitRadius)};
-    };
     for (unsigned i=0;i<2;++i) {
-        volley.players[i]=player(orbit,i);
-        volley.launches[i]=player(launchOrbit,i);
+        volley.players[i]=pixelationPlayer(orbitTime,i);
+        volley.launches[i]=pixelationPlayer(shotOrbitTime,i);
         if (volley.flightProgress>=1) volley.balls[i]=volley.meeting;
         else {
             const float u=volley.flightProgress,arc=tuning::pixelation::ProjectileArc*std::sin(Pi*u);

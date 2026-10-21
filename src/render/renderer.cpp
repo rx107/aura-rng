@@ -517,7 +517,8 @@ void Renderer::world(const Frame& f) {
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
     const float actionTime=f.actionTime>=0?f.actionTime:pixelationActionTime(f.time,pixelated?level:0);
     const auto pose=illusionary?illusionaryPose(f.time):pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
-    // 横向きのIllusionaryだけ胴の中心を軸に倒します。足元を軸にすると体が横へずれます。
+    // Illusionary は胴の中心を支点に後傾し、腰・首・肘を別々に曲げます。
+    // 他のポーズは追加角度が 0 なので、従来の位置と形を保ちます。
     const float posePivot=illusionary?1.45f:0.f;
     auto base=XMMatrixTranslation(0,-posePivot,0)*XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift+posePivot,f.avatarZ);
@@ -535,21 +536,28 @@ void Renderer::world(const Frame& f) {
         instance.color={lit.r,lit.g,lit.b,illusionary?(faceDetail?0.f:.82f):pixelated?1.8f:(equinox || breakthrough)?.65f:0.f}; instances_.push_back(instance);
     };
     const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
+    // 腰より上だけを回す。脚まで回すと「反り返る」代わりに全身が倒れてしまいます。
+    const auto torso=XMMatrixTranslation(0,-1.08f,0)*XMMatrixRotationX(pose.torsoPitch)*XMMatrixTranslation(0,1.08f,0);
     for(int side=0;side<2;++side) {
         const float sign=side?1.f:-1.f;
-        const auto arm=XMMatrixRotationZ(sign*pose.armOut[side])*XMMatrixRotationX(pose.armPitch[side])*XMMatrixTranslation(sign*.76f,2.02f,0);
-        part(0,-.46f,0,.43f,.96f,.54f,skin,arm);
+        const auto arm=XMMatrixRotationZ(sign*pose.armOut[side])*XMMatrixRotationX(pose.armPitch[side])*
+            XMMatrixTranslation(sign*.76f,2.02f,0)*torso;
+        // 上腕と前腕に分け、肘を中心に曲げる。elbowPitch=0 なら元の一本腕と同じ外形です。
+        part(0,-.22f,0,.43f,.48f,.54f,skin,arm);
+        const auto elbow=XMMatrixRotationX(pose.elbowPitch[side])*XMMatrixTranslation(0,-.46f,0)*arm;
+        part(0,-.24f,0,.43f,.48f,.54f,skin,elbow);
         const auto hip=XMMatrixRotationZ(sign*pose.legOut[side])*XMMatrixRotationX(pose.legPitch[side])*XMMatrixTranslation(sign*.27f,1.10f,0);
         part(0,-.24f,0,.46f,.48f,.52f,pants,hip);
         const auto knee=XMMatrixRotationX(pose.knee[side])*XMMatrixTranslation(0,-.48f,0)*hip;
         part(0,-.24f,0,.46f,.48f,.52f,pants,knee);
     }
-    const auto identity=XMMatrixIdentity();
-    part(0,1.56f,0,1.03f,.96f,.60f,shirt,identity);
-    part(0,2.42f,0,.73f,.73f,.73f,skin,identity);
-    part(-.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
-    part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},identity);
-    part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},identity);
+    part(0,1.56f,0,1.03f,.96f,.60f,shirt,torso);
+    // 首の付け根を支点にし、顔パーツも頭と一緒に上へ向ける。
+    const auto head=XMMatrixTranslation(0,-2.055f,0)*XMMatrixRotationX(pose.headPitch)*XMMatrixTranslation(0,2.055f,0)*torso;
+    part(0,2.42f,0,.73f,.73f,.73f,skin,head);
+    part(-.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},head);
+    part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},head);
+    part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},head);
     const float t=f.time*d.speed;
     for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && i<tuning::world::StandardRingSegments;++i) {
         const float a=i*2*Pi/tuning::world::StandardRingSegments+t*tuning::world::StandardRingAngularSpeed;

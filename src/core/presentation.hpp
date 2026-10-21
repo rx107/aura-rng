@@ -31,6 +31,8 @@ struct Settings {
     // 字幕の微調整 [秒]。負数は早く、正数は遅く表示。F1から変更して保存できます。
     float breakthroughCaptionOffset{};
     std::array<float,8> breakthroughWordTimes{tuning::cutscene::BreakthroughWordTimes};
+    // 0=曲からBPMを推定。正の値は手動の拍数/分。時差は秒、正なら鼓動を遅らせます。
+    float pixelationBpm{},pixelationBeatOffset{};
 };
 Settings loadSettings(const std::filesystem::path& path);
 void saveSettings(const std::filesystem::path& path, const Settings& settings);
@@ -67,6 +69,7 @@ struct DebugActions {
     std::optional<std::uint64_t> rollCount;
     std::optional<float> breakthroughCaptionOffset;
     std::optional<std::array<float,8>> breakthroughWordTimes;
+    std::optional<float> pixelationBpm,pixelationBeatOffset;
 };
 // 他の処理から読む共通名。数値の編集場所は tuning/game.hpp に集約。
 inline constexpr float RollCooldown = tuning::game::RollCooldownSeconds;

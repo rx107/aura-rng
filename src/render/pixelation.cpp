@@ -264,18 +264,35 @@ void Renderer::buildPixelation(const Frame& source) {
         line(point(std::cos(a)*r,.23f,std::sin(a)*r),point(std::cos(a)*r,.23f+height,std::sin(a)*r),.11f,.45f);
         if(i%2==0) pixelBillboard(ox+std::cos(a)*1.84f,.77f+.08f*std::sin(t+i),oz+std::sin(a)*1.84f,.13f,.13f,hot,1,.70f,f,t*.2f);
     }
-    // ③ アバターを囲む立方体。拡大→回転→配置の順で変換します。
+    // ③ アバターを囲む立方体。BGM の拍で拡大→回転→配置の順で変換します。
+    // auraBeat は音楽の再生位置に同期した 0〜1 の鼓動。t を使わず、Lv で曲の拍を変えません。
+    const float beat=std::isfinite(source.auraBeat)?std::clamp(source.auraBeat,0.f,1.f):0.f;
+    const float cagePulse=1+px::CageBeatScale*beat,cageEnergy=1+px::CageBeatBrightness*beat;
     for(unsigned cube=0;cube<px::CageCount;++cube) {
-        const float size=px::CageSize+cube*px::CageSizeStep;
+        const float size=(px::CageSize+cube*px::CageSizeStep)*cagePulse;
         const auto transform=XMMatrixScaling(size,size*1.15f,size)*XMMatrixRotationX(.27f+t*(.36f+cube*.14f))*
             XMMatrixRotationZ(.30f+cube*.48f+t*.22f)*XMMatrixRotationY(t*.65f+cube*.9f)*XMMatrixTranslation(ox,px::CageHeight,oz);
         XMVECTOR corners[8];
         for(unsigned i=0;i<8;++i) corners[i]=XMVector3TransformCoord(XMVectorSet(i&1?.5f:-.5f,i&2?.5f:-.5f,i&4?.5f:-.5f,1),transform);
-        for(unsigned i=0;i<8;++i) for(unsigned bit=1;bit<=4;bit*=2) if(!(i&bit)) line(corners[i],corners[i|bit],.12f,cube?.33f:.75f);
+        for(unsigned i=0;i<8;++i) for(unsigned bit=1;bit<=4;bit*=2) if(!(i&bit))
+            line(corners[i],corners[i|bit],.12f,(cube?.33f:.75f)*cageEnergy);
     }
     // ④ PLAYER1/2 の画面。実際の周回・弾道の座標計算は core/animation.cpp にあります。
     for(unsigned player=0;player<2;++player) {
         const float playerX=volley.players[player].x,playerZ=volley.players[player].z,playerY=volley.players[player].y;
+        // 現在地から過去の機体位置へつなぐ連続した光の尾。上昇・下降した跡もそのまま残ります。
+        // pixelationPlayer は弾の発射位置と共有する計算なので、機体と尾が別々の軌道になりません。
+        auto trailHead=volley.players[player];
+        for(unsigned segment=1;segment<=px::PlayerTrailSegments;++segment) {
+            const float u=segment/static_cast<float>(px::PlayerTrailSegments);
+            const float pastTime=t-u*px::PlayerTrailDuration;
+            if(pastTime<0) break; // 表示直後に、まだ飛んでいない過去の尾を作らない
+            const auto tail=pixelationPlayer(pastTime,player);
+            const float fade=1-u;
+            pixelLine(point(trailHead.x,trailHead.y,trailHead.z),point(tail.x,tail.y,tail.z),
+                px::PlayerTrailWidth*(.2f+.8f*fade),hot,px::PlayerTrailBrightness*fade*fade,f);
+            trailHead=tail;
+        }
         const auto rotation=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw);
         const auto screen=rotation*XMMatrixTranslation(ox+playerX,playerY,oz+playerZ);
         pixelQuad(XMMatrixScaling(px::PlayerScreenWidth,px::PlayerScreenHeight,1)*screen,color,3,.9f);

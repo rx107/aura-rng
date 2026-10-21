@@ -357,6 +357,23 @@ void Renderer::debugUi(const Frame& f) {
                 ImGui::TextWrapped("%s",f.presentation.settings.pixelationFinalBgmPath.empty()?t("Default: Censored (bundled or local Downloads)",
                     "初期設定: Censored（同梱またはローカルDownloads）"):f.presentation.settings.pixelationFinalBgmPath.c_str());
                 if(ImGui::SmallButton(t("Use default track##pixelationFinal","初期設定の曲を使用##pixelationFinal"))) debugActions_.pixelationFinalBgmPath=std::string{};
+                ImGui::Separator(); ImGui::TextUnformatted(t("PIXELATION / CUBE HEARTBEAT","PIXELATION / キューブの鼓動"));
+                bool autoBeat=f.presentation.settings.pixelationBpm==0;
+                if(ImGui::Checkbox(t("Estimate BPM from music","音楽からBPMを推定"),&autoBeat))
+                    debugActions_.pixelationBpm=autoBeat?0.f:120.f;
+                ImGui::Text(t("Detected tempo: %.1f BPM","推定テンポ: %.1f BPM"),f.musicBpm);
+                if(!autoBeat) {
+                    float bpm=f.presentation.settings.pixelationBpm;
+                    if(ImGui::SliderFloat("BPM##pixelationBeat",&bpm,30,300,"%.1f")) debugActions_.pixelationBpm=bpm;
+                }
+                float beatOffset=f.presentation.settings.pixelationBeatOffset;
+                if(ImGui::DragFloat(t("Beat offset / seconds","拍の時差 / 秒"),&beatOffset,.01f,-2,2,"%.2f",ImGuiSliderFlags_AlwaysClamp))
+                    debugActions_.pixelationBeatOffset=beatOffset;
+                if(ImGui::SmallButton(t("Reset heartbeat settings","鼓動の設定を初期値へ"))) {
+                    debugActions_.pixelationBpm=0.f; debugActions_.pixelationBeatOffset=0.f;
+                }
+                ImGui::TextWrapped("%s",t("Uses music playback time. If the estimate feels half/double speed, enter the BPM manually. Positive offset delays the pulse. No music means no automatic pulse.",
+                    "音楽の実再生時刻に同期します。推定が半分・倍に感じるときはBPMを手動指定。正の時差で鼓動が遅れます。音楽のない場合は自動で鼓動しません。"));
                 ImGui::Separator(); ImGui::TextUnformatted("Illusionary");
                 if(ImGui::Button(t("Choose Illusionary BGM...","Illusionary BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.illusionaryBgmPath=*path;
                 ImGui::TextWrapped("%s",f.presentation.settings.illusionaryBgmPath.empty()?"The Weirdos / Ogg Vorbis":f.presentation.settings.illusionaryBgmPath.c_str());
