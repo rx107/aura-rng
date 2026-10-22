@@ -186,7 +186,7 @@ void Renderer::createCutscene() {
 void Renderer::drawCutscene(const Frame& frame) {
     if(frame.cutsceneTime<0 || frame.cutsceneTime>EquinoxCutsceneDuration) return;
     const float opacity=tuning::cutscene::endingOpacity(frame.cutsceneTime,EquinoxCutsceneDuration);
-    const float shake=-tuning::cutscene::EquinoxBassShakeHeight*std::clamp(frame.cutsceneBass,0.f,1.f);
+    const float shake=-tuning::cutscene::EquinoxBassShakeHeight*std::clamp(frame.cutsceneBeat,0.f,1.f);
     const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,opacity,static_cast<float>(height_),shake,0,0,0};
     context_->UpdateSubresource(cutsceneConstants_.Get(),0,nullptr,constants,0,0);
     ID3D11RenderTargetView* target=target_.Get(); context_->OMSetRenderTargets(1,&target,nullptr);
@@ -205,7 +205,7 @@ void Renderer::cutsceneUi(const Frame& frame) {
     const float factor=static_cast<float>(height_)/480;
     D2D1_MATRIX_3X2_F previous; d2d_->GetTransform(&previous);
     const float ending=tuning::cutscene::endingOpacity(time,EquinoxCutsceneDuration);
-    const float shake=-480*tuning::cutscene::EquinoxBassShakeHeight*std::clamp(frame.cutsceneBass,0.f,1.f);
+    const float shake=-480*tuning::cutscene::EquinoxBassShakeHeight*std::clamp(frame.cutsceneBeat,0.f,1.f);
     d2d_->SetTransform(D2D1::Matrix3x2F::Translation(0,shake)*D2D1::Matrix3x2F::Scale(factor,factor));
     const Verse* verse=nullptr;
     for(const auto& v:Verses) if(time>=v.start && time<=v.end) { verse=&v; break; }

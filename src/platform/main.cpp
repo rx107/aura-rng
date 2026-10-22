@@ -1,5 +1,6 @@
 #include "core/aura.hpp"
 #include "core/animation.hpp"
+#include "core/equinox_animation.hpp"
 #include "render/renderer.hpp"
 #include "platform/audio.hpp"
 #include "platform/discord.hpp"
@@ -25,7 +26,7 @@ using Clock=std::chrono::steady_clock;
 struct Options {
     bool smoke{},warp{},debug{},silent{};
     std::filesystem::path capture, report, saveDir;
-    std::filesystem::path vrm,bgm,pixelationBgm,pixelationFinalBgm,illusionaryBgm;
+    std::filesystem::path vrm,bgm,pixelationBgm,pixelationFinalBgm,illusionaryBgm,equinoxBgm;
     std::uint64_t seed{};
 };
 Options options() {
@@ -44,6 +45,7 @@ Options options() {
         else if(a.starts_with(L"--pixelation-bgm=")) result.pixelationBgm=a.substr(17);
         else if(a.starts_with(L"--pixelation-final-bgm=")) result.pixelationFinalBgm=a.substr(23);
         else if(a.starts_with(L"--illusionary-bgm=")) result.illusionaryBgm=a.substr(18);
+        else if(a.starts_with(L"--equinox-bgm=")) result.equinoxBgm=a.substr(14);
         else if(a.starts_with(L"--capture=")) result.capture=a.substr(10);
         else if(a.starts_with(L"--report=")) result.report=a.substr(9);
         else if(a.starts_with(L"--save-dir=")) result.saveDir=a.substr(11);
@@ -92,6 +94,7 @@ public:
         if(!opts_.pixelationBgm.empty()) presentation_.settings.pixelationBgmPath=utf8(opts_.pixelationBgm);
         if(!opts_.pixelationFinalBgm.empty()) presentation_.settings.pixelationFinalBgmPath=utf8(opts_.pixelationFinalBgm);
         if(!opts_.illusionaryBgm.empty()) presentation_.settings.illusionaryBgmPath=utf8(opts_.illusionaryBgm);
+        if(!opts_.equinoxBgm.empty()) presentation_.settings.equinoxBgmPath=utf8(opts_.equinoxBgm);
         downloads_=downloadsFolder();
         if(!downloads_.empty()) cutsceneAudioPath_=downloads_/L"EquinoxReworkedCutscene.mp4.mp4";
         roller_.setLuck(presentation_.settings.luck);
@@ -116,10 +119,16 @@ public:
         // 通常プレイは音声出力サンプルの時計。検証時だけ固定時刻で同じ絵を再現します。
         const float musicSecond=opts_.smoke?time_:music_.playbackSeconds().value_or(-1);
         const float pulse=pixelationMusic?music_.beatPulse(musicSecond,presentation_.settings.pixelationBpm,presentation_.settings.pixelationBeatOffset):0;
+        const auto& audioSettings=presentation_.settings;
+        const float equinoxSecond=opts_.smoke?time_:music_.playbackSeconds().value_or(effectClock_);
+        const float equinoxBeat=music_.playing()?music_.beatPosition(equinoxSecond,audioSettings.equinoxBpm,audioSettings.equinoxBeatOffset):
+            aura::musicBeatPosition(opts_.smoke?time_:effectClock_,audioSettings.equinoxBpm,audioSettings.equinoxBeatOffset);
+        const float cutsceneBeat=cutsceneActive() && cutsceneKind_==aura::CutsceneKind::Equinox && cutsceneMusic_.playing()?
+            aura::beatPulse(cutsceneTime_,{audioSettings.equinoxCutsceneBpm,audioSettings.equinoxCutsceneBeatOffset,1}):0;
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
             mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime(),
             stageSelectOpen_,stageTravel_.progress(),stageTravel_.target(),collectionCategory_,
-            cutsceneMusic_.bassPulse(cutsceneTime_),pulse,music_.estimatedBpm()};
+            cutsceneBeat,pulse,music_.estimatedBpm(),equinoxBeat};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -341,14 +350,26 @@ private:
         if(commands.pixelationBgmPath) {presentation_.settings.pixelationBgmPath=*commands.pixelationBgmPath; music_.reload();}
         if(commands.pixelationFinalBgmPath) {presentation_.settings.pixelationFinalBgmPath=*commands.pixelationFinalBgmPath; music_.reload();}
         if(commands.illusionaryBgmPath) {presentation_.settings.illusionaryBgmPath=*commands.illusionaryBgmPath; music_.reload();}
+        if(commands.equinoxBgmPath) {presentation_.settings.equinoxBgmPath=*commands.equinoxBgmPath; music_.reload();}
         if(commands.volume) presentation_.settings.volume=*commands.volume;
         if(commands.pixelationBpm && std::isfinite(*commands.pixelationBpm) &&
             (*commands.pixelationBpm==0 || (*commands.pixelationBpm>=30 && *commands.pixelationBpm<=300)))
             presentation_.settings.pixelationBpm=*commands.pixelationBpm;
         if(commands.pixelationBeatOffset && std::isfinite(*commands.pixelationBeatOffset))
             presentation_.settings.pixelationBeatOffset=std::clamp(*commands.pixelationBeatOffset,-2.f,2.f);
+        const auto setTempo=[](const std::optional<float>& value,float& target) {
+            if(value && std::isfinite(*value) && *value>=30 && *value<=300) target=*value;
+        };
+        const auto setBeatOffset=[](const std::optional<float>& value,float& target) {
+            if(value && std::isfinite(*value))target=std::clamp(*value,-2.f,2.f);
+        };
+        setTempo(commands.equinoxBpm,presentation_.settings.equinoxBpm);
+        setTempo(commands.equinoxCutsceneBpm,presentation_.settings.equinoxCutsceneBpm);
+        setBeatOffset(commands.equinoxBeatOffset,presentation_.settings.equinoxBeatOffset);
+        setBeatOffset(commands.equinoxCutsceneBeatOffset,presentation_.settings.equinoxCutsceneBeatOffset);
         if(commands.username || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
-            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.illusionaryBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes || commands.pixelationBpm || commands.pixelationBeatOffset) {
+            commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.illusionaryBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes || commands.pixelationBpm || commands.pixelationBeatOffset ||
+            commands.equinoxBgmPath || commands.equinoxBpm || commands.equinoxBeatOffset || commands.equinoxCutsceneBpm || commands.equinoxCutsceneBeatOffset) {
             savePlayerSettings();
         }
         if(commands.playEquinoxCutscene) startCutscene();
@@ -393,6 +414,7 @@ private:
         bool musicActive=false;
         if(!cutsceneActive() && id=="singularity") {audioPath_=audioFile(s.bgmPath,L"Tides_of_the_Outer_Reach.mp3"); musicActive=true;}
         if(!cutsceneActive() && id=="illusionary") {audioPath_=audioFile(s.illusionaryBgmPath,L"The_Weirdos.ogg"); musicActive=true;}
+        if(!cutsceneActive() && id=="equinox") {audioPath_=audioFile(s.equinoxBgmPath,L"Koraii_Layers_Cut.mpeg"); musicActive=true;}
         if(!cutsceneActive() && id=="pixelation" && level>=1) {
             audioPath_=level>=3?audioFile(s.pixelationFinalBgmPath,L"Censored.mp3.mpeg"):audioFile(s.pixelationBgmPath,L"Redline_Shift.mp3");
             musicActive=true;
@@ -788,8 +810,32 @@ private:
         const auto cutRolls=progress_.rolls; const auto cutLogs=log_.size();
         const auto cutLogBytes=std::filesystem::file_size(saves_/L"rolls.csv");
         aura::DebugActions equinoxPreview; equinoxPreview.preview=equinox; auto_=true; applyDebugActions(equinoxPreview);
-        time_=2; distance_=11; pitch_=.27f; movement_=0; walk_=0; render(false); captureExtra(L"-equinox");
+        update(.4f);
+        const auto equinoxAudioBytes=music_.decodedBytes();
+        if(!opts_.silent && (!music_.playing() || equinoxAudioBytes<20'000'000 || audioPath_.filename()!=L"Koraii_Layers_Cut.mpeg"))
+            throw std::runtime_error("Equinox normal BGM did not play the supplied track: "+music_.status());
+        time_=2; distance_=13; pitch_=.27f; movement_=0; walk_=0; render(false); captureExtra(L"-equinox");
         if(auto_ || !renderer_->equinoxCount() || renderer_->pixelationCount()) throw std::runtime_error("Equinox preview failed");
+        const auto eqRolls=progress_.rolls,eqLogs=log_.size();
+        aura::DebugActions eqTiming; eqTiming.equinoxBpm=175.f; eqTiming.equinoxBeatOffset=.125f;
+        eqTiming.equinoxCutsceneBpm=185.f; eqTiming.equinoxCutsceneBeatOffset=-.08f; applyDebugActions(eqTiming);
+        const auto eqSaved=aura::loadSettings(saves_/L"settings.txt");
+        if(eqSaved.equinoxBpm!=175 || eqSaved.equinoxBeatOffset!=.125f || eqSaved.equinoxCutsceneBpm!=185 || eqSaved.equinoxCutsceneBeatOffset!=-.08f ||
+            progress_.rolls!=eqRolls || log_.size()!=eqLogs || progress_.equipped!=chosen)
+            throw std::runtime_error("Equinox beat settings did not save independently of progress");
+        const aura::Settings eqDefaults;
+        eqTiming.equinoxBpm=eqDefaults.equinoxBpm; eqTiming.equinoxBeatOffset=eqDefaults.equinoxBeatOffset;
+        eqTiming.equinoxCutsceneBpm=eqDefaults.equinoxCutsceneBpm; eqTiming.equinoxCutsceneBeatOffset=eqDefaults.equinoxCutsceneBeatOffset;
+        applyDebugActions(eqTiming);
+        const bool eqDebug=renderer_->debugOpen(); if(eqDebug)renderer_->toggleDebug();
+        for(float beat:{.4f,4.f,4.12f,4.65f,8.4f,12.4f,16.4f}) {
+            auto beatFrame=frame(); beatFrame.equinoxBeat=beat;
+            if(beat!=4.f && beat!=4.12f && beat!=4.65f)beatFrame.cameraPitch=1.05f;
+            renderer_->draw(beatFrame,false);
+            if(!opts_.capture.empty()) renderer_->capture(opts_.capture.parent_path()/
+                (L"equinox-beat-"+std::to_wstring(static_cast<int>(std::lround(beat*100)))+L".png"));
+        }
+        if(eqDebug)renderer_->toggleDebug();
         const auto equinoxBegin=Clock::now();
         for(int i=0;i<60;++i) {time_+=1.f/60; render(false);}
         const double meanEquinoxMs=std::chrono::duration<double,std::milli>(Clock::now()-equinoxBegin).count()/60;
@@ -805,7 +851,7 @@ private:
         }
         if(!opts_.warp && !opts_.capture.empty()) {
             for(int i=0;i<36;++i) {
-                time_=i*(1.565f/36);
+                time_=i*((60.f/180.f)*aura::tuning::equinox::orbitBeats/36);
                 const auto suffix=L"-equinox-frame-"+std::to_wstring(i); captureExtra(suffix.c_str());
             }
         }
@@ -856,8 +902,8 @@ private:
         }
         cutsceneTime_=4.1f;
         for(float bass:{0.f,1.f}) {
-            auto testFrame=frame(); testFrame.cutsceneBass=bass; renderer_->draw(testFrame,false);
-            captureExtra(bass?L"-cutscene-bass1":L"-cutscene-bass0");
+            auto testFrame=frame(); testFrame.cutsceneBeat=bass; renderer_->draw(testFrame,false);
+            if(!opts_.capture.empty()) renderer_->capture(opts_.capture.parent_path()/(bass?L"cutscene-beat1.png":L"cutscene-beat0.png"));
         }
         cutsceneTime_=aura::EquinoxCutsceneDuration-.01f; update(.02f);
         if(cutsceneActive() || cutsceneMusic_.playing() || !renderer_->debugOpen()) throw std::runtime_error("Cutscene timeout did not stop audio / restore debug state");
@@ -937,7 +983,7 @@ private:
         applyDebugActions(captionTuning);
         cutsceneTime_=24.2f; render(false); captureExtra(L"-breakthrough-words");
         constexpr float breakCutTimes[]={.4f,1.5f,2.5f,3.39f,3.4f,3.7f,6.7f,7.29f,7.3f,7.6f,9.6f,10.85f,
-            11.09f,11.1f,11.7f,13.4f,14.14f,14.15f,14.5f,15.04f,15.05f,16.5f,18,20,20.4f,21,24.2f,26,28,29.05f,29.5f};
+            11.09f,11.1f,11.7f,12.999f,13.f,13.4f,14.119f,14.12f,14.14f,14.15f,14.5f,15.04f,15.05f,16.5f,18,20,20.4f,21,24.2f,26,28,29.05f,29.5f};
         for(float second:breakCutTimes) {
             cutsceneTime_=second; render(false);
             const auto suffix=L"-breakthrough-cutscene-"+std::to_wstring(static_cast<int>(std::lround(second*1000))); captureExtra(suffix.c_str());
@@ -1051,9 +1097,15 @@ private:
             aura::DebugActions desert; desert.preview=index; auto_=true; applyDebugActions(desert);
             x_=9; z_=-2; time_=1.2f; yaw_=.15f; distance_=10; pitch_=.3f; movement_=0; walk_=0; facing_=0;
             render(false);
-            if(auto_ || !renderer_->desertAuraCount() || renderer_->desertAuraCount()>300 || renderer_->illusionaryCount())
+            const auto desertBudget=index==pharaoh?600u:300u;
+            if(auto_ || !renderer_->desertAuraCount() || renderer_->desertAuraCount()>desertBudget || renderer_->illusionaryCount())
                 throw std::runtime_error("Lightweight desert aura preview/switch failed");
             const auto suffix=L"-desert-aura-"+aura::widen(roller_.catalog()[index].id); captureExtra(suffix.c_str());
+            if(index==pharaoh) {
+                distance_=10.5f; pitch_=.12f; yaw_=0; render(false); captureExtra(L"-pharaoh-front");
+                yaw_=.45f; render(false); captureExtra(L"-pharaoh-angle");
+                pitch_=.8f; render(false); captureExtra(L"-pharaoh-overhead");
+            }
             time_+=.6f; movement_=1; walk_=2; render(false);
         }
         update(.6f);
@@ -1221,16 +1273,17 @@ private:
                <<"BreakThrough hard cut: PASS / no underlying world through the final frame, full audio volume at 29.5s, immediate aura reveal and audio stop at the end\n";
             out<<"BreakThrough captions: PASS / eight measured word times, live offset/per-word changes saved during playback, reset to defaults\n";
             out<<"Illusionary: PASS / "<<illusionaryInstances<<" opaque/glow instances, preview isolation, arched torso/upward head/asymmetric elbow pose, solid floor, orbit lights, fixed during movement, resize, cutscene restore and clean switching\n"
-               <<"Desert auras: PASS / Dune 1 in 50, Mirage 1 in 5000, Pharaoh 1 in 250000, <=300 glow instances each, history isolation\n"
+               <<"Desert auras: PASS / Dune 1 in 50, Mirage 1 in 5000, Pharaoh 1 in 250000, Pharaoh <=600 / others <=300 glow instances, history isolation\n"
                <<"Rocket: PASS / shared respawn XZ, boarding clearance, all six planets\n";
             if(opts_.silent) out<<"Audio: disabled by --silent; device playback verified separately on the development PC\n";
-            else out<<"Illusionary Ogg audio: PASS / "<<illusionaryAudioBytes<<" decoded PCM bytes, loop and stop\n";
+            else out<<"Equinox normal BGM: PASS / "<<equinoxAudioBytes<<" PCM bytes, supplied Koraii track, independent BPM/offset settings\n"
+                    <<"Illusionary Ogg audio: PASS / "<<illusionaryAudioBytes<<" decoded PCM bytes, loop and stop\n";
             out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
                <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";
             if(breakthroughAudioBytes) out<<"BreakThrough audio: PASS / "<<breakthroughAudioBytes<<" PCM bytes / 30s non-looping clip, bundled trimmed M4A or local MP4 fallback, restart and stop\n";
             else out<<"BreakThrough local audio: visual-only / reference MP4 unavailable\n";
-            if(cutsceneDecoded) out<<"Equinox audio: PASS / "<<cutsceneDecoded<<" decoded PCM bytes / 10.9s clip, measured bass, restart from beginning and stop\n";
+            if(cutsceneDecoded) out<<"Equinox audio: PASS / "<<cutsceneDecoded<<" decoded PCM bytes / 10.9s clip, separate beat clock, restart from beginning and stop\n";
             else out<<"Local cutscene audio: visual-only / reference MP4 unavailable\n";
             if(!opts_.pixelationBgm.empty()) out<<"Redline Shift: PASS / "<<redlineDecoded<<" decoded PCM bytes / Lv1-2 loop and stop\n";
             if(!opts_.pixelationFinalBgm.empty()) out<<"Censored: PASS / "<<finalDecoded<<" decoded PCM bytes / Lv3 switch and stop\n";

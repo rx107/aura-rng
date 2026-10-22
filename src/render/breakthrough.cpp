@@ -60,7 +60,7 @@ float4 main(Input i):SV_TARGET {
 // ここで柱のcenter.yに時間tを足さないことが「CutSceneの柱は静止」の要点。
 constexpr char CinematicShader[]=R"(
 cbuffer Cinematic:register(b0) {
-    float4 screenAndTime; float4 cameraEye; float4 cameraTarget; float4 sceneTuning;
+    float4 screenAndTime; float4 cameraEye; float4 cameraTarget; float4 sceneTuning; float4 inkTuning;
 };
 struct Input { float4 p:SV_POSITION; float2 uv:TEXCOORD0; };
 float hash(float2 p) { float3 a=frac(float3(p.x,p.y,p.x)*.1031);a+=dot(a,a.yzx+33.33);return frac((a.x+a.y)*a.z); }
@@ -90,7 +90,7 @@ float4 main(Input i):SV_TARGET {
     float2 warp=float2(noise(q*3.5+t*.021),noise(q*3.5+19-t*.017));
     float fog=pow(saturate(cloud(q*3.9+warp*2.4+float2(t*.019,-t*.012))-.16),1.3);
     float3 color=float3(.006,.008,.024)+fog*float3(.16,.17,.34);
-    float2 lightPos=float2(0,0);
+    float2 lightPos=float2(0,0);float pillarSilhouette=0;
     {
         float3 lightWorld=monolithSpace?float3(0,3.9,15):float3(0,3.9,0);
         float3 toLight=lightWorld-eye;
@@ -119,6 +119,7 @@ float4 main(Input i):SV_TARGET {
             if(hit<nearest) {nearest=hit;surface=localEye+localRay*hit;columnID=n;halfSize=bounds;}
         }
         if(nearest<9999) {
+            pillarSilhouette=1;
             float3 normalized=abs(surface/halfSize);
             float2 uv=surface.xy/(halfSize.xy*2)+.5;
             if(normalized.x>normalized.z)uv=float2(surface.z/(halfSize.z*2)+.5,uv.y);
@@ -182,6 +183,14 @@ float4 main(Input i):SV_TARGET {
     color=lerp(color,dot(color,float3(.299,.587,.114)).xxx,desaturate);
     color*=mask*smoothstep(0,.25,t)*(1-smoothstep(28.9,29.0,t));
     color+=exp(-pow((t-29.05)/.045,2))*.68;
+    if(inkTuning.x>.5) {
+        // 字幕と同じCPU側の判定で、一瞬だけ白黒のインク画にします。
+        // 彩度を落とす処理ではなく二値化。中間の灰色や青色は出しません。
+        // 明るいコア・稲妻を黒へ反転し、柱は現在の形のまま黒いシルエットにします。
+        float luminance=dot(color,float3(.299,.587,.114));
+        float blackInk=max(step(inkTuning.y,luminance),pillarSilhouette);
+        color=(1-blackInk).xxx*step(.5,mask);
+    }
     return float4(saturate(color),screenAndTime.z);
 })";
 
@@ -203,7 +212,7 @@ void Renderer::createBreakthrough() {
     };
     shader(MaterialShader,sizeof(MaterialShader)-1,&breakthroughPs_,"breakthrough-material.hlsl");
     shader(CinematicShader,sizeof(CinematicShader)-1,&breakthroughCutscenePs_,"breakthrough-cutscene.hlsl");
-    D3D11_BUFFER_DESC constants{};constants.ByteWidth=64;constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC constants{};constants.ByteWidth=80;constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     constants.Usage=D3D11_USAGE_DEFAULT;
     checked(device_->CreateBuffer(&constants,nullptr,&breakthroughConstants_),"BreakThrough CutScene constants");
     D3D11_TEXTURE2D_DESC description{};description.Width=1024;description.Height=256;
@@ -349,7 +358,8 @@ void Renderer::drawBreakthroughCutscene(const Frame& frame) {
     const float constants[]={frame.cutsceneTime,static_cast<float>(width_)/height_,opacity,static_cast<float>(height_),
         camera.eye[0],camera.eye[1],camera.eye[2],camera.focalLength,
         camera.target[0],camera.target[1],camera.target[2],camera.roll,
-        camera.blackout?-1.f:camera.monolithSpace?1.f:0.f,camera.whiteout,tuning::cutscene::BreakthroughMonolithScale,tuning::cutscene::BreakthroughCoreFlareDistance};
+        camera.blackout?-1.f:camera.monolithSpace?1.f:0.f,camera.whiteout,tuning::cutscene::BreakthroughMonolithScale,tuning::cutscene::BreakthroughCoreFlareDistance,
+        tuning::cutscene::breakthroughIvCaptionVisible(frame.cutsceneTime)?1.f:0.f,tuning::cutscene::BreakthroughIvInkThreshold,0,0};
     context_->UpdateSubresource(breakthroughConstants_.Get(),0,nullptr,constants,0,0);
     ID3D11RenderTargetView* target=target_.Get();context_->OMSetRenderTargets(1,&target,nullptr);
     context_->OMSetDepthStencilState(effectDepth_.Get(),0);context_->OMSetBlendState(effectBlend_.Get(),nullptr,0xffffffff);
@@ -366,13 +376,21 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     if(t<0 || t>BreakthroughCutsceneDuration)return;
     const float factor=static_cast<float>(height_)/480,referenceWidth=static_cast<float>(width_)*480/height_;
     const float ending=tuning::cutscene::endingOpacity(t,BreakthroughCutsceneDuration,true);
+    const bool inkMode=tuning::cutscene::breakthroughIvCaptionVisible(t);
     D2D1_MATRIX_3X2_F previous;d2d_->GetTransform(&previous);
+    const auto previousAntialias=d2d_->GetAntialiasMode();
+    const auto previousTextAntialias=d2d_->GetTextAntialiasMode();
+    if(inkMode) {
+        // 文字や傾いた黒帯の縁にも灰色を混ぜず、画面全体を白と黒だけにします。
+        d2d_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+        d2d_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_ALIASED);
+    }
     auto caption=[&](std::wstring_view value,float x,float y,float angle,float opacity=1.f,float size=14.f) {
         opacity*=ending;
-        const auto ink=D2D1::ColorF(.97f,.97f,1.f,opacity);
+        const auto ink=inkMode?D2D1::ColorF(1,1,1,opacity):D2D1::ColorF(.97f,.97f,1.f,opacity);
         const float width=static_cast<float>(value.size())*size*.49f+14;
         d2d_->SetTransform(D2D1::Matrix3x2F::Rotation(angle,D2D1::Point2F(x,y))*D2D1::Matrix3x2F::Scale(factor,factor));
-        rect(x-width*.5f,y-10,width,21,D2D1::ColorF(0,0,0,opacity*.94f));
+        rect(x-width*.5f,y-10,width,21,D2D1::ColorF(0,0,0,opacity*(inkMode?1.f:.94f)));
         brush_->SetColor(ink);
         if(size==14) d2d_->DrawText(value.data(),static_cast<UINT32>(value.size()),cutsceneFont_.Get(),
             D2D1::RectF(x-width*.5f+3,y-10,x+width*.5f-3,y+11),brush_.Get());
@@ -382,7 +400,7 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     if(t>=1.12f && t<3.1f)caption(L"i - started with few",center-180,206,-3);
     if(t>=5.10f && t<7.0f)caption(L"ii - only less it gets..",center+162,307,2);
     if(t>=9.08f && t<10.85f)caption(L"iii - time by time, now empty",center,263,-17);
-    if(t>=tuning::cutscene::BreakthroughIvCaptionStart && t<14.12f)caption(L"iv - and there was nothing left",center+91,327,-14);
+    if(inkMode)caption(L"iv - and there was nothing left",center+91,327,-14);
     if(t>=14.2f && t<15.0f) {
         d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
         text(L"get out of my head",center-160,228,320,24,11,D2D1::ColorF(.83f,.83f,.86f),false,true);
@@ -413,8 +431,10 @@ void Renderer::breakthroughCutsceneUi(const Frame& frame) {
     }
     d2d_->SetTransform(D2D1::Matrix3x2F::Scale(factor,factor));
     const bool japanese=frame.presentation.settings.language==Language::Japanese;
-    rect(referenceWidth-112,8,104,23,D2D1::ColorF(0,0,0,.40f*ending),3);
-    text(japanese?L"Esc / スキップ":L"Esc / Skip",referenceWidth-108,12,96,17,10,D2D1::ColorF(1,1,1,.82f*ending),false,true);
+    rect(referenceWidth-112,8,104,23,D2D1::ColorF(0,0,0,(inkMode?1.f:.40f)*ending),3);
+    text(japanese?L"Esc / スキップ":L"Esc / Skip",referenceWidth-108,12,96,17,10,D2D1::ColorF(1,1,1,(inkMode?1.f:.82f)*ending),false,true);
     d2d_->SetTransform(previous);
+    d2d_->SetAntialiasMode(previousAntialias);
+    d2d_->SetTextAntialiasMode(previousTextAntialias);
 }
 } // namespace aura

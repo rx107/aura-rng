@@ -374,6 +374,25 @@ void Renderer::debugUi(const Frame& f) {
                 }
                 ImGui::TextWrapped("%s",t("Uses music playback time. If the estimate feels half/double speed, enter the BPM manually. Positive offset delays the pulse. No music means no automatic pulse.",
                     "音楽の実再生時刻に同期します。推定が半分・倍に感じるときはBPMを手動指定。正の時差で鼓動が遅れます。音楽のない場合は自動で鼓動しません。"));
+                ImGui::Separator(); ImGui::TextUnformatted("EQUINOX / BPM");
+                if(ImGui::Button(t("Choose Equinox BGM...","Equinox BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.equinoxBgmPath=*path;
+                ImGui::TextWrapped("%s",f.presentation.settings.equinoxBgmPath.empty()?"Koraii / Layers Cut":f.presentation.settings.equinoxBgmPath.c_str());
+                if(ImGui::SmallButton(t("Use default track##equinox","初期設定の曲を使用##equinox"))) debugActions_.equinoxBgmPath=std::string{};
+                float equinoxBpm=f.presentation.settings.equinoxBpm,equinoxOffset=f.presentation.settings.equinoxBeatOffset;
+                if(ImGui::SliderFloat(t("Aura BPM##eq","通常オーラのBPM##eq"),&equinoxBpm,30,300,"%.2f")) debugActions_.equinoxBpm=equinoxBpm;
+                if(ImGui::DragFloat(t("Aura beat offset / seconds##eq","通常の拍の時差 / 秒##eq"),&equinoxOffset,.005f,-2,2,"%.3f",ImGuiSliderFlags_AlwaysClamp))
+                    debugActions_.equinoxBeatOffset=equinoxOffset;
+                float cutBpm=f.presentation.settings.equinoxCutsceneBpm,cutOffset=f.presentation.settings.equinoxCutsceneBeatOffset;
+                if(ImGui::SliderFloat(t("CutScene BPM##eq","CutSceneのBPM##eq"),&cutBpm,30,300,"%.2f")) debugActions_.equinoxCutsceneBpm=cutBpm;
+                if(ImGui::DragFloat(t("CutScene beat offset / seconds##eq","CutSceneの拍の時差 / 秒##eq"),&cutOffset,.005f,-2,2,"%.3f",ImGuiSliderFlags_AlwaysClamp))
+                    debugActions_.equinoxCutsceneBeatOffset=cutOffset;
+                if(ImGui::SmallButton(t("Reset Equinox beat settings","Equinoxの拍設定を初期値へ"))) {
+                    const Settings defaults;
+                    debugActions_.equinoxBpm=defaults.equinoxBpm; debugActions_.equinoxBeatOffset=defaults.equinoxBeatOffset;
+                    debugActions_.equinoxCutsceneBpm=defaults.equinoxCutsceneBpm; debugActions_.equinoxCutsceneBeatOffset=defaults.equinoxCutsceneBeatOffset;
+                }
+                ImGui::TextWrapped("%s",t("Aura and CutScene use separate music clocks. Positive offset delays the beat. Every 4 beats: Yin, Yang, Balance, Nothing.",
+                    "通常とCutSceneは別々の音源に同期します。正の時差で拍を遅くします。床は4拍ごとに陰→陽→衡→無です。"));
                 ImGui::Separator(); ImGui::TextUnformatted("Illusionary");
                 if(ImGui::Button(t("Choose Illusionary BGM...","Illusionary BGMを選択..."),{-1,32})) if(auto path=chooseAsset(window_,false)) debugActions_.illusionaryBgmPath=*path;
                 ImGui::TextWrapped("%s",f.presentation.settings.illusionaryBgmPath.empty()?"The Weirdos / Ogg Vorbis":f.presentation.settings.illusionaryBgmPath.c_str());

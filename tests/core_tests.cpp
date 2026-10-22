@@ -2,6 +2,7 @@
 #include "core/presentation.hpp"
 #include "core/animation.hpp"
 #include "core/audio_envelope.hpp"
+#include "core/equinox_animation.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -249,6 +250,9 @@ int main(int argc, char** argv) {
         settings.pixelationFinalBgmPath="C:/Music/Pixelation \"final\".mp3";
         settings.illusionaryBgmPath="C:/音楽/The Weirdos \"loop\".ogg";
         settings.pixelationBpm=179.2f; settings.pixelationBeatOffset=-.17f;
+        settings.equinoxBgmPath="C:/音楽/陰陽 \"Equinox\".mp3";
+        settings.equinoxBpm=153.35f; settings.equinoxBeatOffset=.11f;
+        settings.equinoxCutsceneBpm=181.5f; settings.equinoxCutsceneBeatOffset=-.23f;
         settings.username="星の \"Player\" 🌟"; settings.discordEnabled=false; settings.discordApplicationId="12345678901234567890";
         aura::saveSettings(settingsPath,settings); const auto loadedSettings=aura::loadSettings(settingsPath);
         check(loadedSettings.language==aura::Language::Japanese && std::abs(loadedSettings.shirt.r-.95f)<.0001f,
@@ -260,6 +264,10 @@ int main(int argc, char** argv) {
         check(loadedSettings.illusionaryBgmPath==settings.illusionaryBgmPath,"Schema 6 preserves the Illusionary OGG path and quoted Unicode names");
         check(loadedSettings.pixelationBpm==179.2f && loadedSettings.pixelationBeatOffset==-.17f,
             "Schema 7 preserves custom BPM and beat alignment");
+        check(loadedSettings.equinoxBgmPath==settings.equinoxBgmPath &&
+            loadedSettings.equinoxBpm==settings.equinoxBpm && loadedSettings.equinoxBeatOffset==settings.equinoxBeatOffset &&
+            loadedSettings.equinoxCutsceneBpm==settings.equinoxCutsceneBpm && loadedSettings.equinoxCutsceneBeatOffset==settings.equinoxCutsceneBeatOffset,
+            "Schema 8 round trips a quoted Unicode Equinox path and independent normal/cutscene beat settings");
         check(loadedSettings.username==settings.username && !loadedSettings.discordEnabled && loadedSettings.discordApplicationId==settings.discordApplicationId,
             "Schema 4 preserves Unicode/quoted usernames and Discord preferences");
         settings.breakthroughCaptionOffset=-.18f;
@@ -281,6 +289,22 @@ int main(int argc, char** argv) {
         aura::saveSettings(settingsPath,settings);
         {
             std::ifstream oldSettings(settingsPath); std::string all((std::istreambuf_iterator<char>(oldSettings)),{});
+            check(all.starts_with("STARS_RNG_SETTINGS 8\n"),"New settings use schema 8");
+            const auto eraseRow=[&](const char* field) {
+                const auto row=all.find(field);
+                check(row!=std::string::npos,"Settings migration fixture contains the field being removed");
+                all.erase(row,all.find('\n',row)-row+1);
+            };
+            all.replace(0,20,"STARS_RNG_SETTINGS 7");
+            eraseRow("equinox_bgm "); eraseRow("equinox_beat ");
+            {std::ofstream legacySettings(settingsPath); legacySettings<<all;}
+            const auto migratedV7=aura::loadSettings(settingsPath);
+            const aura::Settings defaults;
+            check(migratedV7.pixelationBpm==settings.pixelationBpm && migratedV7.pixelationBeatOffset==settings.pixelationBeatOffset &&
+                migratedV7.illusionaryBgmPath==settings.illusionaryBgmPath && migratedV7.equinoxBgmPath.empty() &&
+                migratedV7.equinoxBpm==defaults.equinoxBpm && migratedV7.equinoxBeatOffset==defaults.equinoxBeatOffset &&
+                migratedV7.equinoxCutsceneBpm==defaults.equinoxCutsceneBpm && migratedV7.equinoxCutsceneBeatOffset==defaults.equinoxCutsceneBeatOffset,
+                "Schema 7 retains Pixelation alignment and migrates both Equinox clocks to current defaults");
             all.replace(all.find("STARS_RNG_SETTINGS 7"),20,"STARS_RNG_SETTINGS 6");
             const auto beatRow=all.find("pixelation_beat ");
             check(beatRow!=std::string::npos,"New settings contain the beat alignment field");
@@ -289,6 +313,9 @@ int main(int argc, char** argv) {
             const auto migratedV6=aura::loadSettings(settingsPath);
             check(migratedV6.illusionaryBgmPath==settings.illusionaryBgmPath && migratedV6.pixelationBpm==0 && migratedV6.pixelationBeatOffset==0,
                 "Schema 6 keeps audio paths and defaults to automatic beat detection");
+            check(migratedV6.equinoxBgmPath.empty() && migratedV6.equinoxBpm==defaults.equinoxBpm &&
+                migratedV6.equinoxCutsceneBpm==defaults.equinoxCutsceneBpm,
+                "Schema 6 also receives independent default Equinox beat clocks");
             all.replace(all.find("STARS_RNG_SETTINGS 6"),20,"STARS_RNG_SETTINGS 5");
             const auto musicRow=all.find("illusionary_bgm ");
             check(musicRow!=std::string::npos,"New settings contain the named Illusionary music field");
@@ -391,6 +418,14 @@ int main(int argc, char** argv) {
                 !breakthroughCamera(15.05f).blackout && !breakthroughCamera(15.05f).monolithSpace &&
                 !breakthroughCamera(29.f).monolithSpace,
                 "Get out of my head appears on black before a direct cut back to the original seven-pillar finale");
+            using aura::tuning::cutscene::breakthroughIvCaptionVisible;
+            const float inkStart=aura::tuning::cutscene::BreakthroughIvCaptionStart;
+            const float inkEnd=aura::tuning::cutscene::BreakthroughIvCaptionEnd;
+            check(!breakthroughIvCaptionVisible(std::nextafter(inkStart,-INFINITY)) && breakthroughIvCaptionVisible(inkStart) &&
+                breakthroughIvCaptionVisible(std::nextafter(inkEnd,-INFINITY)) && !breakthroughIvCaptionVisible(inkEnd),
+                "BreakThrough white/black rendering starts on the first iv caption frame and ends on its exact shared boundary");
+            for(float time:{-1.f,0.f,12.9f,14.15f,14.5f,15.05f,29.f,30.f,NAN,INFINITY,-INFINITY})
+                check(!breakthroughIvCaptionVisible(time),"The iv ink mode cannot affect other shots, blackout, finale or invalid times");
             check(aura::tuning::cutscene::breakthroughCaptionDrift(17.05f,16.05f)==
                     aura::tuning::cutscene::breakthroughCaptionDrift(21.f,20.f) &&
                 aura::tuning::cutscene::breakthroughCaptionDrift(20.f,20.f)==0 &&
@@ -449,6 +484,48 @@ int main(int argc, char** argv) {
             settings.pixelationBeatOffset=invalidAlignment; rejects([&]{aura::saveSettings(settingsPath,settings);});
         }
         settings.pixelationBeatOffset=0;
+        for(const std::string& invalidPath:{std::string("bad\npath"),std::string("bad\rpath"),std::string("bad\0path",8),std::string(2049,'x')}) {
+            auto bad=settings; bad.equinoxBgmPath=invalidPath;
+            rejects([&]{aura::saveSettings(settingsPath,bad);});
+        }
+        for(float invalidTempo:{NAN,INFINITY,-INFINITY,-1.f,0.f,29.f,301.f}) {
+            auto bad=settings; bad.equinoxBpm=invalidTempo;
+            rejects([&]{aura::saveSettings(settingsPath,bad);});
+            bad=settings; bad.equinoxCutsceneBpm=invalidTempo;
+            rejects([&]{aura::saveSettings(settingsPath,bad);});
+        }
+        for(float invalidAlignment:{NAN,INFINITY,-INFINITY,-2.1f,2.1f}) {
+            auto bad=settings; bad.equinoxBeatOffset=invalidAlignment;
+            rejects([&]{aura::saveSettings(settingsPath,bad);});
+            bad=settings; bad.equinoxCutsceneBeatOffset=invalidAlignment;
+            rejects([&]{aura::saveSettings(settingsPath,bad);});
+        }
+        {
+            auto boundaries=settings;
+            boundaries.equinoxBpm=30; boundaries.equinoxCutsceneBpm=300;
+            boundaries.equinoxBeatOffset=-2; boundaries.equinoxCutsceneBeatOffset=2;
+            aura::saveSettings(settingsPath,boundaries);
+            const auto loaded=aura::loadSettings(settingsPath);
+            check(loaded.equinoxBpm==30 && loaded.equinoxCutsceneBpm==300 &&
+                loaded.equinoxBeatOffset==-2 && loaded.equinoxCutsceneBeatOffset==2,
+                "Both Equinox clocks accept and persist the inclusive BPM and offset boundaries");
+            std::ifstream input(settingsPath); const std::string valid((std::istreambuf_iterator<char>(input)),{}); input.close();
+            const auto row=valid.find("equinox_beat ");
+            check(row!=std::string::npos,"Schema 8 emits a named Equinox alignment row");
+            for(const char* malformed:{"equinox_beat 0 0 180 0","equinox_beat 180 0 301 0", "equinox_beat 180 2.1 180 0",
+                    "equinox_beat 180 0 180 -2.1","equinox_beat 180 0 180", "equinox_beat nan 0 180 0", "unknown_beat 180 0 180 0"}) {
+                auto damaged=valid; damaged.replace(row,damaged.find('\n',row)-row,malformed);
+                {std::ofstream output(settingsPath);output<<damaged;}
+                rejects([&]{aura::loadSettings(settingsPath);});
+            }
+            {std::ofstream output(settingsPath);output<<valid<<"equinox_beat 180 0 180 0\n";}
+            rejects([&]{aura::loadSettings(settingsPath);});
+            auto damagedPath=valid;
+            const auto pathRow=damagedPath.find("equinox_bgm ");
+            damagedPath.replace(pathRow,damagedPath.find('\n',pathRow)-pathRow,"equinox_bgm \"bad\npath\"");
+            {std::ofstream output(settingsPath);output<<damagedPath;}
+            rejects([&]{aura::loadSettings(settingsPath);});
+        }
         settings.shirt.g=NAN; rejects([&] { aura::saveSettings(settingsPath,settings); });
         check(aura::displayName(defs[0],aura::Language::Japanese)=="コモン","Japanese aura names");
         check(aura::displayName(defs[pixelation],aura::Language::Japanese)=="ピクセレーション","Japanese Pixelation name");
@@ -613,6 +690,77 @@ int main(int argc, char** argv) {
             equinoxPose.armOut[0]==equinoxPose.armOut[1] && equinoxPose.armOut[0]>.3f && equinoxPose.lift>.23f &&
             equinoxPose.legPitch[0]==0 && equinoxPose.legPitch[1]==0,"Equinox has a finite calm fixed floating pose");
         check(aura::EquinoxCutsceneDuration==10.9f,"Equinox cutscene has one shared duration");
+        {
+            namespace eq=aura::equinox;
+            namespace style=aura::tuning::equinox;
+            const auto finite=[](const eq::Point& point) {
+                return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
+            };
+            const auto equal=[](const eq::Point& a,const eq::Point& b) {
+                return a.x==b.x && a.y==b.y && a.z==b.z;
+            };
+            check(eq::beatClock(7.25f,999.f)==7.25f && eq::beatClock(0,999.f)==0 &&
+                eq::beatClock(-1,2)==2*style::fallbackBpm/60.f &&
+                eq::beatClock(NAN,2)==eq::beatClock(-1,2) && eq::beatClock(INFINITY,-2)==0 && eq::beatClock(-1,NAN)==0,
+                "Equinox uses the supplied music beat and safely falls back to elapsed time when playback is unavailable");
+            float lowest=INFINITY,highest=-INFINITY;
+            for(unsigned frame=0;frame<1000;++frame) {
+                const float beat=frame*.031f;
+                const auto a=eq::orbPosition(beat,0),b=eq::orbPosition(beat,1);
+                check(finite(a) && finite(b) && std::abs(std::hypot(a.x,a.z)-style::orbOrbitRadius)<.00005f &&
+                    std::abs(std::hypot(b.x,b.z)-style::orbOrbitRadius)<.00005f &&
+                    std::abs(a.x+b.x)<.00005f && std::abs(a.z+b.z)<.00005f &&
+                    std::abs(a.y+b.y-2*style::orbHeight)<.00005f &&
+                    a.y>=style::orbHeight-style::orbBobHeight-.00005f && a.y<=style::orbHeight+style::orbBobHeight+.00005f &&
+                    b.y>=style::orbHeight-style::orbBobHeight-.00005f && b.y<=style::orbHeight+style::orbBobHeight+.00005f,
+                    "Equinox orbs stay opposite on a finite constant-radius orbit with mirrored bounded vertical motion");
+                lowest=std::min({lowest,a.y,b.y}); highest=std::max({highest,a.y,b.y});
+                const unsigned swap=eq::polarity(beat),first=0u^swap,second=1u^swap;
+                check(swap<=1 && first+second==1 && first!=second,
+                    "Every Equinox frame has exactly one white orb and one black orb");
+                const float age=eq::transitionAge(beat);
+                check(std::isfinite(age) && age>=0 && age<style::polarityBeats,
+                    "Color-swap explosion age remains in the same finite beat interval as polarity");
+                for(unsigned side=0;side<2;++side) {
+                    check(equal(eq::orbPosition(beat,side),eq::orbPosition(beat,side+2)),
+                        "Orb side selection is stable for equivalent parity values");
+                    for(unsigned segment=0;segment<=style::trailSegments;++segment) {
+                        const float ageBeats=style::trailBeats*segment/static_cast<float>(style::trailSegments);
+                        const auto past=eq::orbPosition(beat-ageBeats,side);
+                        check(finite(past) && std::abs(std::hypot(past.x,past.z)-style::orbOrbitRadius)<.00005f &&
+                            past.y>=style::orbHeight-style::orbBobHeight-.00005f && past.y<=style::orbHeight+style::orbBobHeight+.00005f,
+                            "Every trail segment samples a finite past point on the real orb orbit, including before beat zero");
+                        if(segment==0)check(equal(past,eq::orbPosition(beat,side)),"Each Equinox trail begins exactly at its current orb");
+                    }
+                }
+            }
+            check(highest-lowest>style::orbBobHeight*1.95f,"Equinox covers its intended vertical orbit range");
+            for(unsigned event=1;event<=32;++event) {
+                const float boundary=event*style::polarityBeats;
+                const float before=std::nextafter(boundary,-INFINITY);
+                check(eq::polarity(before)==((event-1)%2) && eq::polarity(boundary)==event%2 &&
+                    eq::transitionAge(before)>style::polarityBeats*.99f && eq::transitionAge(boundary)==0 &&
+                    eq::transitionAge(boundary+style::burstBeats*.5f)<style::burstBeats,
+                    "Polarity swaps and its explosion age reset on exactly the same music-beat boundary");
+            }
+            for(unsigned glyph=0;glyph<20;++glyph) {
+                const float boundary=glyph*style::floorGlyphBeats;
+                check(eq::floorGlyphIndex(boundary)==glyph%4 &&
+                    eq::floorGlyphIndex(boundary+style::floorGlyphBeats*.5f)==glyph%4,
+                    "Floor atlas selection loops through Yin, Yang, Balance, Void in order and holds between changes");
+                if(glyph)check(eq::floorGlyphIndex(std::nextafter(boundary,-INFINITY))==(glyph-1)%4,
+                    "The floor glyph changes at the exact beat boundary without advancing one frame early");
+            }
+            for(float invalidBeat:{NAN,INFINITY,-INFINITY}) {
+                check(equal(eq::orbPosition(invalidBeat,0),eq::orbPosition(0,0)) &&
+                    equal(eq::orbPosition(invalidBeat,1),eq::orbPosition(0,1)) && eq::polarity(invalidBeat)==0 &&
+                    eq::floorGlyphIndex(invalidBeat)==0 && eq::transitionAge(invalidBeat)==style::polarityBeats,
+                    "Malformed Equinox beat values cannot generate NaN positions or false color-change explosions");
+            }
+            check(eq::polarity(-1)==0 && eq::floorGlyphIndex(-1)==0 && eq::transitionAge(-1)==style::polarityBeats &&
+                finite(eq::orbPosition(-style::trailBeats,0)),
+                "Negative event clocks are inactive while finite negative history remains available to a trail");
+        }
         check(aura::pixelationMotionTime(3,0)==3 && std::abs(aura::pixelationMotionTime(3,1)-4.8f)<.00001f &&
             aura::pixelationMotionTime(3,1)==aura::pixelationMotionTime(3,2) && aura::pixelationMotionTime(3,3)==9 &&
             aura::pixelationMotionSpeed(3)==3 && aura::pixelationMotionSpeed(3)>aura::pixelationMotionSpeed(2),
@@ -740,6 +888,19 @@ int main(int argc, char** argv) {
         check(std::abs(beatGrid.bpm-120)<.2f && std::abs(beatGrid.offset-.13f)<.015f && beatGrid.confidence>.8f,
             "Repeated bass onsets recover 120 BPM and their actual starting phase");
         const aura::BeatGrid exactBeat{120,.13f,1};
+        check(std::abs(aura::musicBeatPosition(1.044f,180,.044f)-3)<.00001f &&
+            std::abs(aura::musicBeatPosition(.544f,180,.044f)-1.5f)<.00001f &&
+            aura::musicBeatPosition(.02f,180,.044f)==0 &&
+            std::abs(aura::musicBeatPosition(0,180,-.1f)-.3f)<.00001f,
+            "Music beat position follows tempo and positive delay, including fractional beats");
+        check(std::abs(aura::musicBeatPosition(148.75f,180,.044f,148.25f)-446.368f)<.001f &&
+            std::abs(aura::musicBeatPosition(297.f,180,.044f,148.25f)-891.368f)<.001f,
+            "A track ending between beats rephases each loop without accumulating drift");
+        check(aura::musicBeatPosition(NAN,180,0)==0 && aura::musicBeatPosition(-1,180,0)==0 &&
+            aura::musicBeatPosition(1,301,0)==0 && aura::musicBeatPosition(1,29,0)==0 &&
+            aura::musicBeatPosition(1,180,INFINITY)==0 &&
+            aura::musicBeatPosition(1,180,0,NAN)==3,
+            "Malformed music clocks stay safe and an invalid loop length uses the nonlooping clock");
         check(aura::beatPulse(.13f,exactBeat)>.999f && aura::beatPulse(.63f,exactBeat)>.999f &&
             aura::beatPulse(.38f,exactBeat)==0 && aura::beatPulse(.23f,exactBeat,0,.1f)>.999f &&
             aura::beatPulse(.38f,exactBeat,240)>.999f,
@@ -764,7 +925,7 @@ int main(int argc, char** argv) {
             aura::tuning::cutscene::endingOpacity(29.999f,30.f,true)==1 &&
             aura::tuning::cutscene::endingOpacity(30.f,30.f,true)==0,
             "BreakThrough stays opaque until the exact ending and then hard-cuts without crossfade");
-        std::cout << "PASS: exact stage odds, six planets, limited drops, fixed poses, preview isolation, bass envelope, schema migration, save/restore, UTF-8 CSV\n";
+        std::cout << "PASS: exact stage odds, six planets, limited drops, fixed poses, Equinox beat/trails/glyphs, BreakThrough ink bounds, preview isolation, bass envelope, schema 8 migration, save/restore, UTF-8 CSV\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
 }

@@ -1,10 +1,9 @@
 #include "render/renderer.hpp"
+#include "core/equinox_animation.hpp"
 #include "tuning/equinox.hpp"
 #include <d3dcompiler.h>
 #include <algorithm>
-#include <charconv>
 #include <cmath>
-#include <limits>
 #include <stdexcept>
 
 // 読む順番: buildEquinox()で部品の配置 → createEquinox()で描画準備。
@@ -45,7 +44,8 @@ float4 main(Input i):SV_TARGET {
     float2 q=i.local.xy*2; float r=length(q),a=atan2(q.y,q.x),time=eyeAndTime.w;
     int style=(int)floor(i.color.a);
     if(style==3) {
-        float2 uv=float2(.4375+(q.x*.5+.5)*.125,(1.5-q.y*.5)*.25);
+        // 第2行の左半分に4文字を配置。元の衡と同じ128px四方で字の大きさを保つ。
+        float2 uv=float2((i.color.r+q.x*.5+.5)*.125,(1.5-q.y*.5)*.25);
         float alpha=lettering.Sample(linearClamp,uv).a;
         float c=.82+.10*sin(time*.8);
         return float4(c,c,c,alpha);
@@ -58,7 +58,8 @@ float4 main(Input i):SV_TARGET {
                              lettering.Sample(linearClamp,uv-float2(texel.x,0)).a),
                          max(lettering.Sample(linearClamp,uv+float2(0,texel.y)).a,
                              lettering.Sample(linearClamp,uv-float2(0,texel.y)).a));
-        bool black=((int)floor(time/EQUINOX_POLARITY_SECONDS)&1)!=0;
+        // 玉と同じ拍で切り替える。別の秒時計を使わないので音楽調整後も一致する。
+        bool black=i.color.r>.5;
         float c=black?.009:.99,edge=black?.60:.025;
         float outAlpha=saturate(alpha+max(0,border-alpha)*.48);
         return float4(lerp(edge.xxx,c.xxx,alpha/max(.0001,outAlpha)),outAlpha);
@@ -108,15 +109,8 @@ float4 main(Input i):SV_TARGET {
 })";
 }
 void Renderer::createEquinox() {
-    // 玉と名前の白黒切り替えは同じ半周期を使う。設定を変えてもずれないようGPUへ渡す。
-    // 小数を丸めて周期がずれないよう、floatを元に戻せる桁数で文字列にする。
-    std::array<char,32> polaritySeconds{};
-    const auto encoded=std::to_chars(polaritySeconds.data(),polaritySeconds.data()+polaritySeconds.size()-1,
-        settings::orbOrbitSeconds*.5f,std::chars_format::general,std::numeric_limits<float>::max_digits10);
-    if(encoded.ec!=std::errc{}) throw std::runtime_error("Equinox polarity number conversion");
-    const D3D_SHADER_MACRO definitions[]={{"EQUINOX_POLARITY_SECONDS",polaritySeconds.data()},{nullptr,nullptr}};
     ComPtr<ID3DBlob> shader,errors;
-    const HRESULT hr=D3DCompile(OrbShader,sizeof(OrbShader)-1,"equinox-orbs.hlsl",definitions,nullptr,"main","ps_4_0",
+    const HRESULT hr=D3DCompile(OrbShader,sizeof(OrbShader)-1,"equinox-orbs.hlsl",nullptr,nullptr,"main","ps_4_0",
         D3DCOMPILE_OPTIMIZATION_LEVEL3|D3DCOMPILE_ENABLE_STRICTNESS,0,&shader,&errors);
     if(FAILED(hr) && errors) throw std::runtime_error(static_cast<const char*>(errors->GetBufferPointer()));
     checked(hr,"Compile Equinox material");
@@ -134,15 +128,17 @@ void Renderer::createEquinox() {
     checked(d2dFactory_->CreateDxgiSurfaceRenderTarget(surface.Get(),props,&canvas),"Equinox lettering target");
     ComPtr<ID2D1SolidColorBrush> brush; checked(canvas->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White),&brush),"Equinox lettering brush");
     canvas->BeginDraw(); canvas->Clear(D2D1::ColorF(0,0));
-    const wchar_t* words[]={L"EQUINOX",L"衡",L"EQUILIBRIUM INCARNATE"};
-    const float sizes[]={102,100,31};
-    for(unsigned i=0;i<3;++i) {
+    const wchar_t* words[]={L"EQUINOX",L"陰",L"陽",L"衡",L"無",L"EQUILIBRIUM INCARNATE"};
+    for(unsigned i=0;i<6;++i) {
+        const bool glyph=i>=1 && i<=4;
         ComPtr<IDWriteTextFormat> font;
-        checked(write_->CreateTextFormat(i==1?L"Yu Gothic":L"Times New Roman",nullptr,DWRITE_FONT_WEIGHT_BOLD,
-            i==0?DWRITE_FONT_STYLE_ITALIC:DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,sizes[i],L"ja-jp",&font),"Equinox lettering font");
+        checked(write_->CreateTextFormat(glyph?L"Yu Gothic":L"Times New Roman",nullptr,DWRITE_FONT_WEIGHT_BOLD,
+            i==0?DWRITE_FONT_STYLE_ITALIC:DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,glyph?100.f:(i==0?102.f:31.f),L"ja-jp",&font),"Equinox lettering font");
         font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER); font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         const auto value=std::wstring(words[i]);
-        canvas->DrawText(value.data(),static_cast<UINT32>(value.size()),font.Get(),D2D1::RectF(0,i*128.f,1024,(i+1)*128.f),brush.Get());
+        const auto rect=glyph?D2D1::RectF((i-1)*128.f,128,i*128.f,256):
+            D2D1::RectF(0,i==0?0.f:256.f,1024,i==0?128.f:384.f);
+        canvas->DrawText(value.data(),static_cast<UINT32>(value.size()),font.Get(),rect,brush.Get());
     }
     checked(canvas->EndDraw(),"Render Equinox lettering");
     checked(device_->CreateShaderResourceView(texture.Get(),nullptr,&equinoxLettering_),"Equinox lettering source");
@@ -151,18 +147,21 @@ void Renderer::createEquinox() {
     createCutscene();
 }
 void Renderer::buildEquinox(const Frame& source) {
-    // 毎フレーム、足元 → 霧 → 玉と軌跡 → 名前 → 粒子の順に描画部品を並べる。
+    // 毎フレーム、足元 → 霧 → 玉とトレイル → 入替の爆発 → 名前 → 粒子を並べる。
     const auto& f=source;
     const float t=f.time,ox=f.avatarX,oz=f.avatarZ;
+    const float beat=equinox::beatClock(f.equinoxBeat,t);
+    const unsigned polarity=equinox::polarity(beat);
     const Color silver=settings::silver,white=settings::white;
     // pointはアバター中心の相対座標をワールド座標へ変換する小さな補助関数。
     auto point=[&](float x,float y,float z){return XMVectorSet(ox+x,y,oz+z,1);};
     auto line=[&](XMVECTOR a,XMVECTOR b,float width,float power){pixelLine(a,b,width,silver,power,f);};
-    auto material=[&](FXMMATRIX model,unsigned style) {Instance v;XMStoreFloat4x4(&v.world,model);v.color={1,1,1,style+.95f};equinoxOrbs_.push_back(v);};
+    auto material=[&](FXMMATRIX model,unsigned style,float selection=0) {Instance v;XMStoreFloat4x4(&v.world,model);v.color={selection,1,1,style+.95f};equinoxOrbs_.push_back(v);};
     material(XMMatrixScaling(settings::floorDiameter,settings::floorDiameter,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorHeight,oz),2);
     const auto billboard=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw);
-    // 床の「衡」は横長の文字画像から切り出し、内側の輪へ収まる正方形の面に置く。
-    material(XMMatrixScaling(settings::floorGlyphSize,settings::floorGlyphSize,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorGlyphHeight,oz),3);
+    // 同じ大きさの四角い面のまま、4拍ごとに「陰→陽→衡→無」を切り替える。
+    material(XMMatrixScaling(settings::floorGlyphSize,settings::floorGlyphSize,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorGlyphHeight,oz),3,
+        static_cast<float>(equinox::floorGlyphIndex(beat)));
     // 足元の輪: 短い線分をつなぎ、少しずつ上下へ揺らして柔らかい輪にする。
     for(unsigned ring=0;ring<settings::floorRingCount;++ring) {
         const float radius=settings::floorInnerRadius+ring*settings::floorRingSpacing,height=settings::floorRingHeight+ring*settings::floorRingHeightStep;
@@ -181,31 +180,46 @@ void Renderer::buildEquinox(const Frame& source) {
         pixelBillboard(ox+std::cos(a)*r,.30f+.52f*u,oz+std::sin(a)*r,size,size*.60f,silver,0,settings::mistBrightness*fade,f,a);
     }
     struct Orb {float x,y,z;unsigned style;}; Orb orbs[2];
-    // 玉: 半周ごとに白黒を同時交換するので、必ず白1個・黒1個になる。
-    const unsigned polarity=static_cast<unsigned>(std::floor(t/(settings::orbOrbitSeconds*.5f)))&1u;
+    // 玉: 同じ音楽の拍を使い、1拍ごとに白黒を同時交換。必ず白1個・黒1個になる。
     for(unsigned side=0;side<2;++side) {
-        const float a=t*2*Pi/settings::orbOrbitSeconds+side*Pi;
-        orbs[side]={std::cos(a)*settings::orbOrbitRadius,settings::orbHeight+settings::orbBobHeight*std::sin(a),std::sin(a)*settings::orbOrbitRadius,side^polarity};
+        const auto p=equinox::orbPosition(beat,side);
+        orbs[side]={p.x,p.y,p.z,side^polarity};
     }
-    // 軌跡: 玉それぞれの過去の軌道を描く。玉同士を結ぶ糸は作らない。
-    const float orbit=t*2*Pi/settings::orbOrbitSeconds;
+    // トレイル: 現在の玉と同じ位置計算を過去の拍で呼ぶ。波や独立した点は加えない。
+    // u=0は玉の中心、u=1は尾の先。先へ行くほど幅と明るさを0に近づける。
     for(unsigned side=0;side<2;++side) {
-        auto wake=[&](float u) {
-            const float a=orbit+side*Pi-u*settings::wakeSeconds*2*Pi/settings::orbOrbitSeconds;
-            const float wave=std::sin(u*Pi*3)*std::sin(u*Pi),radius=settings::orbOrbitRadius+wave*settings::wakeRadialWave;
-            return point(std::cos(a)*radius,settings::orbHeight+settings::orbBobHeight*std::sin(a)+wave*settings::wakeVerticalWave,std::sin(a)*radius);
+        auto trail=[&](float u) {
+            const auto p=equinox::orbPosition(beat-u*settings::trailBeats,side);
+            return point(p.x,p.y,p.z);
         };
-        for(unsigned j=0;j<settings::wakeSegments;++j) {
-            const float u=j/static_cast<float>(settings::wakeSegments),v=(j+1)/static_cast<float>(settings::wakeSegments),fade=std::pow(1-u,.65f);
-            line(wake(u),wake(v),settings::wakeWidth*(1-u*.45f),settings::wakeBrightness*fade);
+        for(unsigned j=0;j<settings::trailSegments;++j) {
+            const float u=j/static_cast<float>(settings::trailSegments),v=(j+1)/static_cast<float>(settings::trailSegments);
+            line(trail(u),trail(v),settings::trailWidth*std::pow(1-u,1.15f),settings::trailBrightness*std::pow(1-u,1.5f));
         }
-        for(unsigned dot=1;dot<=settings::wakeDotCount;++dot) {
-            const float u=dot/static_cast<float>(settings::wakeDotCount+1),fade=std::pow(1-u,.65f);
-            const auto p=wake(u);
-            const float size=.065f+.035f*(1-u);
-            pixelBillboard(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p),size,size,white,5,.80f*fade,f);
-            if(dot==4 || dot==6) particleStar(XMVectorGetX(p),XMVectorGetY(p),XMVectorGetZ(p),.10f*(1-u*.25f),silver,t*.35f+side,f);
+    }
+    // 白黒が交換された位置へ短い爆発を残す。1拍ごとの交換と同じ時計なので同期する。
+    const float burstAge=equinox::transitionAge(beat);
+    if(burstAge<settings::burstBeats) for(unsigned side=0;side<2;++side) {
+        const auto center=equinox::orbPosition(beat-burstAge,side);
+        const float u=burstAge/settings::burstBeats,fade=(1-u)*(1-u);
+        const float radius=settings::orbRadius+.12f+u*settings::burstRadius;
+        const auto face=billboard*XMMatrixTranslation(ox+center.x,center.y,oz+center.z);
+        for(unsigned j=0;j<settings::burstRingSegments;++j) {
+            const float a=j*2*Pi/settings::burstRingSegments,b=(j+1)*2*Pi/settings::burstRingSegments;
+            line(XMVector3TransformCoord(XMVectorSet(std::cos(a)*radius,std::sin(a)*radius,0,1),face),
+                 XMVector3TransformCoord(XMVectorSet(std::cos(b)*radius,std::sin(b)*radius,0,1),face),
+                 .11f*(1-u)+.015f,settings::burstBrightness*fade);
         }
+        for(unsigned j=0;j<settings::burstFragments;++j) {
+            const float a=j*2.399963f+side*Pi,dy=1-2*(j+.5f)/settings::burstFragments;
+            const float horizontal=std::sqrt(std::max(0.f,1-dy*dy));
+            const auto direction=XMVectorSet(std::cos(a)*horizontal,dy,std::sin(a)*horizontal,0);
+            const float reach=settings::orbRadius+u*settings::burstRadius*1.4f;
+            const auto start=point(center.x,center.y,center.z)+direction*reach;
+            line(start,start+direction*(.15f+.26f*u),.055f*(1-u)+.01f,settings::burstBrightness*fade);
+        }
+        pixelBillboard(ox+center.x,center.y,oz+center.z,settings::orbRadius*3.5f,settings::orbRadius*3.5f,white,0,
+            settings::burstBrightness*std::pow(1-u,5.f),f);
     }
     const float eyeX=std::sin(f.cameraYaw),eyeZ=-std::cos(f.cameraYaw);
     if(orbs[0].x*eyeX+orbs[0].z*eyeZ>orbs[1].x*eyeX+orbs[1].z*eyeZ) std::swap(orbs[0],orbs[1]);
@@ -219,7 +233,7 @@ void Renderer::buildEquinox(const Frame& source) {
                  XMVector3TransformCoord(XMVectorSet(std::cos(b)*r,std::sin(b)*r,0,1),face),.065f,orb.style?.25f:.40f);
         }
         // 外側の光は控えめにし、内部の雷雲の明暗が白飛びしないようにする。
-        pixelBillboard(ox+orb.x,orb.y,oz+orb.z,3.6f,3.6f,silver,0,orb.style?settings::blackHaloBrightness:settings::whiteHaloBrightness,f);
+        pixelBillboard(ox+orb.x,orb.y,oz+orb.z,radius*2.67f,radius*2.67f,silver,0,orb.style?settings::blackHaloBrightness:settings::whiteHaloBrightness,f);
         if(orb.style) {
             pixelBillboard(ox+orb.x,orb.y,oz+orb.z,2.2f,2.2f,white,4,.90f,f);
             pixelBillboard(ox+orb.x,orb.y,oz+orb.z,5.2f,.55f,white,4,.65f,f);
@@ -228,7 +242,7 @@ void Renderer::buildEquinox(const Frame& source) {
     // 名前: 光をにじませる処理の後で重ねる。黒い文字を黒いまま読めるようにするため。
     auto title=[&](float y,float width,float height,unsigned style) {
         Instance v; XMStoreFloat4x4(&v.world,XMMatrixScaling(width,height,1)*billboard*XMMatrixTranslation(ox,y,oz));
-        v.color={1,1,1,style+.95f}; equinoxTitles_.push_back(v);
+        v.color={static_cast<float>(polarity),1,1,style+.95f}; equinoxTitles_.push_back(v);
     };
     title(settings::titleHeight,settings::titleWidth,settings::titleTextHeight,4);
     title(settings::subtitleHeight,settings::subtitleWidth,settings::subtitleTextHeight,5);

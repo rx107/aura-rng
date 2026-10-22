@@ -61,6 +61,18 @@ inline float bassAt(std::span<const float> envelope,float seconds) {
 // 低音の立ち上がりの繰り返しから推定します。曲によって半拍/倍拍に解釈されるため、
 // F1のBPMと時差でも調整できます。曲の読み込み時だけ計算し、描画中は再解析しません。
 struct BeatGrid { float bpm{},offset{},confidence{}; };
+// 音声の秒数を連続した拍数へ。ループ時も曲の先頭の拍へ合わせ直します。
+// 端が半端な拍で切れた音源は、近い整数拍へ接続して位相ずれの蓄積を防ぎます。
+inline float musicBeatPosition(float seconds,float bpm,float offset,float loopSeconds=0) {
+    if(!std::isfinite(seconds) || seconds<0 || !std::isfinite(bpm) || bpm<30 || bpm>300 || !std::isfinite(offset)) return 0;
+    double local=seconds,completed=0;
+    if(std::isfinite(loopSeconds) && loopSeconds>0) {
+        const double loops=std::floor(local/loopSeconds);
+        local=std::fmod(local,loopSeconds);
+        completed=loops*std::round(static_cast<double>(loopSeconds)*bpm/60);
+    }
+    return static_cast<float>(std::max(0.,completed+(local-offset)*bpm/60));
+}
 inline BeatGrid estimateBeatGrid(std::span<const float> envelope) {
     const auto n=std::min<std::size_t>(envelope.size(),12000); // 解析は先頭120秒まで。
     if(n<400) return {};

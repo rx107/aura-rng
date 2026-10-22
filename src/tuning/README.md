@@ -16,11 +16,11 @@
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |
 | Pixelationの機体・尾・キューブ | [pixelation.hpp](pixelation.hpp) | `PlayerBobAmplitude` を `.85 → .4`。PLAYERの上下移動が小さくなる。 |
-| Equinox | [equinox.hpp](equinox.hpp) | `floorGlyphSize` を `3.2f → 2.8f`。床の「衡」が小さくなる。 |
+| Equinoxの玉・尾・爆発・床文字 | [equinox.hpp](equinox.hpp) | `orbOrbitRadius` を `3.f → 3.5f`。二つの玉がプレイヤーから離れた範囲を周回する。 |
 | BreakThrough の通常表示 | [breakthrough.hpp](breakthrough.hpp) | `titleHeight` を `3.85f → 4.1f`。名前を上に移動。 |
 | Nanally | [nanally.hpp](nanally.hpp) | `HeadWidth` を `6.35f → 7.0f`。頭が横に広がる。 |
 | Illusionaryの床・白い光・文字 | [illusionary.hpp](illusionary.hpp) | `OrbitLightRadius` を `1.92f → 2.2f`。白い光が体から離れた場所を回る。 |
-| 砂漠テーマ3種類 | [desert.hpp](desert.hpp) | Dune / Mirage / Pharaohそれぞれの半径・速度・粒子数を変更。 |
+| 砂漠テーマ3種類 | [desert.hpp](desert.hpp) | `PharaohWingWidth` を `3.45f → 4.f`。長短二段の翼が横へ広がる。Dune / Mirageにも個別の半径・速度・粒子数。 |
 
 オーラ名、確率、標準の輪・粒子の色や数は [data/auras.csv](../../data/auras.csv) を使います。特殊なオーラの形は同名の専用 `.hpp` で調整します。安全な試作用オーラを CSV に追加する例も、[改造ガイド](../../docs/development-guide.md#6-csv-で自作オーラを-1-個追加する) にあります。
 
@@ -45,12 +45,16 @@ CSV を変えた場合も元の `data/auras.csv` を保存し、Develop.cmd を�
 - **Pixelation は時計が 2 本**あります。`FinalMotionSpeed` は Lv3 の周囲の回転用、`BoostedSpeed` は Lv2 / Lv3 で共通の弾・爆発・浮遊用でもあります。機体だけの速さは`PlayerOrbitSpeed = 1.55`、上下幅は`PlayerBobAmplitude = .85`です。機体の速度を変えても弾が衝突する間隔は変わりません。
 - **Pixelationの光の尾**は`PlayerTrailDuration = .72f`で長さ、`PlayerTrailSegments = 28`で滑らかさを調整します。時間を長くすると飛んできた軌道を長く残し、分割数を増やすとカーブが滑らかになります。尾は機体と同じ3D軌道をたどります。
 - **キューブの鼓動はBGMの再生時刻**を使います。`CageBeatScale = .15f`は1拍で最大15%拡大、`CageBeatBrightness = .20f`は最大20%増光。0でそれぞれの変化を止めます。拍の速さと時差はF1 → 音楽 → キューブの鼓動から変更でき、再ビルド不要です。自動推定が半分・倍に感じる場合はBPMを30〜300で手動指定します。音楽を再生していない間とBGMのないLv0は鼓動しません。
+- **Equinoxは一つの拍の時計を共有**します。通常BGMとCutSceneはF1 → 音楽でBPM・時差を別々に保存します。手動BPMは30〜300、時差は-2〜+2秒、正の値で演出の拍を遅らせます。通常表示では`orbitBeats = 4.f`が4拍で1周、`polarityBeats = 1.f`が1拍で白黒交換、`floorGlyphBeats = 4.f`が4拍で次の床文字です。「陰→陽→衡→無」の一巡は16拍になります。
+- **Equinoxの玉と尾は別の大きさ**です。`orbRadius = 1.55f`を下げると玉だけが小さくなり、`orbOrbitRadius = 3.f`を上げると周回範囲が広がります。`trailBeats = .80f`なら過去0.8拍分の位置を先細りの尾でつなぎ、`trailWidth = .20f`で太さを変えます。以前の波形軌跡と点列の星は描きません。交換時の爆発は`burstRadius = 1.15f`で広がる距離、`burstFragments = 12`で破片の数を変えます。
 - **BreakThrough の通常表示と CutScene は独立**しています。`breakthrough.hpp`の柱設定を変えても、CutScene の柱は変わらず静止します。`cutscene.hpp`の`BreakthroughOriginalI / BreakthroughOriginalII`は初実装のi・ii、`BreakthroughCoreRush`はiii、`BreakthroughMonolith`で始まる値はivを調整します。`BreakthroughBlackoutEnd`は黒画面が終わる時刻、`BreakthroughFinalDistance`・`BreakthroughFinalPullbackSpeed`・`BreakthroughFinalYawSpeed`は15.05秒以降の7本柱を映すカメラです。[場面と調整値の説明](../../docs/stage-and-cutscene-guide.md#breakthroughの場面とカメラ)に値の意味をまとめています。
 - **後半の2つのテロップは同じ動き**です。`BreakthroughFloatingCaptionAngle = -2.f`は傾きの度数、`BreakthroughFloatingCaptionSpeed = 6.f`は1秒ごとの横移動、`BreakthroughFloatingCaptionMoveSeconds = 4.f`は移動を続ける秒数です。`it wasn't gone`と`with only 5 fragments left`の両方に反映されます。
+- **BreakThroughのiv字幕中だけ白黒二値**になります。`BreakthroughIvCaptionStart = 13.f`以上、`BreakthroughIvCaptionEnd = 14.12f`未満を`breakthroughIvCaptionVisible()`で共有します。`BreakthroughIvInkThreshold = .12f`は白と黒を分ける明るさの境界です。直前の閃光と`get out of my head`以降にはかかりません。
 - **BreakThroughは終端で即切り替え**ます。`endingOpacity()`に`instantSwitch=true`を渡すため、`EndingFadeSeconds`の変更はEquinoxだけに影響します。BreakThroughの映像内にある冒頭0.25秒の導入フェード、i・iiの絞り閉鎖・開口、iii冒頭の開口、最後の絞り閉鎖・短い閃光は保ちます。これらは通常画面へ重ねる終了フェードとは別の演出です。
 - **Illusionaryの天を仰ぐポーズ**は `avatar.hpp` の `illusionary`にあります。`BodyPitch`が全身の傾き、`TorsoPitch`が胸の反り、`HeadPitch`が首の反りです。`ElbowPitch`の片方だけを約1.5708にすると直角の肘になります。`illusionary.hpp`は光・帯・床・文字を担当し、姿勢とは分けています。
 - **文字と光の明るさは別々**に調整します。Illusionaryの `TextSelfLight`はにじまない文字用です。`White`を変えると白い光全体にも影響します。
-- **Equinoxの揺れは音声の低音から**求めます。`EquinoxBassShakeHeight`は画面高に対する割合で、`.008f`なら0.8%、`0.f`なら無効です。音声がない場合も揺れはありません。
+- **Equinoxの揺れは保存したBPMと時差**で拍を合わせます。`EquinoxBassShakeHeight`は画面高に対する割合で、`.008f`なら0.8%、`0.f`なら無効です。名前にBassが残っていますが、生の低音の強さをそのまま揺れ幅へ使う方式ではありません。拍はF1で合わせ、揺れの最大幅はこのC++の値で変えます。
+- **Pharaohは明るさより線幅で形を出します。**`PharaohPyramidLineWidth = .30f`がピラミッド、`PharaohFloorLineWidth = .28f`が床の外輪です。`PharaohWingHeight = 1.20f`を上げると翼の外側が高くなり、`PharaohFeatherLength = 1.28f`を上げると外側の羽が下へ伸びます。`PharaohSunRadius = .78f`と`PharaohSunLineWidth = .28f`で太陽の大きさと輪郭を独立に調整できます。標準値は最大437枚の板なので、羽や円の分割数は少しずつ増やしてください。
 - **数は少しずつ増やす**と試しやすくなります。粒子や線の数を増やすと描画量も増えます。各ファイルの範囲チェックを残したまま試してください。
 - **RGB は赤・緑・青**の順番です。UI の色は各 0〜1、専用オーラの発光は 1 を超える成分も使います。
 

@@ -27,6 +27,9 @@ public:
     float bassPulse(float seconds) const;
     float beatPulse(float seconds,float bpmOverride=0,float offset=0) const;
     float estimatedBpm() const {return beat_.bpm;}
+    float beatPosition(float seconds,float bpm,float offset) const {
+        return musicBeatPosition(seconds,bpm,offset,clipDuration_==0?playbackEndSeconds_:0);
+    }
     std::size_t decodedBytes() const { return pcm_.size(); }
     void reload() { clear(); attemptedLoad_=false; }
 private:

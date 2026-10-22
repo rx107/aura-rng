@@ -33,6 +33,10 @@ struct Settings {
     std::array<float,8> breakthroughWordTimes{tuning::cutscene::BreakthroughWordTimes};
     // 0=曲からBPMを推定。正の値は手動の拍数/分。時差は秒、正なら鼓動を遅らせます。
     float pixelationBpm{},pixelationBeatOffset{};
+    std::string equinoxBgmPath;
+    // Equinoxは通常BGMとCutSceneを別々に合わせます。BPM=拍/分、正の時差=遅くする。
+    float equinoxBpm{180.f},equinoxBeatOffset{.044f};
+    float equinoxCutsceneBpm{180.f},equinoxCutsceneBeatOffset{.056f};
 };
 Settings loadSettings(const std::filesystem::path& path);
 void saveSettings(const std::filesystem::path& path, const Settings& settings);
@@ -70,6 +74,8 @@ struct DebugActions {
     std::optional<float> breakthroughCaptionOffset;
     std::optional<std::array<float,8>> breakthroughWordTimes;
     std::optional<float> pixelationBpm,pixelationBeatOffset;
+    std::optional<std::string> equinoxBgmPath;
+    std::optional<float> equinoxBpm,equinoxBeatOffset,equinoxCutsceneBpm,equinoxCutsceneBeatOffset;
 };
 // 他の処理から読む共通名。数値の編集場所は tuning/game.hpp に集約。
 inline constexpr float RollCooldown = tuning::game::RollCooldownSeconds;

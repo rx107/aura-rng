@@ -1,4 +1,4 @@
-# Star's RNG — Alpha 0.1 / v0.1.14
+# Star's RNG — Alpha 0.1 / v0.1.15
 
 C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームです。
 
@@ -6,9 +6,10 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 
 ## 今回の変更
 
-- BreakThroughのCutSceneのi・iiを、初実装のv0.1.6の映像・カメラへ戻しました。iiiのコアへの急接近とivの閃光・巨大な柱はv0.1.13のままです。
-- `get out of my head`は黒画面に戻し、そこから最後までを初実装の後半へ戻しました。`with only 5 fragments left`は、現在の`it wasn't gone`と同じ傾き・横移動のテロップにしました。
-- BreakThroughは演出終了時に映像と音を即座に切り替え、対応オーラを表示します。映像内の元の絞り切り替え・短い閃光は保ちます。Equinoxの最後0.8秒の映像・音声フェードはそのままです。
+- Equinoxの通常表示に`Koraii_Layers_Cut.mpeg`を追加し、BGMの拍で玉の白黒交換・周回・爆発・床文字をそろえました。玉を少し大きくして間隔を広げ、波形の軌跡を先細りの連続トレイルへ変更しました。床文字は「陰→陽→衡→無」をループします。
+- Equinoxの通常表示とCutSceneは、F1 → 音楽からBPM・拍の時差を別々に調整して保存できます。CutSceneの軽い上下の揺れも、設定した拍と実際の音声再生時刻に合わせます。
+- Pharaohの床とピラミッドの線を太くし、翼を拡大。重なる羽・青緑の宝石・二重の太陽を加え、明るさを盛らずに輪郭を読みやすくしました。
+- BreakThroughのiv字幕が出る13〜14.12秒だけ、白地と黒い構造物の二値表示にしました。`get out of my head`以降と終了時の即切り替えは維持しています。
 
 見た目の調整方法は[Illusionary・Extraのガイド](docs/illusionary-and-extra-guide.md)、カメラと字幕は[CutScene調整](docs/stage-and-cutscene-guide.md)を参照してください。
 
@@ -39,7 +40,7 @@ Luck L倍は「基礎抽選をL回した中で最もレアな結果」と同じ�
 - **ワールド**：Roll / AutoRoll、Luck、惑星の即時切替、現在の排出確率。
 - **アバター**：ブロック / ローカルVRM、服の色。
 - **オーラ**：未所持も含む全オーラ、Singularity / PixelationのLevel、CutSceneのみ再生、BreakThrough字幕のタイミング調整。
-- **音楽**：各BGMの差し替え、初期曲へ戻す、音楽・効果音の音量、PixelationのBPMと拍の時差。
+- **音楽**：各BGMの差し替え、初期曲へ戻す、音楽・効果音の音量、PixelationとEquinoxのBPM・拍の時差。Equinoxは通常表示とCutSceneで別の設定です。
 
 プレビューはAutoRollを止め、所持数・Roll History・実装備を変えません。CutSceneを最後まで見ると対応オーラをプレビューし、Esc / 停止なら直前の表示へ戻ります。プレビューは保存しません。
 
@@ -47,9 +48,11 @@ SingularityとPixelationは初取得Level 0、重複ごとに+1、最大3。Sing
 
 Pixelationのキューブは**実際の音楽の再生時刻**に同期します。F1 → 音楽 → **キューブの鼓動**で自動推定を外すと、BPMを30〜300で指定できます。BPMは1分間の拍数で、120なら約0.5秒に1回です。拍の時差は-2〜+2秒、正の値で鼓動を遅らせます。音楽が再生されていない場合は鼓動せず、BGMのないLevel 0も同様です。
 
+Equinoxは同じ拍を玉・文字・トレイル・爆発で共有します。標準では4拍で1周し、1拍ごとに玉の白黒が交換され、4拍ごとに床文字が進みます。「陰→陽→衡→無」の1巡は16拍です。F1 → 音楽で通常表示とCutSceneのBPM・時差を調整できます。BPMは30〜300、時差は-2〜+2秒で、`+.10`なら拍を0.1秒遅らせます。大きさ・尾の長さは[Equinoxの調整値](src/tuning/equinox.hpp)へ。
+
 ## 音声・VRM・Discord
 
-提供者の許可を得た6つの音源をソースとWindows ZIPに同梱しています。The WeirdosはOgg Vorbisを同梱デコーダーで再生するため、追加コーデックは不要です。CutSceneの音声は必要な範囲だけM4Aへ切り出しており、元動画のCollection部分は再生しません。[音声の一覧](data/audio/README.md)
+提供者の許可を得た7つの音源をソースとWindows ZIPに同梱しています。The WeirdosはOgg Vorbisを同梱デコーダーで再生するため、追加コーデックは不要です。Equinoxの通常表示用の曲とCutScene用のM4Aは別の音源です。CutSceneの音声は必要な範囲だけ切り出しており、元動画のCollection部分は再生しません。[音声の一覧](data/audio/README.md)
 
 **VRM・元の参考画像・参考動画は配布しません。** F1から自分のPCのVRMを選択してください。`Start-with-local-assets.cmd` はDownloadsのChocolat.vrmを指定する補助起動です。通常の立ち姿・歩行と、各オーラの固定ポーズをブロックとVRMで共有します。固定ポーズ中は移動しても歩行を混ぜません。VRM 0.x / 1.0の自己完結GLB、スキン、初期モーフ、ベースカラーに対応。Spring Bone・表情・MToon固有の影や輪郭は未対応です。
 
@@ -57,7 +60,7 @@ Discordデスクトップ版を起動すると、ユーザー名とロール回�
 
 ## 初心者向けの改造入口
 
-[改造用ソースZIP v0.1.14](https://github.com/rx107/aura-rng/releases/download/v0.1.14-alpha.1/StarRng-v0.1.14-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
+[改造用ソースZIP v0.1.15](https://github.com/rx107/aura-rng/releases/download/v0.1.15-alpha.1/StarRng-v0.1.15-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
 
 1. `src/tuning` の数字を1つだけ変更して保存。
 2. ゲームを閉じて `Develop.cmd` を実行。
@@ -76,7 +79,7 @@ build-release\StarRng.exe
 
 `build.cmd` はコアとDiscord IPCのテストも実行します。`Develop.cmd` は自由な数値変更を試すためコンパイルのみ実行します。コアはLinuxでもテストでき、DirectXアプリはWindowsで生成します。`--warp` はソフトウェア描画、`--debug` はF1を開いて起動します。
 
-通常の保存先は `%LOCALAPPDATA%\AuraRng\`。「ログを開く」から確認できます。`progress.txt` はID別在庫と実装備、`rolls.csv` は全ロール、`settings.txt` は設定です。画面履歴は起動中の最新200件。設定schema 7にPixelationのBPM・拍の時差を保存し、旧schema 1〜6も読み込めます。Still / Glimmerの内部IDは保存互換のため維持します。進行は一時ファイルから置き換え、読めない進行セーブはバックアップします。
+通常の保存先は `%LOCALAPPDATA%\AuraRng\`。「ログを開く」から確認できます。`progress.txt` はID別在庫と実装備、`rolls.csv` は全ロール、`settings.txt` は設定です。画面履歴は起動中の最新200件。設定schema 8にEquinoxのBGMパス・通常表示とCutSceneのBPM・時差、PixelationのBPM・時差などを保存し、旧schema 1〜7も読み込めます。Still / Glimmerの内部IDは保存互換のため維持します。進行は一時ファイルから置き換え、読めない進行セーブはバックアップします。
 
 ## 今後の予定
 

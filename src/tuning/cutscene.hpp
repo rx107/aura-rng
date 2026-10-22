@@ -18,9 +18,9 @@ inline constexpr float endingOpacity(float elapsed,float duration,bool instantSw
     return 1-progress*progress*(3-2*progress);
 }
 
-// Equinox の音声から取り出した低音の強さ [0～1] で、画面全体を上下します。
+// Equinoxの保存したBPM・最初の拍から求めた鼓動 [0～1] で、画面全体を上下します。
 // .008 は画面高の0.8%。.004にすると半分、0にすると揺れなしになります。
-// 一定のテンポを仮定せず、再生中の音声位置に対応する低音データを使います。
+// 再生中の音声位置を時計に使います。拍のずれはF1のCutScene用BPM・時差で直せます。
 inline constexpr float EquinoxBassShakeHeight = .008f;
 
 inline constexpr float BreakthroughDuration = 30.f;
@@ -71,6 +71,14 @@ inline constexpr float BreakthroughMonolithScale = 1.f;       // 全ての巨大
 inline constexpr float BreakthroughWhiteoutSeconds = .43f;    // 閃光から視界が戻るまでの秒数。
 // ivの文章の時刻は音楽との同期を維持します。カメラとは別に変更できます。
 inline constexpr float BreakthroughIvCaptionStart = 13.f;
+inline constexpr float BreakthroughIvCaptionEnd = 14.12f;
+// iv の文章が出ている間だけ「白い紙に黒いインク」の二色に切り替えます。
+// threshold を下げると細い光・霧まで黒くなり、上げると余白が多くなります。
+// 柱の形とカメラはそのまま。光の中心と柱を黒く、暗い空間を白く見せます。
+inline constexpr float BreakthroughIvInkThreshold = .35f;
+inline constexpr bool breakthroughIvCaptionVisible(float elapsed) {
+    return elapsed>=BreakthroughIvCaptionStart && elapsed<BreakthroughIvCaptionEnd;
+}
 // 初実装の黒画面と、その後に戻る7本柱の全景。
 // 黒画面は薄く重ねず完全な黒にし、字幕だけを出します。
 inline constexpr float BreakthroughBlackoutStart = BreakthroughMonolithEnd;

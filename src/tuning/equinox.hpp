@@ -14,7 +14,7 @@ inline constexpr Color white{1.1f,1.1f,1.1f};
 // 足元の面の直径・高さ。例: floorDiameter=9で外側の面が広がります。
 inline constexpr float floorDiameter=8.2f;
 inline constexpr float floorHeight=.19f;
-// 「衡」の四角い表示面の一辺・高さ。大きくすると文字も拡大。例: floorGlyphSize=2.8で小さく。
+// 「陰→陽→衡→無」の四角い表示面の一辺・高さ。大きくすると文字も拡大。
 // floorGlyphHeightは床の面より少し上に保つと、面同士のちらつきを防げます。
 inline constexpr float floorGlyphSize=3.2f;
 inline constexpr float floorGlyphHeight=.240f;
@@ -37,24 +37,35 @@ inline constexpr float mistOuterRadius=4.1f;
 inline constexpr float mistBrightness=.24f;
 
 // 二つの玉。例: orbRadius=1で小さく、orbOrbitRadius=3でプレイヤーから離れます。
-inline constexpr float orbRadius=1.35f;
-inline constexpr float orbOrbitRadius=2.25f;
+inline constexpr float orbRadius=1.55f;
+inline constexpr float orbOrbitRadius=3.0f;
 inline constexpr float orbHeight=3.1f;
 inline constexpr float orbBobHeight=.20f; // 上下移動の片側の幅。0で同じ高さを周回。
-inline constexpr float orbOrbitSeconds=1.565f; // 一周の秒数。増やすと遅くなり、文字の白黒周期も連動。
+// 音楽から受け取る「拍数」を共通の時計にします。BGMなしではfallbackBpmで動きます。
+// 例: orbitBeats=8で周回を半分の速さに、polarityBeats=2で2拍ごとに白黒交換。
+inline constexpr float fallbackBpm=180.f; // 提供BGMの主拍を全曲で計測した既定値。
+inline constexpr float orbitBeats=4.0f;
+inline constexpr float polarityBeats=1.0f;
+inline constexpr float floorGlyphBeats=4.0f; // 4拍ごとに次の字へ。4文字で16拍のループ。
 inline constexpr float orbFaceRotation=-.14f; // 玉の正面の回転、ラジアン/秒。
 inline constexpr unsigned orbRimSegments=96; // 輪郭の分割数。通常はそのままで十分。
 inline constexpr float whiteHaloBrightness=.20f; // 上げすぎると内部の雷雲が白飛びします。
 inline constexpr float blackHaloBrightness=.16f;
 
-// 玉の中心が残す独立した軌跡。例: wakeSeconds=.45で長く、wakeWidth=.08で細く。
-inline constexpr float wakeSeconds=.30f; // 過去何秒分の軌道を描くか。
-inline constexpr float wakeWidth=.12f;
-inline constexpr float wakeBrightness=.68f;
-inline constexpr float wakeVerticalWave=.24f; // 上下のなみなみの幅。0で周回軌道に沿うだけ。
-inline constexpr float wakeRadialWave=.10f;   // 内外のなみなみの幅。
-inline constexpr unsigned wakeSegments=32;
-inline constexpr unsigned wakeDotCount=6; // 小さな光点の数。星を置く位置の都合で6以上を推奨。
+// 玉の実際の過去位置を結んだトレイル。波や点は足さず、尾の先ほど細く薄くします。
+// trailBeatsを増やすと長い尾、trailWidthを増やすと太い尾になります。
+inline constexpr float trailBeats=.80f;
+inline constexpr float trailWidth=.20f;
+inline constexpr float trailBrightness=.62f;
+inline constexpr unsigned trailSegments=40;
+
+// 白黒が入れ替わった瞬間だけ、玉の中心からリングと小さな破片を外へ飛ばします。
+// burstBeatsは表示時間（拍）、burstRadiusは広がる距離。量はburstFragmentsで調整。
+inline constexpr float burstBeats=.42f;
+inline constexpr float burstRadius=1.15f;
+inline constexpr float burstBrightness=.60f;
+inline constexpr unsigned burstRingSegments=48;
+inline constexpr unsigned burstFragments=12;
 
 // 名前と副題の表示面。高さを増やすと上へ、幅/高さを増やすと文字が横/縦に大きくなります。
 // 例: titleHeight=5.5で名前を少し上へ移動。
@@ -73,8 +84,11 @@ inline constexpr float dustBrightness=.40f;
 
 // 0除算や極端な描画量を防ぐ範囲チェック。初めはこの範囲内で値を試してください。
 static_assert(floorRingCount<=8 && floorRingSegments>=3 && floorRingSegments<=256);
-static_assert(orbRadius>0 && orbOrbitRadius>0 && orbOrbitSeconds>0);
+static_assert(orbRadius>0 && orbOrbitRadius>0 && fallbackBpm>0 && orbitBeats>0);
+static_assert(polarityBeats>0 && floorGlyphBeats>0);
 static_assert(orbRimSegments>=3 && orbRimSegments<=256);
-static_assert(wakeSeconds>=0 && wakeWidth>0 && wakeSegments>=1 && wakeSegments<=128);
-static_assert(wakeDotCount>=1 && wakeDotCount<=24 && mistCount<=128 && dustCount<=512);
+static_assert(trailBeats>=0 && trailWidth>0 && trailSegments>=1 && trailSegments<=128);
+static_assert(burstBeats>0 && burstBeats<polarityBeats && burstRadius>0);
+static_assert(burstRingSegments>=3 && burstRingSegments<=128 && burstFragments<=64);
+static_assert(mistCount<=128 && dustCount<=512);
 } // namespace aura::tuning::equinox

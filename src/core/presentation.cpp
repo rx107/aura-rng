@@ -85,13 +85,17 @@ void validate(const Settings& s) {
     if(!std::isfinite(s.pixelationBpm) || (s.pixelationBpm!=0 && (s.pixelationBpm<30 || s.pixelationBpm>300)) ||
         !std::isfinite(s.pixelationBeatOffset) || std::abs(s.pixelationBeatOffset)>2)
         throw std::runtime_error("Beat settings require BPM=0 or 30..300, offset=-2..2 seconds");
+    for(const float bpm:{s.equinoxBpm,s.equinoxCutsceneBpm})
+        if(!std::isfinite(bpm) || bpm<30 || bpm>300) throw std::runtime_error("Equinox BPM must be 30..300");
+    for(const float offset:{s.equinoxBeatOffset,s.equinoxCutsceneBeatOffset})
+        if(!std::isfinite(offset) || std::abs(offset)>2) throw std::runtime_error("Equinox beat offset must be -2..2 seconds");
     float previous=-1;
     for(const float second:s.breakthroughWordTimes) {
         if(!std::isfinite(second) || second<0 || second>=BreakthroughCutsceneDuration || second<=previous)
             throw std::runtime_error("Caption words must have ascending times inside the cutscene");
         previous=second;
     }
-    for (const auto* p:{&s.vrmPath,&s.bgmPath,&s.pixelationBgmPath,&s.pixelationFinalBgmPath,&s.illusionaryBgmPath})
+    for (const auto* p:{&s.vrmPath,&s.bgmPath,&s.pixelationBgmPath,&s.pixelationFinalBgmPath,&s.illusionaryBgmPath,&s.equinoxBgmPath})
         if (p->size()>2048 || p->find_first_of("\r\n\0",0,3)!=std::string::npos)
         throw std::runtime_error("Invalid asset path");
     if (s.language != Language::English && s.language != Language::Japanese) throw std::runtime_error("Invalid language");
@@ -108,7 +112,7 @@ Settings loadSettings(const std::filesystem::path& path) {
     std::getline(input, header);
     int version{};
     std::istringstream headerInput(header); std::string magic,headerExtra;
-    if (!(headerInput>>magic>>version) || magic!="STARS_RNG_SETTINGS" || version<1 || version>7 || (headerInput>>headerExtra))
+    if (!(headerInput>>magic>>version) || magic!="STARS_RNG_SETTINGS" || version<1 || version>8 || (headerInput>>headerExtra))
         throw std::runtime_error("Invalid settings header");
     if (!(input >> kind >> language) || kind != "language" || (language != "en" && language != "ja"))
         throw std::runtime_error("Invalid language setting");
@@ -145,6 +149,9 @@ Settings loadSettings(const std::filesystem::path& path) {
             throw std::runtime_error("Invalid Illusionary audio setting");
         if(version>=7 && (!(input>>kind>>s.pixelationBpm>>s.pixelationBeatOffset) || kind!="pixelation_beat"))
             throw std::runtime_error("Invalid Pixelation beat setting");
+        if(version>=8 && (!(input>>kind>>std::quoted(s.equinoxBgmPath)) || kind!="equinox_bgm" ||
+            !(input>>kind>>s.equinoxBpm>>s.equinoxBeatOffset>>s.equinoxCutsceneBpm>>s.equinoxCutsceneBeatOffset) || kind!="equinox_beat"))
+            throw std::runtime_error("Invalid Equinox music/beat settings");
     }
     if (input>>extra) throw std::runtime_error("Unexpected settings data");
     validate(s); return s;
@@ -154,7 +161,7 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     auto temporary = path; temporary += ".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    out << "STARS_RNG_SETTINGS 7\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
+    out << "STARS_RNG_SETTINGS 8\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
         << "\nshirt " << std::setprecision(17) << settings.shirt.r << ' ' << settings.shirt.g << ' ' << settings.shirt.b
         << "\nluck "<<settings.luck<<"\navatar "<<static_cast<int>(settings.avatar)<<"\nbiome "<<static_cast<int>(settings.biome)
         <<"\nvolume "<<settings.volume<<"\nvrm "<<std::quoted(settings.vrmPath)<<"\nbgm "<<std::quoted(settings.bgmPath)
@@ -165,7 +172,10 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
         <<"\nbreakthrough_caption_offset "<<settings.breakthroughCaptionOffset<<"\nbreakthrough_word_times";
     for(const float second:settings.breakthroughWordTimes) out<<' '<<second;
     out<<"\nillusionary_bgm "<<std::quoted(settings.illusionaryBgmPath)
-        <<"\npixelation_beat "<<settings.pixelationBpm<<' '<<settings.pixelationBeatOffset<<'\n';
+        <<"\npixelation_beat "<<settings.pixelationBpm<<' '<<settings.pixelationBeatOffset
+        <<"\nequinox_bgm "<<std::quoted(settings.equinoxBgmPath)
+        <<"\nequinox_beat "<<settings.equinoxBpm<<' '<<settings.equinoxBeatOffset<<' '
+        <<settings.equinoxCutsceneBpm<<' '<<settings.equinoxCutsceneBeatOffset<<'\n';
     out.flush();
     if (!out) throw std::runtime_error("Cannot write settings");
     out.close();

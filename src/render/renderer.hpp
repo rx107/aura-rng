@@ -37,8 +37,9 @@ struct Frame {
     float stageTravelProgress{-1};
     Biome stageTravelTarget{Biome::Normal};
     AuraCategory collectionCategory{AuraCategory::Normal};
-    float cutsceneBass{}; // 再生音声から計測した低音0〜1。音声がなければ0。
+    float cutsceneBeat{}; // 実音声の再生位置に同期した拍0〜1。音声がなければ0。
     float auraBeat{},musicBpm{}; // BGMの実再生時刻に同期した拍0〜1と、推定BPM。
+    float equinoxBeat{-1}; // 通常Equinoxの連続した経過拍数。負なら設定BPMで代替。
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory };
 struct Hit { Action action{Action::None}; std::size_t index{}; };

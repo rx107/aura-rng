@@ -4,7 +4,7 @@
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/archive/refs/tags/v0.1.13-alpha.1.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.15-alpha.1/StarRng-v0.1.15-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -60,11 +60,18 @@ inline constexpr float HeadWidth = 7.0f;
 | キューブの鼓動を大きくする | 同上 → `CageBeatScale` | `.15f` → `.22f`。1拍で膨らむ最大量が15%から22%へ。拍の速さは変わらない |
 | キューブの拍を曲へ合わせる | F1 → 音楽 → キューブの鼓動 | 自動推定を外してBPMを指定。時差`+.10`で0.1秒遅らせる。再ビルド不要 |
 | Equinoxの床文字を小さくする | `src/tuning/equinox.hpp` → `floorGlyphSize` | `3.2f` → `2.8f` |
+| Equinoxの玉を体から離す | 同上 → `orbOrbitRadius` | `3.f` → `3.5f`。二つの玉の周回範囲が外へ広がる |
+| Equinoxの玉を小さくする | 同上 → `orbRadius` | `1.55f` → `1.3f`。周回位置を変えずに玉だけ縮める |
+| Equinoxの尾を長くする | 同上 → `trailBeats` | `.80f` → `1.2f`。過去1.2拍分の軌道を残す。`trailWidth`なら太さを変更 |
+| Equinoxの色交換の爆発を小さくする | 同上 → `burstRadius` | `1.15f` → `.8f`。リングと破片が広がる距離を抑える |
+| Equinoxの拍を曲へ合わせる | F1 → 音楽 → Equinoxの通常表示 / CutScene | BPMで拍の間隔、時差`+.10`で0.1秒遅くする。二つの曲を別々に保存 |
 | BreakThroughの名前を上げる | `src/tuning/breakthrough.hpp` → `titleHeight` | `3.85f` → `4.1f`。名前と確率が上へ移動する |
 | Nanallyの電撃を太くする | `src/tuning/nanally.hpp` → `ElectricWidth` | `.12f` → `.18f`。小さな稲妻の線が太くなる |
 | Illusionaryの回転をゆっくりにする | `src/tuning/illusionary.hpp` → `MotionSpeed` | `1.f` → `.7f`。リボンと放射光の動きがゆっくりになる |
 | Illusionaryの胸の反りを弱める | `src/tuning/avatar.hpp` → `illusionary::TorsoPitch` | `.55f` → `.35f`。腰より上を起こす。首だけなら`HeadPitch`を調整 |
 | 砂漠オーラの砂を広げる | `src/tuning/desert.hpp` → `DuneRadius` | `1.75f` → `2.2f`。砂のらせんが外側へ広がる |
+| Pharaohの金の線を太くする | 同上 → `PharaohPyramidLineWidth` | `.30f` → `.38f`。ピラミッドの辺が太くなる。光の色や明るさは変えない |
+| Pharaohの翼を横へ広げる | 同上 → `PharaohWingWidth` | `3.45f` → `4.f`。左右の長い羽と短い羽が一緒に広がる |
 | ロケットの乗降空間を高くする | `src/tuning/stages.hpp` → `RocketBoardingClearance` | `3.f` → `4.f`。機体だけ1単位上へ移動。発着地点は中央のまま |
 
 `HalfExtent`は全幅の**半分**です。32なら全幅64。処理を軽く保つため、範囲チェックでは12〜48を指定できるようにしています。
@@ -73,7 +80,9 @@ Pixelationには時計が2本あります。**Motion**は周囲の粒子・立�
 
 **BPMは1分間の拍数**です。120なら0.5秒ごと、150なら0.4秒ごとに鼓動します。音楽の自動推定は、低音の立ち上がりの繰り返しを探すため、曲によって半分・倍の値を選ぶことがあります。F1から30〜300の手動BPMと-2〜+2秒の時差で合わせられます。正の時差で遅く、負の時差で早くなります。曲が再生されていない間は鼓動せず、BGMのないLevel 0も同様です。
 
-BreakThroughの`breakthrough.hpp`は**通常表示用**です。柱の浮遊幅や位置を変えても、別の処理で描くCutSceneの柱は変更されません。CutSceneの構造物は静止し、周回・後退・急接近・前進するカメラは`cutscene.hpp`で調整します。[4つの場面の調整表](stage-and-cutscene-guide.md#breakthroughの4つのカメラ)を参照してください。
+Equinoxは通常表示とCutSceneの音楽が異なるため、F1 → 音楽でBPM・時差を**別々に**合わせます。玉の周回は4拍で1周、白黒交換と小さな爆発は1拍ごと、床文字は4拍ごとの「陰→陽→衡→無」です。たとえば`floorGlyphBeats = 4.f`を`8.f`にすると文字の切り替えだけ半分の速さになり、4文字の1巡は32拍になります。通常の曲を差し替えたときは、その曲のBPM・時差も調整してください。[拍と揺れの調整手順](stage-and-cutscene-guide.md#equinoxの拍と揺れを音楽へ合わせる)
+
+BreakThroughの`breakthrough.hpp`は**通常表示用**です。柱の浮遊幅や位置を変えても、別の処理で描くCutSceneの柱は変更されません。CutSceneの構造物は静止し、周回・後退・急接近・前進するカメラは`cutscene.hpp`で調整します。iv字幕中だけの白黒表示は`BreakthroughIvInkThreshold = .12f`が白と黒の境界です。[場面とカメラの調整表](stage-and-cutscene-guide.md#breakthroughの場面とカメラ)を参照してください。
 
 ## 4. コードの記号を少しだけ読む
 
@@ -132,7 +141,7 @@ auratest,My Test Aura,0,1.0,0.3,0.7,32,1.5,0.7,1
 
 通常抽選へ追加するときは、すべての確率の合計を考える必要があります。詳しい条件は [aura-format.md](aura-format.md) にあります。最初は上のプレビュー行から始めると、確率計算を触らず絵作りに集中できます。
 
-許可済みの6音源はソースZIPにも同梱しています。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
+許可済みの7音源はソースZIPにも同梱しています。Equinoxの通常表示用の曲とCutScene用M4Aは別ファイルです。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
 
 ## 7. 変わらない・ビルドできないとき
 
@@ -143,6 +152,7 @@ auratest,My Test Aura,0,1.0,0.3,0.7,32,1.5,0.7,1
 | ポーズの設定を変えたのに違いがない | 対象オーラと同じレベルで見比べる。歩行用と固定ポーズ用は別 |
 | キューブが鼓動しない | PixelationのLevel 1〜3でBGMが再生されているか確認。自動推定が0なら手動BPMを指定。Level 0にはBGMがない |
 | キューブの鼓動が半分・倍に感じる | F1 → 音楽から自動推定を外し、BPMを手動指定。少しのずれは拍の時差で調整 |
+| Equinoxの拍が音楽と合わない | F1 → 音楽で通常表示とCutSceneのどちらを直すか選ぶ。BPMで間隔、時差で出る瞬間を合わせる |
 | ファイルを上書きできない | ゲームを閉じてから再ビルド |
 | C++のエラーが出る | 最初のエラーを見る。変更した1行を元に戻し、`;`や`,`や`f`を確認 |
 | `static_assert`と出る | 設定が指定範囲外。直前のコメントとチェックの範囲へ戻す |
