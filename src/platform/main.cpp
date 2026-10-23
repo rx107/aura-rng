@@ -184,6 +184,28 @@ private:
         auto_=false; keys_.fill(false); movement_=0; dragging_=false;
         ReleaseCapture(); pending_.reset(); sfxBaseline_=false;
     }
+    void closeMultiplayerPanel() {
+        // プロフィールの画面だけを閉じます。通信を切断する処理は呼びません。
+        multiplayerOpen_=false; returnAfterConnect_=false; clearWorldInput();
+        if(renderer_)renderer_->releaseInputFocus();
+    }
+    void receiveMultiplayerSnapshot(aura::net::Snapshot snapshot) {
+        networkSnapshot_=std::move(snapshot);
+        // 「参加する」を押した接続だけ、成功後にゲームへ戻します。
+        // 通信は別スレッドなので、Connectingを描く前にConnectedになる場合もあります。
+        // 接続中に名前・写真を編集する再接続では、勝手に画面を閉じません。
+        if(!returnAfterConnect_) return;
+        if(networkSnapshot_.state==aura::net::State::Connected) closeMultiplayerPanel();
+        else if(networkSnapshot_.state==aura::net::State::Error || networkSnapshot_.state==aura::net::State::Offline)
+            returnAfterConnect_=false; // エラー表示を読むため、プロフィールは開いたまま。
+    }
+    aura::net::LocalPlayer multiplayerPlayer(bool moving) const {
+        // 相手にも「いま画面に表示している」オーラを送ります。
+        // F1プレビューでも所持数・Collectionの装備・履歴は変更しません。
+        const auto shown=presentation_.shown(progress_);
+        return {x_,z_,facing_,moving,presentation_.settings.biome,roller_.catalog()[shown].id,
+            presentation_.level(progress_,roller_.catalog()),presentation_.settings.shirt};
+    }
     void selectStages() {
         if(cutsceneActive() || stageTravel_.active()) return;
         stageSelectOpen_=!stageSelectOpen_; clearWorldInput();
@@ -215,6 +237,7 @@ private:
     void startCutscene(aura::CutsceneKind kind=aura::CutsceneKind::Equinox) {
         // 実際の装備と所持数は維持し、演出の最後に対応オーラを一時表示します。
         // Esc/停止なら直前のプレビューに戻し、自然終了なら結果を見たままにします。
+        if(multiplayerOpen_) closeMultiplayerPanel();
         stageSelectOpen_=false; stageTravel_.finish();
         if(!cutsceneActive()) {
             cutsceneDebugWasOpen_=renderer_->debugOpen();
@@ -274,7 +297,10 @@ private:
         if(stageSelectOpen_ && hit.action!=aura::Action::Stages && hit.action!=aura::Action::Travel &&
             hit.action!=aura::Action::CloseStages && hit.action!=aura::Action::Debug) return;
         switch(hit.action) {
-        case aura::Action::Multiplayer: multiplayerOpen_=!multiplayerOpen_; clearWorldInput(); break;
+        case aura::Action::Multiplayer:
+            if(multiplayerOpen_) closeMultiplayerPanel();
+            else {multiplayerOpen_=true; clearWorldInput();}
+            break;
         case aura::Action::Stages: selectStages(); break;
         case aura::Action::CloseStages: stageSelectOpen_=false; clearWorldInput(); break;
         case aura::Action::Travel:
@@ -297,14 +323,20 @@ private:
                 sfxBaseline_=false; persist();
             }
             break;
-        case aura::Action::Debug:
-            renderer_->toggleDebug(); keys_.fill(false); dragging_=false; ReleaseCapture();
+        case aura::Action::Debug: {
+            // F1へ切り替えたのに、背後のプロフィールがプレビューを止めないようにします。
+            const bool fromProfile=multiplayerOpen_;
+            if(multiplayerOpen_) closeMultiplayerPanel();
+            if(!fromProfile || !renderer_->debugOpen()) renderer_->toggleDebug();
+            keys_.fill(false); dragging_=false; ReleaseCapture();
             break;
+        }
         default: break;
         }
     }
     void applyDebugActions(const aura::DebugActions& commands) {
         // F1パネルから届く変更を反映。プレビューと実際の所持・装備は分けて扱います。
+        if(commands.closeMultiplayer) closeMultiplayerPanel();
         if(commands.stopCutscene) stopCutscene();
         if(!worldInputBlocked()) {
         if(commands.preview) presentation_.showPreview(*commands.preview,roller_.catalog().size(),auto_);
@@ -374,7 +406,6 @@ private:
         setTempo(commands.equinoxCutsceneBpm,presentation_.settings.equinoxCutsceneBpm);
         setBeatOffset(commands.equinoxBeatOffset,presentation_.settings.equinoxBeatOffset);
         setBeatOffset(commands.equinoxCutsceneBeatOffset,presentation_.settings.equinoxCutsceneBeatOffset);
-        if(commands.closeMultiplayer)multiplayerOpen_=false;
         if(commands.serverEndpoint)presentation_.settings.serverEndpoint=*commands.serverEndpoint;
         if(commands.profilePhotoPath) {
             try {
@@ -388,12 +419,13 @@ private:
             profilePhoto_.clear(); presentation_.settings.profilePhotoPath.clear();
             std::error_code ec;std::filesystem::remove(saves_/L"profile.png",ec);
         }
-        if(commands.disconnectMultiplayer)multiplayer_.disconnect();
+        if(commands.disconnectMultiplayer) {returnAfterConnect_=false; multiplayer_.disconnect();}
         const bool reconnect=(commands.username || commands.profilePhotoPath || commands.clearProfilePhoto) && networkSnapshot_.state==aura::net::State::Connected;
         if(commands.connectMultiplayer || reconnect) {
-            if(presentation_.settings.usernameConfigured && aura::validUsername(presentation_.settings.username))
+            if(presentation_.settings.usernameConfigured && aura::validUsername(presentation_.settings.username)) {
+                returnAfterConnect_=returnAfterConnect_ || commands.connectMultiplayer;
                 multiplayer_.connect(presentation_.settings.serverEndpoint,presentation_.settings.username,profilePhoto_);
-            else notice_="Set your username before joining multiplayer.";
+            } else {returnAfterConnect_=false; notice_="Set your username before joining multiplayer.";}
         }
         if(commands.username || commands.serverEndpoint || commands.profilePhotoPath || commands.clearProfilePhoto || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
             commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.illusionaryBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes || commands.pixelationBpm || commands.pixelationBeatOffset ||
@@ -484,10 +516,9 @@ private:
         }
         const float target=moving?1.f:0.f;
         movement_+=std::clamp(target-movement_,-dt*8,dt*8);
-        // 接続中も抽選/保存は従来のまま。実装備と移動だけを通信スレッドへ渡します。
-        const auto& equipped=roller_.catalog()[progress_.equipped];
-        multiplayer_.submit({x_,z_,facing_,moving,s.biome,equipped.id,progress_.auraLevel(progress_.equipped,roller_.catalog()),s.shirt});
-        networkSnapshot_=multiplayer_.snapshot();
+        // 接続中も抽選/保存は従来のまま。表示オーラと移動だけを通信スレッドへ渡します。
+        multiplayer_.submit(multiplayerPlayer(moving));
+        receiveMultiplayerSnapshot(multiplayer_.snapshot());
     }
     void render(bool present) {
         try {
@@ -1282,7 +1313,64 @@ private:
         if(!opts_.capture.empty())renderer_->capture(opts_.capture.parent_path()/L"multiplayer-profile.png");
         action({aura::Action::Multiplayer,0});const auto pausedRolls=progress_.rolls;cooldown_=0;roll();
         if(progress_.rolls!=pausedRolls || !worldInputBlocked())throw std::runtime_error("Multiplayer profile allowed world input");
-        aura::DebugActions closeOnline;closeOnline.closeMultiplayer=true;applyDebugActions(closeOnline);render(false);
+        // 接続画面→成功→実際のキー入力を通す回帰試験。画面だけの架空Frameでは見落とす不具合です。
+        const auto onlinePresentation=presentation_;
+        const auto onlineCounts=progress_.counts;const auto onlineEquipped=progress_.equipped;
+        const auto onlineLogs=log_.size();const float onlineX=x_,onlineZ=z_;
+        returnAfterConnect_=true;
+        auto connecting=peers;connecting.state=aura::net::State::Connecting;
+        receiveMultiplayerSnapshot(connecting);
+        if(!multiplayerOpen_ || !returnAfterConnect_)throw std::runtime_error("Connecting closed the profile too early");
+        keys_['W']=true;dragging_=true;
+        receiveMultiplayerSnapshot(peers);
+        if(multiplayerOpen_ || returnAfterConnect_ || worldInputBlocked() || keys_['W'] || dragging_)
+            throw std::runtime_error("Successful multiplayer join left the world input blocked");
+        if(renderer_->debugOpen())renderer_->toggleDebug();
+        render(false);render(false); // 閉じたImGui画面の前フレームの入力取得を解放。
+        SendMessageW(window_,WM_KEYDOWN,'W',0);update(.2f);SendMessageW(window_,WM_KEYUP,'W',0);
+        if(std::abs(x_-onlineX)+std::abs(z_-onlineZ)<.1f)throw std::runtime_error("Movement after multiplayer join failed");
+        checkOrbit();
+        x_=onlineX;z_=onlineZ;
+        // 速い接続ではConnectingを1フレームも描かない場合もあります。
+        receiveMultiplayerSnapshot({});action({aura::Action::Multiplayer,0});returnAfterConnect_=true;
+        receiveMultiplayerSnapshot(peers);
+        if(multiplayerOpen_)throw std::runtime_error("Fast multiplayer join did not return to the game");
+        // 接続済みのプロフィールを開き直しても、自動では閉じません。
+        action({aura::Action::Multiplayer,0});receiveMultiplayerSnapshot(peers);
+        if(!multiplayerOpen_)throw std::runtime_error("Connected profile could not remain open for editing");
+        aura::DebugActions closeOnline;closeOnline.closeMultiplayer=true;applyDebugActions(closeOnline);
+        if(multiplayerOpen_ || networkSnapshot_.state!=aura::net::State::Connected)
+            throw std::runtime_error("Back to game disconnected multiplayer");
+        action({aura::Action::Multiplayer,0});SendMessageW(window_,WM_KEYDOWN,VK_ESCAPE,0);
+        if(multiplayerOpen_ || quitting_ || networkSnapshot_.state!=aura::net::State::Connected)
+            throw std::runtime_error("Profile Escape disconnected or quit the game");
+        // F1はプロフィールからデバッグへ切り替える。所持しないオーラとLevelも表示・送信可能。
+        action({aura::Action::Multiplayer,0});SendMessageW(window_,WM_KEYDOWN,VK_F1,0);update(0);
+        receiveMultiplayerSnapshot(peers);
+        if(multiplayerOpen_ || !renderer_->debugOpen())throw std::runtime_error("F1 left multiplayer profile blocking previews");
+        aura::DebugActions onlinePreview;onlinePreview.preview=pixelation;onlinePreview.pixelationLevel=3;
+        auto_=true;applyDebugActions(onlinePreview);
+        const auto outgoingPreview=multiplayerPlayer(false);
+        if(auto_ || presentation_.shown(progress_)!=pixelation || outgoingPreview.auraId!="pixelation" || outgoingPreview.auraLevel!=3)
+            throw std::runtime_error("Online aura preview / preview level was not shared");
+        aura::DebugActions restoreOnline;restoreOnline.restore=true;applyDebugActions(restoreOnline);
+        if(multiplayerPlayer(false).auraId!=roller_.catalog()[progress_.equipped].id)
+            throw std::runtime_error("Restoring equipment did not restore the shared aura");
+        action({aura::Action::Multiplayer,0});SendMessageW(window_,WM_KEYDOWN,VK_F1,0);update(0);
+        receiveMultiplayerSnapshot(peers);
+        if(multiplayerOpen_ || !renderer_->debugOpen())throw std::runtime_error("F1 closed an already-open debug panel behind the profile");
+        // 接続失敗時は画面とエラーを保持。閉じる＋プレビューが同時に届いても受け付けます。
+        action({aura::Action::Multiplayer,0});returnAfterConnect_=true;
+        auto failed=peers;failed.state=aura::net::State::Error;receiveMultiplayerSnapshot(failed);
+        if(!multiplayerOpen_ || returnAfterConnect_)throw std::runtime_error("Failed multiplayer join hid its error");
+        closeOnline.preview=nanally;applyDebugActions(closeOnline);
+        if(worldInputBlocked() || presentation_.shown(progress_)!=nanally || multiplayerPlayer(false).auraId!="nanally")
+            throw std::runtime_error("Closing profile did not unblock the same-frame preview");
+        if(progress_.counts!=onlineCounts || progress_.equipped!=onlineEquipped || progress_.rolls!=pausedRolls || log_.size()!=onlineLogs)
+            throw std::runtime_error("Multiplayer preview changed inventory, equipment or roll history");
+        presentation_=onlinePresentation;receiveMultiplayerSnapshot({});
+        if(renderer_->debugOpen())renderer_->toggleDebug();
+        render(false);render(false);
         if(renderer_->remotePlayerCount()!=0 || worldInputBlocked())throw std::runtime_error("Offline players or profile input block remained");
         frutigerStage.biome=frutigerOriginalStage;applyDebugActions(frutigerStage);x_=frutigerOriginalX;z_=frutigerOriginalZ;
         // 実際のApp::rollを高Luckで64回通し、Extraの5種の取得・演出発火を確認。
@@ -1320,7 +1408,8 @@ private:
             out<<"Planets: PASS / garden, desert, ocean, forest, volcano, extra, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
             out<<"Collection: PASS / Normal13 Desert3 Extra5 Administrator1, folder button and row click mapping, navigation preserves progress\nExtra acquisition: PASS / 64 actual rolls, all five exclusive auras acquired, CutScene triggers, equipment preserved\n";
             out<<"Frutiger Aero: PASS / grass, sky/clouds, glossy bubbles, animated blue butterflies, <=1000 boards, preview isolation\n"
-               <<"Multiplayer render: PASS / two same-planet block avatars with detailed auras, other-planet filtering, profile window input suppression; actual HTTP covered by separate client/server tests\n";
+               <<"Multiplayer render: PASS / two same-planet block avatars with detailed auras, other-planet filtering, profile window input suppression; actual HTTP covered by separate client/server tests\n"
+               <<"Multiplayer input/preview: PASS / success auto-return including skipped Connecting, movement, right-drag, reopen, Esc/Back preserves connection, F1, displayed aura/level payload, failure remains visible, inventory/history isolation\n";
             out<<"Profile: PASS / UTF-8 username and Discord settings save/restore; editable total 0 / 123456789 / original, AutoRoll stop, inventory/history/best unchanged\n"
                <<"Discord integration: disabled during game smoke; transport and payload covered by isolated fake IPC tests\n";
             out<<"Pixelation: PASS / preview isolation, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
@@ -1373,7 +1462,7 @@ private:
         }
         if(!app) return DefWindowProcW(window,message,wp,lp);
         if(message==WM_KEYUP && wp<256) app->keys_[wp]=false;
-        if(message==WM_KEYDOWN && wp==VK_ESCAPE && app->multiplayerOpen_) {app->multiplayerOpen_=false;return 0;}
+        if(message==WM_KEYDOWN && wp==VK_ESCAPE && app->multiplayerOpen_) {app->closeMultiplayerPanel();return 0;}
         if(message==WM_KEYDOWN && wp==VK_F1 && !(lp & (1LL<<30))) { app->pending_=aura::Hit{aura::Action::Debug,0}; return 0; }
         if(app->cutsceneActive() && message==WM_KEYDOWN && wp==VK_ESCAPE) {
             if(!(lp & (1LL<<30))) app->stopCutsceneRequested_=true;
@@ -1465,7 +1554,7 @@ private:
     aura::net::Client multiplayer_;
     aura::net::Snapshot networkSnapshot_;
     std::vector<std::uint8_t> profilePhoto_;
-    bool multiplayerOpen_{};
+    bool multiplayerOpen_{},returnAfterConnect_{};
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;
     std::optional<std::size_t> cutscenePreviousPreview_;

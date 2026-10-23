@@ -87,6 +87,7 @@ public:
     float scale() const { return scale_; }
     bool handleMessage(HWND window, UINT message, WPARAM wp, LPARAM lp) noexcept;
     bool wantsKeyboard() const;
+    void releaseInputFocus();
     void toggleDebug() { debugOpen_ = !debugOpen_; }
     bool debugOpen() const { return debugOpen_; }
     DebugActions takeDebugActions();

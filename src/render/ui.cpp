@@ -76,14 +76,23 @@ bool Renderer::handleMessage(HWND window,UINT message,WPARAM wp,LPARAM lp) noexc
         ImGui::SetCurrentContext(imguiContext_);
         const LRESULT handled=ImGui_ImplWin32_WndProcHandler(window,message,wp,lp);
         const auto& io=ImGui::GetIO();
-        if (message>=WM_MOUSEFIRST && message<=WM_MOUSELAST) return io.WantCaptureMouse;
-        if (message>=WM_KEYFIRST && message<=WM_KEYLAST) return io.WantCaptureKeyboard;
+        // 閉じた画面の前フレームのCapture値で、ゲームの入力まで捨てないようにします。
+        const bool uiVisible=debugOpen_ || multiplayerPanelVisible_;
+        if (message>=WM_MOUSEFIRST && message<=WM_MOUSELAST) return uiVisible && io.WantCaptureMouse;
+        if (message>=WM_KEYFIRST && message<=WM_KEYLAST) return uiVisible && io.WantCaptureKeyboard;
         return handled!=0;
     } catch (...) { return false; }
 }
 bool Renderer::wantsKeyboard() const {
-    if (!imguiContext_) return false;
+    if (!imguiContext_ || (!debugOpen_ && !multiplayerPanelVisible_)) return false;
     ImGui::SetCurrentContext(imguiContext_); return ImGui::GetIO().WantCaptureKeyboard;
+}
+void Renderer::releaseInputFocus() {
+    if(!imguiContext_) return;
+    ImGui::SetCurrentContext(imguiContext_);
+    // InputTextとキーボードナビのフォーカスを解除。画面を閉じただけでは残る場合があります。
+    ImGui::SetWindowFocus(nullptr);
+    multiplayerPanelVisible_=false;
 }
 DebugActions Renderer::takeDebugActions() { return std::exchange(debugActions_,{}); }
 void Renderer::debugUi(const Frame& f) {

@@ -62,6 +62,13 @@ void Renderer::multiplayerUi(const Frame& f) {
         if(nameSource!=profile.username) {name.fill(0);std::copy_n(profile.username.begin(),std::min(profile.username.size(),name.size()-1),name.begin());nameSource=profile.username;}
         if(endpointSource!=profile.serverEndpoint) {endpoint.fill(0);std::copy_n(profile.serverEndpoint.begin(),std::min(profile.serverEndpoint.size(),endpoint.size()-1),endpoint.begin());endpointSource=profile.serverEndpoint;}
         ImGui::TextColored({.55f,.96f,.82f,1},"STAR'S RNG / ONLINE");
+        // この画面の開閉と、サーバーへの接続は別の状態です。
+        // closeMultiplayer は画面だけを閉じる命令。切断は下の Disconnect が担当します。
+        // 上側に置くと、小さな画面でもスクロールせずゲームへ戻れます。
+        if(ImGui::Button(t("Back to game","ゲームに戻る"),{-1,36}))debugActions_.closeMultiplayer=true;
+        ImGui::TextWrapped("%s",t("Esc also closes this profile. Your connection stays active. Joining successfully returns you to the game automatically.",
+            "Escでもこの画面を閉じられます。接続はそのまま続き、参加に成功すると自動でゲームへ戻ります。"));
+        ImGui::Separator();
         if(!profile.usernameConfigured)ImGui::TextWrapped("%s",t("Set your username before your first multiplayer session.","はじめて参加する前に、ユーザー名を入力して確定してください。"));
         ImGui::InputText(t("Username##mp","ユーザー名##mp"),name.data(),name.size());
         const bool valid=validUsername(name.data());ImGui::BeginDisabled(!valid);
