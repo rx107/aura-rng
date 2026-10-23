@@ -42,3 +42,36 @@ jobs:
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
+  publish-release:
+    # 通常のmain更新では配布しません。codex/release-v0.1.17-alpha.1 のような
+    # 公開専用ブランチをpushした時だけ、両OSの検証成功後にリリースを作成します。
+    if: github.event_name == 'push' && github.repository == 'rx107/aura-rng' && startsWith(github.ref, 'refs/heads/codex/release-')
+    needs: [windows, core-portable]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: StarsRng-Alpha0.1-windows-x64
+          path: windows-package
+      - name: Build audited release archives
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#codex/release-}"
+          python tools/package_release.py --windows-folder windows-package --dest dist --tag "$tag"
+      - name: Publish tested binaries and source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME#codex/release-}"
+          gh release create "$tag" dist/*.zip dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Star's RNG Alpha 0.1 / $tag" --notes-file dist/release-notes.md
