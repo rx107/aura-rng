@@ -15,9 +15,22 @@ inline float beatClock(float musicBeat,float elapsed) {
     if(std::isfinite(musicBeat) && musicBeat>=0) return musicBeat;
     return std::isfinite(elapsed)?std::max(0.f,elapsed)*tuning::equinox::fallbackBpm/60.f:0.f;
 }
-inline Point orbPosition(float beat,unsigned side) {
+// 加速と減速を含む共通の周回角度です。sinの往復分を足すため、平均の周回時間は変わりません。
+// 角度の増え方は「1 + 強さ*cos(...)」。強さを1未満に保つと常に前へ進みます。
+inline float orbOrbitAngle(float beat) {
     if(!std::isfinite(beat)) beat=0;
-    const float angle=beat*2*Pi/tuning::equinox::orbitBeats+(side&1u)*Pi;
+    const float base=beat*2*Pi/tuning::equinox::orbitBeats;
+    return base+tuning::equinox::orbitSpeedVariation*tuning::equinox::orbitSpeedCycleOrbits*
+        std::sin(base/tuning::equinox::orbitSpeedCycleOrbits);
+}
+// 平均速度を1とした、その拍での速さ。画面を使わないテストでも逆走しないか確認できます。
+inline float orbSpeedScale(float beat) {
+    if(!std::isfinite(beat)) beat=0;
+    const float base=beat*2*Pi/tuning::equinox::orbitBeats;
+    return 1+tuning::equinox::orbitSpeedVariation*std::cos(base/tuning::equinox::orbitSpeedCycleOrbits);
+}
+inline Point orbPosition(float beat,unsigned side) {
+    const float angle=orbOrbitAngle(beat)+(side&1u)*Pi;
     return {std::cos(angle)*tuning::equinox::orbOrbitRadius,
             tuning::equinox::orbHeight+std::sin(angle)*tuning::equinox::orbBobHeight,
             std::sin(angle)*tuning::equinox::orbOrbitRadius};

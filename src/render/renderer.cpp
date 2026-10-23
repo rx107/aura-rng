@@ -225,7 +225,7 @@ void Renderer::updateVrm(const Frame& f) {
 void Renderer::world(const Frame& f) {
     // 1. 前フレームの絵を消す → 2. ステージ → 3. アバター → 4. 表示オーラ → 5. GPUへ送る。
     // この関数は描画専用です。所持数・ロール回数を書き換えません。
-    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear(); holeVisible_=false;
+    instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear(); frutigerInstances_.clear(); holeVisible_=false;
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const unsigned level=f.presentation.level(f.progress,f.roller.catalog());
     const auto biome=f.presentation.settings.biome;
@@ -510,6 +510,7 @@ void Renderer::world(const Frame& f) {
     const bool breakthrough=d.id=="breakthrough";
     const bool nanally=d.id=="nanally";
     const bool illusionary=d.id=="illusionary";
+    const bool frutiger=d.id=="frutiger_aero"; frutigerVisible_=frutiger;
     const bool desertAura=d.id=="dune" || d.id=="mirage" || d.id=="pharaoh";
     pixelationVisible_=pixelated; equinoxVisible_=equinox; breakthroughVisible_=breakthrough;
     nanallyVisible_=nanally;
@@ -522,49 +523,14 @@ void Renderer::world(const Frame& f) {
     const float posePivot=illusionary?1.45f:0.f;
     auto base=XMMatrixTranslation(0,-posePivot,0)*XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift+posePivot,f.avatarZ);
-    auto part=[&](float x,float y,float z,float sx,float sy,float sz,Color c,FXMMATRIX transform) {
-        if(useVrm) return;
-        Instance instance{};
-        XMStoreFloat4x4(&instance.world,XMMatrixScaling(sx,sy,sz)*XMMatrixTranslation(x,y,z)*transform*base);
-        auto lit=c;
-        if(pixelated) {const auto hue=pixelationColor(effectTime); lit={.45f+hue.r*.55f,.45f+hue.g*.55f,.45f+hue.b*.55f};}
-        if(equinox) lit={.83f,.85f,.90f};
-        if(breakthrough) lit={.65f,.71f,1.f};
-        // 元の服・肌・顔の濃淡を残し、横向きでも頭と手足を見分けられるようにします。
-        if(illusionary) lit={c.r*.76f,c.g*.82f,std::min(1.f,c.b*.82f+.16f)};
-        const bool faceDetail=illusionary && c.r<.30f && c.g<.22f;
-        instance.color={lit.r,lit.g,lit.b,illusionary?(faceDetail?0.f:.82f):pixelated?1.8f:(equinox || breakthrough)?.65f:0.f}; instances_.push_back(instance);
-    };
-    const Color skin{.95f,.76f,.47f}, shirt=f.presentation.settings.shirt, pants{.20f,.29f,.42f};
-    // 腰より上だけを回す。脚まで回すと「反り返る」代わりに全身が倒れてしまいます。
-    const auto torso=XMMatrixTranslation(0,-1.08f,0)*XMMatrixRotationX(pose.torsoPitch)*XMMatrixTranslation(0,1.08f,0);
-    for(int side=0;side<2;++side) {
-        const float sign=side?1.f:-1.f;
-        const auto arm=XMMatrixRotationZ(sign*pose.armOut[side])*XMMatrixRotationX(pose.armPitch[side])*
-            XMMatrixTranslation(sign*.76f,2.02f,0)*torso;
-        // 上腕と前腕に分け、肘を中心に曲げる。elbowPitch=0 なら元の一本腕と同じ外形です。
-        part(0,-.22f,0,.43f,.48f,.54f,skin,arm);
-        const auto elbow=XMMatrixRotationX(pose.elbowPitch[side])*XMMatrixTranslation(0,-.46f,0)*arm;
-        part(0,-.24f,0,.43f,.48f,.54f,skin,elbow);
-        const auto hip=XMMatrixRotationZ(sign*pose.legOut[side])*XMMatrixRotationX(pose.legPitch[side])*XMMatrixTranslation(sign*.27f,1.10f,0);
-        part(0,-.24f,0,.46f,.48f,.52f,pants,hip);
-        const auto knee=XMMatrixRotationX(pose.knee[side])*XMMatrixTranslation(0,-.48f,0)*hip;
-        part(0,-.24f,0,.46f,.48f,.52f,pants,knee);
-    }
-    part(0,1.56f,0,1.03f,.96f,.60f,shirt,torso);
-    // 首の付け根を支点にし、顔パーツも頭と一緒に上へ向ける。
-    const auto head=XMMatrixTranslation(0,-2.055f,0)*XMMatrixRotationX(pose.headPitch)*XMMatrixTranslation(0,2.055f,0)*torso;
-    part(0,2.42f,0,.73f,.73f,.73f,skin,head);
-    part(-.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},head);
-    part(.16f,2.48f,-.375f,.085f,.10f,.02f,{.10f,.13f,.15f},head);
-    part(0,2.26f,-.375f,.24f,.045f,.02f,{.25f,.19f,.17f},head);
+    blockAvatar(f,useVrm);
     const float t=f.time*d.speed;
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && i<tuning::world::StandardRingSegments;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && !frutiger && i<tuning::world::StandardRingSegments;++i) {
         const float a=i*2*Pi/tuning::world::StandardRingSegments+t*tuning::world::StandardRingAngularSpeed;
         if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
         else box(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && i<d.particles;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && !frutiger && i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
         const float y=.4f+std::fmod(u*3.3f+f.time*tuning::world::StandardParticleRiseSpeed,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
@@ -589,6 +555,7 @@ void Renderer::world(const Frame& f) {
     if(nanally) buildNanally(f);
     if(illusionary) buildIllusionary(f);
     if(desertAura) buildDesert(f);
+    if(frutiger) buildFrutiger(f);
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
     const float focus=illusionary?tuning::game::CameraFocusIllusionary:breakthrough?tuning::game::CameraFocusBreakthrough:nanally?tuning::game::CameraFocusNanally:
@@ -622,6 +589,7 @@ void Renderer::world(const Frame& f) {
     context_->DrawIndexedInstanced(36,static_cast<UINT>(instances_.size()),0,0,0);
     if(useVrm) vrm_->draw(context_.Get(),view*projection,base,pose);
     drawEffects(f);
+    drawRemotePlayers(f,view*projection,eye,fogColor);
 }
 void Renderer::rect(float x,float y,float w,float h,D2D1_COLOR_F c,float r) {
     brush_->SetColor(c); const auto area=D2D1::RectF(x,y,x+w,y+h);
@@ -658,10 +626,10 @@ void Renderer::draw(const Frame& frame,bool present) {
             frame.cutsceneKind==CutsceneKind::Breakthrough);
         if(cinematicOpacity<1) world(frame);
         else {
-        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear();
+        instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear(); frutigerInstances_.clear();
         pixelationVisible_=equinoxVisible_=breakthroughVisible_=holeVisible_=false;
         nanallyVisible_=false;
-        illusionaryVisible_=desertAuraVisible_=false;
+        illusionaryVisible_=desertAuraVisible_=frutigerVisible_=false;
         }
         if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame); else drawCutscene(frame);
     } else world(frame);
@@ -678,6 +646,7 @@ void Renderer::draw(const Frame& frame,bool present) {
 Hit Renderer::hit(float px,float py,const Frame& f) const {
     if(f.cutsceneTime>=0) return {};
     const float x=px/scale_,y=py/scale_,w=logicalW_,h=logicalH_,bx=w*.5f-105,by=h-146;
+    if(inside(x,y,w-458,26,116,28)) return {Action::Multiplayer,0};
     if(inside(x,y,w-330,26,112,28)) return {Action::Debug,0};
     if(f.stageTravelProgress>=0) return {};
     if(f.stageSelectOpen) {
@@ -708,6 +677,7 @@ int Renderer::region(float px,float py) const {
     return 0;
 }
 bool Renderer::canOrbit(float px,float py) const {
+    if(multiplayerPanelVisible_ && inside(px,py,multiplayerBounds_.x,multiplayerBounds_.y,multiplayerBounds_.z,multiplayerBounds_.w)) return false;
     if(debugOpen_ && inside(px,py,debugBounds_.x,debugBounds_.y,debugBounds_.z,debugBounds_.w)) return false;
     return inside(px/scale_,py/scale_,256,96,logicalW_-596,logicalH_-280);
 }

@@ -157,7 +157,8 @@ void Renderer::buildEquinox(const Frame& source) {
     auto point=[&](float x,float y,float z){return XMVectorSet(ox+x,y,oz+z,1);};
     auto line=[&](XMVECTOR a,XMVECTOR b,float width,float power){pixelLine(a,b,width,silver,power,f);};
     auto material=[&](FXMMATRIX model,unsigned style,float selection=0) {Instance v;XMStoreFloat4x4(&v.world,model);v.color={selection,1,1,style+.95f};equinoxOrbs_.push_back(v);};
-    material(XMMatrixScaling(settings::floorDiameter,settings::floorDiameter,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorHeight,oz),2);
+    // 床の模様・輪・粒子に同じ回転を与え、円全体がまとまって流れるように見せる。
+    material(XMMatrixScaling(settings::floorDiameter,settings::floorDiameter,1)*XMMatrixRotationZ(t*settings::floorRotation)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorHeight,oz),2);
     const auto billboard=XMMatrixRotationX(f.cameraPitch)*XMMatrixRotationY(-f.cameraYaw);
     // 同じ大きさの四角い面のまま、4拍ごとに「陰→陽→衡→無」を切り替える。
     material(XMMatrixScaling(settings::floorGlyphSize,settings::floorGlyphSize,1)*XMMatrixRotationX(Pi*.5f)*XMMatrixTranslation(ox,settings::floorGlyphHeight,oz),3,
@@ -166,10 +167,14 @@ void Renderer::buildEquinox(const Frame& source) {
     for(unsigned ring=0;ring<settings::floorRingCount;++ring) {
         const float radius=settings::floorInnerRadius+ring*settings::floorRingSpacing,height=settings::floorRingHeight+ring*settings::floorRingHeightStep;
         for(unsigned i=0;i<settings::floorRingSegments;++i) {
-            const float a=i*2*Pi/settings::floorRingSegments+t*(ring%2?settings::floorOddRotation:settings::floorEvenRotation),b=a+2*Pi/settings::floorRingSegments;
-            const float wave=settings::floorWaveHeight*std::sin(a*3+t);
-            line(point(std::cos(a)*radius,height+wave,std::sin(a)*radius),
-                 point(std::cos(b)*radius,height+wave,std::sin(b)*radius),.17f+ring*.025f,.31f+ring*.12f);
+            const float localA=i*2*Pi/settings::floorRingSegments,localB=localA+2*Pi/settings::floorRingSegments;
+            const float rotation=t*(ring%2?settings::floorOddRotation:settings::floorEvenRotation),a=localA+rotation,b=localB+rotation;
+            // 波の山を円の「回す前の角度」に固定。回転後の角度で計算すると、
+            // 一周つながった円では速度を上げても模様がその場に残ってしまいます。
+            const float waveA=settings::floorWaveHeight*std::sin(localA*3+ring*.65f);
+            const float waveB=settings::floorWaveHeight*std::sin(localB*3+ring*.65f);
+            line(point(std::cos(a)*radius,height+waveA,std::sin(a)*radius),
+                 point(std::cos(b)*radius,height+waveB,std::sin(b)*radius),.17f+ring*.025f,.31f+ring*.12f);
         }
     }
     // 霧: uが0→1へ進むほど外側から中心へ近づき、前後を薄くして自然に出入りさせる。
@@ -208,7 +213,7 @@ void Renderer::buildEquinox(const Frame& source) {
             const float a=j*2*Pi/settings::burstRingSegments,b=(j+1)*2*Pi/settings::burstRingSegments;
             line(XMVector3TransformCoord(XMVectorSet(std::cos(a)*radius,std::sin(a)*radius,0,1),face),
                  XMVector3TransformCoord(XMVectorSet(std::cos(b)*radius,std::sin(b)*radius,0,1),face),
-                 .11f*(1-u)+.015f,settings::burstBrightness*fade);
+                 settings::burstRingWidth*(1-u)+.015f,settings::burstBrightness*fade);
         }
         for(unsigned j=0;j<settings::burstFragments;++j) {
             const float a=j*2.399963f+side*Pi,dy=1-2*(j+.5f)/settings::burstFragments;
@@ -216,7 +221,7 @@ void Renderer::buildEquinox(const Frame& source) {
             const auto direction=XMVectorSet(std::cos(a)*horizontal,dy,std::sin(a)*horizontal,0);
             const float reach=settings::orbRadius+u*settings::burstRadius*1.4f;
             const auto start=point(center.x,center.y,center.z)+direction*reach;
-            line(start,start+direction*(.15f+.26f*u),.055f*(1-u)+.01f,settings::burstBrightness*fade);
+            line(start,start+direction*(.15f+.26f*u),settings::burstFragmentWidth*(1-u)+.01f,settings::burstBrightness*fade);
         }
         pixelBillboard(ox+center.x,center.y,oz+center.z,settings::orbRadius*3.5f,settings::orbRadius*3.5f,white,0,
             settings::burstBrightness*std::pow(1-u,5.f),f);

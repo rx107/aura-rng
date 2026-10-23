@@ -4,7 +4,7 @@
 
 Win32入力 → Appが操作を検証 → Rollerで抽選 → Progressで所持数・総回数を更新 → CSVとセーブを保存 → FrameをRendererへ渡して描画します。
 
-`src/core` はDirectXから独立した計算です。抽選、進行、設定、共通ポーズ、惑星移動、低音と拍の計算をテストできます。`Renderer` は読み取り用Frameから描くだけで、UIはHit / DebugActionsを返し、Appが変更を反映します。
+`src/core` はDirectXから独立した計算です。抽選、進行、設定、共通ポーズ、惑星移動、低音と拍の計算をテストできます。`Renderer` は読み取り用Frameから描くだけで、UIはHit / DebugActionsを返し、Appが変更を反映します。v0.1.16では、この流れへマルチプレイの読み取り用スナップショットも追加しています。
 
 `Progress::record()` は装備を変えません。実装備はCollection操作から変更します。`Presentation::preview` は未所持でも確認できる一時表示です。プレビューはAutoRollを止め、在庫・履歴・保存中の装備を変えません。
 
@@ -12,7 +12,7 @@ Win32入力 → Appが操作を検証 → Rollerで抽選 → Progressで所持�
 
 `Biome` は既存番号を保ち、Extraを末尾に追加した6種類です。`Roller::setBiome()` が惑星ごとの有効な行を選び、`setLuck()` がCDFをL乗した分布を計算します。対象外の行はLuckを上げてもチケット0枚です。
 
-`auraCategory()` と `availableInBiome()` が分類と取得条件の入口です。Normal13種類は全惑星、Desert3種類は砂漠、Extra4種類はExtra限定。AdministratorのNanallyだけ `preview_only=1` で、抽選・在庫・履歴へ登録できません。計21行、取得可能20種類です。CSVの指定分母を維持し、各惑星で残った確率をStardustへ配分します。
+`auraCategory()` と `availableInBiome()` が分類と取得条件の入口です。Normal13種類は全惑星、Desert3種類は砂漠、Extra5種類はExtra限定。Frutiger AeroはExtraの新しい1種類で、基礎確率は1 in 5,000,000です。AdministratorのNanallyだけ `preview_only=1` で、抽選・在庫・履歴へ登録できません。計22行、取得可能21種類です。CSVの指定分母を維持し、各惑星で残った確率をStardustへ配分します。
 
 `StageTravel` は移動の時計です。選択中・移動中は入力とAutoRollを止め、宇宙で画面が覆われる中間点に行き先を交換して保存します。Extraの丸い星形は `extraStageRadius()` を描画と歩行制限で共有します。各ステージの背景物との物理衝突はありません。
 
@@ -26,9 +26,25 @@ Pixelationの`pixelationPlayer()`は、現在のPLAYER1/2・弾の発射位置�
 
 EquinoxはBGMの再生時刻と保存したBPM・時差から共通の拍数を求めます。標準の周回は4拍、白黒交換は1拍、床文字の交換は4拍です。床文字は「陰→陽→衡→無」の16拍ループ。二つの玉は逆の白黒を保ち、交換した瞬間の拍内の経過量からリングと破片を描きます。トレイルは実際の過去の玉の座標を結ぶため、玉から離れた波形や点列になりません。通常の名前の白黒も同じ拍を使います。
 
+v0.1.16の玉は半径1.80、中心の高さ2.70、周回半径3.60です。`orbOrbitAngle()`が音楽の拍から加速・減速を含む角度を求め、玉・過去のトレイル・交換時の爆発位置が同じ`orbPosition()`を使います。`orbitSpeedVariation=.22f`では平均の78〜122%で動き、0なら等速。強さを1未満に制限するため逆走せず、1周期の平均テンポを保ちます。`floorRotation=1.10f`は床の面・輪・粒子で共有し、輪の上下の波も回転前の角度に固定して模様ごと回します。爆発は広がり1.65、光量.82、破片18個です。すべて`src/tuning/equinox.hpp`に日本語の調整例があります。
+
 Pharaohはピラミッドと二重の床輪、左右の長短二段の羽、青緑の宝石、二重の太陽を既存の発光板で描きます。標準値で最大437枚、Duneは144枚、Mirageは142枚です。専用画像や新しい描画パスを増やさず、線幅を広げて形を出し、不透明度を抑えて白飛びを防ぎます。
 
+Frutiger Aeroは`src/render/frutiger.cpp`で草原・小川・青空・雲・透明な泡・青い蝶を描きます。草の揺れ、雲の流れ、羽の回転は別々の調整値を使います。虹色の薄膜と白い映り込みでガラスの光沢を作り、透明な板は遠い順に並べます。参考画像を貼り付けず、GPUの数式で模様を作るため、元画像の同梱は不要です。[見た目の調整例](frutiger-aero.md)
+
 VRMはcgltfとnlohmann/jsonで自己完結GLBを読み、別スレッドで初期モーフ、スキン、テクスチャを準備します。DirectXの即時コンテキストはメインスレッド専用です。GPUスキニングで描画し、失敗時はブロックを表示します。モデルはローカル選択で、アップロードや再配布をしません。
+
+## マルチプレイの境界
+
+自分の操作 → `App`が`LocalPlayer`へ位置・向き・歩行・惑星・装備オーラ・服色をまとめる → `Client::submit()` → WinHTTPの専用ワーカーが約100msごとに専用サーバーへ送る → `Snapshot`を描画へ渡す、という流れです。通信の完了を待ってゲームの描画を止めません。サーバー全体で自分を含む最大32人を扱います。ロール・所持品・Luckは各PC内で管理し、オンラインへ参加してもサーバー主体の抽選には切り替わりません。
+
+UserName未設定なら参加前に名前を確定します。UserNameと別に初回生成する10桁のUserIDを持ち、名前を変えてもIDは維持します。IDと一緒に作る秘密鍵はWindowsのDPAPIで保護して`multiplayer_identity.json`へ保存します。このローカルの識別情報はプロフィール写真や設定とは別です。
+
+写真の選択は`src/render/multiplayer_ui.cpp`、画像の準備は`src/platform/profile_photo.cpp`です。WindowsのWICでPNG/JPEG/BMPを読み、中央を正方形に切り取り、160×160のPNGとして保存・送信します。元の写真ファイル・ファイル名・メタデータは送信しません。届いた小さいPNGはGPUテクスチャとして再利用し、毎フレーム読み直しません。
+
+`src/render/multiplayer.cpp`の`blockAvatar()`は自分と相手のブロックアバターで共有します。相手の位置は補間し、同じ惑星だけをワールドに表示します。近い4人までを詳細オーラの対象にし、それ以外は少数の星などで負荷を抑えます。他人のVRMは送受信せず、相手はブロックアバターです。プレビューは自分の見た目の確認用で、送信するのはCollectionで装備したオーラです。
+
+同梱の`server/serve.py`は参加者・位置・セッションを管理するPython専用サーバーです。`server/stars-rng.service`がLinuxでの常駐・自動起動、`server/Caddyfile.example`が外部HTTPSからVPS内サーバーへの転送を担当します。XServer VPSへの実際の配備は未実施です。手元の2人接続からVPS設定へ進む手順は[マルチプレイのガイド](multiplayer.md)にまとめています。
 
 ## CutSceneと音声
 
@@ -52,10 +68,12 @@ MP3 / M4A / WAVはWindows Media Foundation、Ogg Vorbisは同梱stb_vorbisでPCM
 
 進行schema 2は編集可能な `rolls` と実在庫合計 `collected` を分けます。所持数は安定したIDで保存し、削除したIDも引退在庫として保持します。旧schema 1、旧カタログ、旧プレビューから抽選対象へ変わったオーラも移行できます。
 
-設定schema 8は言語・服・Luck・惑星・VRM/BGMパス・音量・プロフィール・Discord・字幕時刻・PixelationのBPMと拍の時差に加え、Equinoxの通常BGMパスと通常/CutSceneそれぞれのBPM・時差を保存します。schema 1〜7も読みます。旧設定ではPixelationは自動推定、Equinoxは同梱曲に合わせた初期値で始まります。Equinoxの手動BPMは30〜300、時差は±2秒に制限します。総回数のF1変更は在庫や既存CSVを変えません。プレビューとデバッグLevelは保存しません。
+設定schema 9は従来の言語・服・Luck・惑星・VRM/BGM・音量・Discord・字幕・各曲のBPMと時差に加え、`usernameConfigured`、`serverEndpoint`、`profilePhotoPath`を保存します。ファイルの行名は`username_configured`、`server_endpoint`、`profile_photo`です。旧schema 1〜8も読み、旧UserNameが`Player`なら未確定、それ以外なら設定済みとして移行します。新しい接続先は`http://127.0.0.1:8765`、写真は未選択が初期値です。写真のパスは変換後のローカルPNGを指します。IDと秘密鍵は設定ファイルに混ぜません。
+
+schema 6以前ではPixelationのBPMが自動推定になり、schema 7以前ではEquinoxが同梱曲に合わせた初期値で始まります。schema 8からの移行は保存済みの曲・BPM・時差を保ちます。Equinoxの手動BPMは30〜300、時差は±2秒に制限します。総回数のF1変更は在庫や既存CSVを変えません。プレビューとデバッグLevelは保存しません。
 
 Discordはローカル名前付きパイプを専用ワーカーで扱い、ユーザー名・総回数をRich Presenceへ送ります。公開Application IDだけを用い、トークンは扱いません。実Discordのプロフィール表示は未検証です。[連携の説明](discord.md)
 
 ## 改造の入口
 
-数値は[調整ファイル一覧](../src/tuning/README.md)、CSVは[データ仕様](aura-format.md)、将来のマルチプレイヤー・実績・お宝は[必要な準備](next-features.md)へ。これらの将来機能は今回は実装していません。
+数値は[調整ファイル一覧](../src/tuning/README.md)、CSVは[データ仕様](aura-format.md)、通信とVPSは[マルチプレイ](multiplayer.md)へ。次のサーバー主体の進行管理・実績・お宝は[必要な準備](next-features.md)へ。実績とお宝はまだ実装していません。

@@ -1,0 +1,28 @@
+[Unit]
+Description=Star's RNG multiplayer presence server
+After=network.target
+
+[Service]
+Type=simple
+User=starsrng
+Group=starsrng
+WorkingDirectory=/opt/stars-rng
+ExecStart=/usr/bin/python3 /opt/stars-rng/server/serve.py --host 127.0.0.1 --port 8765 --data-dir /var/lib/stars-rng
+Restart=on-failure
+RestartSec=3
+StateDirectory=stars-rng
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/stars-rng
+
+[Install]
+WantedBy=multi-user.target

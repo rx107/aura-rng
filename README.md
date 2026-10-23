@@ -1,17 +1,14 @@
-# Star's RNG — Alpha 0.1 / v0.1.15
+# Star's RNG — Alpha 0.1 / v0.1.16
 
 C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームです。
 
-![Illusionary](docs/illusionary-preview.webp)
+![Frutiger Aero](docs/frutiger-preview.webp)
 
 ## 今回の変更
 
-- Equinoxの通常表示に`Koraii_Layers_Cut.mpeg`を追加し、BGMの拍で玉の白黒交換・周回・爆発・床文字をそろえました。玉を少し大きくして間隔を広げ、波形の軌跡を先細りの連続トレイルへ変更しました。床文字は「陰→陽→衡→無」をループします。
-- Equinoxの通常表示とCutSceneは、F1 → 音楽からBPM・拍の時差を別々に調整して保存できます。CutSceneの軽い上下の揺れも、設定した拍と実際の音声再生時刻に合わせます。
-- Pharaohの床とピラミッドの線を太くし、翼を拡大。重なる羽・青緑の宝石・二重の太陽を加え、明るさを盛らずに輪郭を読みやすくしました。
-- BreakThroughのiv字幕が出る13〜14.12秒だけ、白地と黒い構造物の二値表示にしました。`get out of my head`以降と終了時の即切り替えは維持しています。
-
-見た目の調整方法は[Illusionary・Extraのガイド](docs/illusionary-and-extra-guide.md)、カメラと字幕は[CutScene調整](docs/stage-and-cutscene-guide.md)を参照してください。
+- Extraに**Frutiger Aero（1 in 5,000,000）**を追加。草原と小川、青空と流れる雲、虹色に反射する透明な泡、羽ばたく青い蝶を描きます。光の映り込みと立体感を保つ通常のアルファ合成で、光沢の形を見せます。[調整ガイド](docs/frutiger-aero.md)
+- **マルチプレイ**を追加。ユーザー名・写真を設定して専用サーバーへ参加すると、同じ惑星のプレイヤーと実装備オーラが見えます。最大32人。未設定の名前は参加前に確定し、10桁のUserIDは別に自動生成・保存します。[使い方とXServer VPS手順](docs/multiplayer.md)
+- Equinoxの玉を大きく・低く・離して配置。平均テンポを維持した速度の強弱、強めの爆発、床面・円・粒子の共有回転を追加しました。[調整値](src/tuning/equinox.hpp)
 
 ## 遊び方と入手場所
 
@@ -23,14 +20,22 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 | --- | --- | --- |
 | Normal | 13 | Common〜Singularity。すべてのステージ |
 | Desert | 3 | Dune / Mirage / Pharaoh。砂漠だけ |
-| Extra | 4 | Pixelation / Equinox / BreakThrough / Illusionary。Extraだけ |
+| Extra | 5 | Pixelation / Equinox / BreakThrough / Illusionary / Frutiger Aero。Extraだけ |
 | Administrator | 1 | Nanally。F1のプレビュー専用 |
 
-Commonは正確に1/2、Uncommonは1/4。Duneは1/50、Mirageは1/5,000、Pharaohは1/250,000。Extraの4種の基礎確率は順に1/2,000,000、1/2,500,000、1/3,000,000、1/4,000,000です。これらは `data/auras.csv` で変更できます。Commonなどの既存分母は維持し、余りをStardustに割り当てます。ステージごとに合計100%となります。
+Commonは正確に1/2、Uncommonは1/4。Duneは1/50、Mirageは1/5,000、Pharaohは1/250,000。Extraの5種の基礎確率は順に1/2,000,000、1/2,500,000、1/3,000,000、1/4,000,000、1/5,000,000です。これらは `data/auras.csv` で変更できます。Commonなどの既存分母は維持し、余りをStardustに割り当てます。ステージごとに合計100%となります。
 
 Luck L倍は「基礎抽選をL回した中で最もレアな結果」と同じ分布をCDFで計算し、結果を1個だけ記録します。入手対象外のオーラはLuckを上げても出ません。F1 → ワールドで現在の惑星の実確率を確認できます。[詳しい確率仕様](docs/aura-format.md)
 
 取得済みオーラはCollectionの行を選んで装備します。普通のRollでは表示オーラを変更しません。Equinox / BreakThroughの当選時だけ入手CutSceneを流し、最後にそのオーラを一時プレビューします。**保存される装備はCollectionから変更**します。
+
+## マルチプレイを試す
+
+画面上の**MULTIPLAYER / マルチプレイ**を開き、名前を確定し、好きな写真を選びます。写真は中央を160pxの正方形にして共有し、元の写真やファイル名は送信しません。設定後も名前・写真はいつでも変更でき、接続中なら再接続して反映します。
+
+自分のPCで試す場合はPython 3.10以上を用意し、同梱の**Start-local-server.cmd**を開いたまま、ゲームから **http://127.0.0.1:8765** へ参加します。友達と遊ぶ場合は、同梱の専用サーバーをXServer VPSへ置き、用意したHTTPS URLへ参加します。VPSはまだ配置していません。[詳しい手順](docs/multiplayer.md)
+
+位置・向き・歩行・服色・実装備を約10回/秒で共有します。相手はブロックアバターで表示し、VRMは送信しません。近い4人は詳細オーラ、それ以外は輪と色を使った軽い表示です。写真と名前はマルチ画面の一覧、名前・ID・オーラは頭上にも表示します。ロール・所持品・Luckは各PCに保存します。
 
 ## F1で自由に試す
 
@@ -60,7 +65,7 @@ Discordデスクトップ版を起動すると、ユーザー名とロール回�
 
 ## 初心者向けの改造入口
 
-[改造用ソースZIP v0.1.15](https://github.com/rx107/aura-rng/releases/download/v0.1.15-alpha.1/StarRng-v0.1.15-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
+[改造用ソースZIP v0.1.16](https://github.com/rx107/aura-rng/releases/download/v0.1.16-alpha.1/StarRng-v0.1.16-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
 
 1. `src/tuning` の数字を1つだけ変更して保存。
 2. ゲームを閉じて `Develop.cmd` を実行。
@@ -77,12 +82,12 @@ build.cmd
 build-release\StarRng.exe
 ```
 
-`build.cmd` はコアとDiscord IPCのテストも実行します。`Develop.cmd` は自由な数値変更を試すためコンパイルのみ実行します。コアはLinuxでもテストでき、DirectXアプリはWindowsで生成します。`--warp` はソフトウェア描画、`--debug` はF1を開いて起動します。
+`build.cmd` はコアとDiscord IPC、Pythonが見つかる場合は専用サーバー・実WinHTTPの接続テストも実行します。`Develop.cmd` は自由な数値変更を試すためコンパイルのみ実行します。コアはLinuxでもテストでき、DirectXアプリはWindowsで生成します。`--warp` はソフトウェア描画、`--debug` はF1を開いて起動します。
 
-通常の保存先は `%LOCALAPPDATA%\AuraRng\`。「ログを開く」から確認できます。`progress.txt` はID別在庫と実装備、`rolls.csv` は全ロール、`settings.txt` は設定です。画面履歴は起動中の最新200件。設定schema 8にEquinoxのBGMパス・通常表示とCutSceneのBPM・時差、PixelationのBPM・時差などを保存し、旧schema 1〜7も読み込めます。Still / Glimmerの内部IDは保存互換のため維持します。進行は一時ファイルから置き換え、読めない進行セーブはバックアップします。
+通常の保存先は `%LOCALAPPDATA%\AuraRng\`。「ログを開く」から確認できます。`progress.txt` はID別在庫と実装備、`rolls.csv` は全ロール、`settings.txt` は設定です。画面履歴は起動中の最新200件。設定schema 9にEquinoxのBGMパス・通常表示とCutSceneのBPM・時差、PixelationのBPM・時差などを保存し、旧schema 1〜8も読み込めます。Still / Glimmerの内部IDは保存互換のため維持します。進行は一時ファイルから置き換え、読めない進行セーブはバックアップします。
 
 ## 今後の予定
 
-マルチプレイヤー・実績・各ステージのお宝による常時Luck上昇は**まだ実装していません**。[次の機能に必要な準備](docs/next-features.md)に設計・保存・通信・サーバーなどを整理しました。オーラ作成ソフト、クラフト、ポーションも今後の拡張です。
+マルチプレイは位置と見た目の共有まで実装しています。サーバー主体の抽選・進行保存、実績、各ステージのお宝による常時Luck上昇は今後の機能です。[次の機能に必要な準備](docs/next-features.md)に設計・保存・通信・サーバーなどを整理しました。オーラ作成ソフト、クラフト、ポーションも今後の拡張です。
 
 [検証記録](docs/validation.md) / [設計](docs/architecture.md) / [依存ライブラリ](third_party/README.md)

@@ -4,6 +4,8 @@
 #include "render/renderer.hpp"
 #include "platform/audio.hpp"
 #include "platform/discord.hpp"
+#include "platform/multiplayer.hpp"
+#include "platform/profile_photo.hpp"
 #include "tuning/game.hpp"
 #include "tuning/stages.hpp"
 #include <windowsx.h>
@@ -99,6 +101,8 @@ public:
         if(!downloads_.empty()) cutsceneAudioPath_=downloads_/L"EquinoxReworkedCutscene.mp4.mp4";
         roller_.setLuck(presentation_.settings.luck);
         roller_.setBiome(presentation_.settings.biome);
+        multiplayer_.initialize(saves_); networkSnapshot_=multiplayer_.snapshot();
+        try {if(!presentation_.settings.profilePhotoPath.empty())profilePhoto_=aura::readProfilePhoto(saves_/L"profile.png");} catch(const std::exception&) {}
     }
     aura::Frame frame() const {
         // Rendererに渡す「今のゲームのスナップショット」。ここでは抽選や装備変更をしません。
@@ -128,7 +132,7 @@ public:
         return {roller_,progress_,presentation_,log_,time_,cooldown_,x_,z_,facing_,walk_,yaw_,distance_,
             mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime(),
             stageSelectOpen_,stageTravel_.progress(),stageTravel_.target(),collectionCategory_,
-            cutsceneBeat,pulse,music_.estimatedBpm(),equinoxBeat};
+            cutsceneBeat,pulse,music_.estimatedBpm(),equinoxBeat,&networkSnapshot_,multiplayerOpen_,profilePhoto_};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -171,7 +175,7 @@ public:
     ~App() { renderer_.reset(); if(window_ && IsWindow(window_)) DestroyWindow(window_); }
 private:
     bool cutsceneActive() const { return cutsceneTime_>=0; }
-    bool worldInputBlocked() const { return cutsceneActive() || stageSelectOpen_ || stageTravel_.active(); }
+    bool worldInputBlocked() const { return cutsceneActive() || stageSelectOpen_ || stageTravel_.active() || multiplayerOpen_; }
     void savePlayerSettings() {
         try {aura::saveSettings(saves_/L"settings.txt",presentation_.settings);}
         catch(const std::exception&) {notice_="Settings could not be saved.";}
@@ -270,6 +274,7 @@ private:
         if(stageSelectOpen_ && hit.action!=aura::Action::Stages && hit.action!=aura::Action::Travel &&
             hit.action!=aura::Action::CloseStages && hit.action!=aura::Action::Debug) return;
         switch(hit.action) {
+        case aura::Action::Multiplayer: multiplayerOpen_=!multiplayerOpen_; clearWorldInput(); break;
         case aura::Action::Stages: selectStages(); break;
         case aura::Action::CloseStages: stageSelectOpen_=false; clearWorldInput(); break;
         case aura::Action::Travel:
@@ -322,7 +327,9 @@ private:
         if(commands.toggleAuto && !cutsceneActive()) auto_=!auto_;
         }
         if(commands.language) presentation_.settings.language=*commands.language;
-        if(commands.username && aura::validUsername(*commands.username)) presentation_.settings.username=*commands.username;
+        if(commands.username && aura::validUsername(*commands.username)) {
+            presentation_.settings.username=*commands.username; presentation_.settings.usernameConfigured=true;
+        }
         if(commands.discordApplicationId && aura::validDiscordApplicationId(*commands.discordApplicationId))
             presentation_.settings.discordApplicationId=*commands.discordApplicationId;
         if(commands.discordEnabled) presentation_.settings.discordEnabled=*commands.discordEnabled;
@@ -367,7 +374,28 @@ private:
         setTempo(commands.equinoxCutsceneBpm,presentation_.settings.equinoxCutsceneBpm);
         setBeatOffset(commands.equinoxBeatOffset,presentation_.settings.equinoxBeatOffset);
         setBeatOffset(commands.equinoxCutsceneBeatOffset,presentation_.settings.equinoxCutsceneBeatOffset);
-        if(commands.username || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
+        if(commands.closeMultiplayer)multiplayerOpen_=false;
+        if(commands.serverEndpoint)presentation_.settings.serverEndpoint=*commands.serverEndpoint;
+        if(commands.profilePhotoPath) {
+            try {
+                auto prepared=aura::prepareProfilePhoto(std::filesystem::path(aura::widen(*commands.profilePhotoPath)));
+                aura::saveProfilePhoto(saves_/L"profile.png",prepared);profilePhoto_=std::move(prepared);
+                const auto u=(saves_/L"profile.png").u8string();
+                presentation_.settings.profilePhotoPath=std::string(reinterpret_cast<const char*>(u.data()),u.size());
+            } catch(const std::exception& e) {notice_=e.what();}
+        }
+        if(commands.clearProfilePhoto) {
+            profilePhoto_.clear(); presentation_.settings.profilePhotoPath.clear();
+            std::error_code ec;std::filesystem::remove(saves_/L"profile.png",ec);
+        }
+        if(commands.disconnectMultiplayer)multiplayer_.disconnect();
+        const bool reconnect=(commands.username || commands.profilePhotoPath || commands.clearProfilePhoto) && networkSnapshot_.state==aura::net::State::Connected;
+        if(commands.connectMultiplayer || reconnect) {
+            if(presentation_.settings.usernameConfigured && aura::validUsername(presentation_.settings.username))
+                multiplayer_.connect(presentation_.settings.serverEndpoint,presentation_.settings.username,profilePhoto_);
+            else notice_="Set your username before joining multiplayer.";
+        }
+        if(commands.username || commands.serverEndpoint || commands.profilePhotoPath || commands.clearProfilePhoto || commands.discordApplicationId || commands.discordEnabled || commands.language || commands.shirt || commands.luck || commands.avatar || commands.biome || commands.vrmPath || commands.bgmPath ||
             commands.pixelationBgmPath || commands.pixelationFinalBgmPath || commands.illusionaryBgmPath || commands.volume || commands.breakthroughCaptionOffset || commands.breakthroughWordTimes || commands.pixelationBpm || commands.pixelationBeatOffset ||
             commands.equinoxBgmPath || commands.equinoxBpm || commands.equinoxBeatOffset || commands.equinoxCutsceneBpm || commands.equinoxCutsceneBeatOffset) {
             savePlayerSettings();
@@ -456,6 +484,10 @@ private:
         }
         const float target=moving?1.f:0.f;
         movement_+=std::clamp(target-movement_,-dt*8,dt*8);
+        // 接続中も抽選/保存は従来のまま。実装備と移動だけを通信スレッドへ渡します。
+        const auto& equipped=roller_.catalog()[progress_.equipped];
+        multiplayer_.submit({x_,z_,facing_,moving,s.biome,equipped.id,progress_.auraLevel(progress_.equipped,roller_.catalog()),s.shirt});
+        networkSnapshot_=multiplayer_.snapshot();
     }
     void render(bool present) {
         try {
@@ -534,7 +566,7 @@ private:
         // 4フォルダーを実際にクリックし、表示番号とクリック判定の一致を確認。
         const auto categoryRolls=progress_.rolls,categoryLogs=log_.size();
         const auto categoryCounts=progress_.counts;
-        constexpr std::array<std::size_t,4> categorySizes={13,3,4,1};
+        constexpr std::array<std::size_t,4> categorySizes={13,3,5,1};
         for(unsigned category=0;category<4;++category) {
             const float scale=renderer_->scale();
             SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(static_cast<int>((82+(category%2)*100)*scale),
@@ -1216,17 +1248,54 @@ private:
         profileEdit.username=originalUsername; profileEdit.discordApplicationId=originalApplicationId; profileEdit.discordEnabled=originalDiscordEnabled;
         applyDebugActions(profileEdit); update(0);
         if(discord_.state()!=aura::DiscordPresenceState::Disabled) throw std::runtime_error("Smoke test must never publish a real Discord activity");
-        // 実際のApp::rollを高Luckで64回通し、Extraの4種の取得・演出発火を確認。
+        const auto frutiger=findAura("frutiger_aero");
+        const auto frutigerOriginalStage=presentation_.settings.biome;
+        const float frutigerOriginalX=x_,frutigerOriginalZ=z_;
+        aura::DebugActions frutigerStage;frutigerStage.biome=aura::Biome::Extra;frutigerStage.avatar=aura::Avatar::Block;applyDebugActions(frutigerStage);
+        x_=8;z_=8;
+        const auto beforeFrutigerCounts=progress_.counts;const auto beforeFrutigerLogs=log_.size();
+        aura::DebugActions frutigerPreview;frutigerPreview.preview=frutiger;auto_=true;applyDebugActions(frutigerPreview);
+        time_=2;distance_=16;pitch_=.30f;yaw_=0;movement_=0;render(false);captureExtra(L"-frutiger");
+        if(auto_ || renderer_->frutigerCount()<100 || renderer_->frutigerCount()>1000 || progress_.counts!=beforeFrutigerCounts || log_.size()!=beforeFrutigerLogs)
+            throw std::runtime_error("Frutiger preview/budget/history isolation failed");
+        if(!opts_.warp && !opts_.capture.empty())for(unsigned i=0;i<24;++i) {
+            time_=i/12.f;render(false);const auto suffix=L"-frutiger-frame-"+std::to_wstring(i);captureExtra(suffix.c_str());
+        }
+        pitch_=.9f;render(false);captureExtra(L"-frutiger-floor");pitch_=.30f;
+        // 実接続の試験は別のmultiplayer_clientテスト。この描画試験は架空の2人だけを使います。
+        aura::net::Snapshot peers;peers.state=aura::net::State::Connected;peers.userId="1234567890";peers.status="Connected / localhost test";
+        peers.players.push_back({"1234567891","Blue Star","",{x_-4,z_,0,true,presentation_.settings.biome,"frutiger_aero",0,{.2f,.6f,1}}, {}});
+        peers.players.push_back({"1234567892","Green Star","",{x_+4,z_+.5f,0,false,presentation_.settings.biome,"equinox",0,{.3f,.9f,.5f}}, {}});
+        peers.players.push_back({"1234567893","Other Planet","",{x_,z_,0,false,
+            presentation_.settings.biome==aura::Biome::Ocean?aura::Biome::Forest:aura::Biome::Ocean,"still",0,{.5f,.5f,.5f}}, {}});
+        std::vector<std::uint8_t> photoPreview;
+        if(!opts_.capture.empty()) {
+            photoPreview=aura::prepareProfilePhoto(opts_.capture);
+            peers.players[0].avatarHash=std::string(64,'1');peers.players[0].avatarPng=photoPreview;
+        }
+        auto onlineFrame=frame();onlineFrame.multiplayer=&peers;onlineFrame.cameraDistance=19;
+        onlineFrame.profilePhoto=photoPreview;
+        renderer_->draw(onlineFrame,false);
+        if(renderer_->remotePlayerCount()!=2)throw std::runtime_error("Remote players did not filter by planet");
+        if(!opts_.capture.empty())renderer_->capture(opts_.capture.parent_path()/L"multiplayer-world.png");
+        onlineFrame.multiplayerOpen=true;renderer_->draw(onlineFrame,false);
+        if(!opts_.capture.empty())renderer_->capture(opts_.capture.parent_path()/L"multiplayer-profile.png");
+        action({aura::Action::Multiplayer,0});const auto pausedRolls=progress_.rolls;cooldown_=0;roll();
+        if(progress_.rolls!=pausedRolls || !worldInputBlocked())throw std::runtime_error("Multiplayer profile allowed world input");
+        aura::DebugActions closeOnline;closeOnline.closeMultiplayer=true;applyDebugActions(closeOnline);render(false);
+        if(renderer_->remotePlayerCount()!=0 || worldInputBlocked())throw std::runtime_error("Offline players or profile input block remained");
+        frutigerStage.biome=frutigerOriginalStage;applyDebugActions(frutigerStage);x_=frutigerOriginalX;z_=frutigerOriginalZ;
+        // 実際のApp::rollを高Luckで64回通し、Extraの5種の取得・演出発火を確認。
         const auto beforeExtra=progress_.rolls; const auto extraEquipment=progress_.equipped;
         const auto originalStage=presentation_.settings.biome; const auto originalLuck=roller_.luck();
         aura::DebugActions extraWorld; extraWorld.biome=aura::Biome::Extra; extraWorld.luck=1'000'000; applyDebugActions(extraWorld);
-        std::array<bool,4> obtained{};
+        std::array<bool,5> obtained{};
         for(unsigned i=0;i<64;++i) {
             if(cutsceneActive()) stopCutscene();
             cooldown_=0; roll();
             const auto result=log_.back().aura;
             if(!aura::availableInBiome(roller_.catalog()[result],aura::Biome::Extra)) throw std::runtime_error("Offstage aura acquired in Extra");
-            const std::array<std::size_t,4> ids={pixelation,equinox,breakthrough,illusionary};
+            const std::array<std::size_t,5> ids={pixelation,equinox,breakthrough,illusionary,frutiger};
             for(std::size_t a=0;a<ids.size();++a) if(result==ids[a]) obtained[a]=true;
             if((result==equinox || result==breakthrough) && (!cutsceneActive() ||
                 cutsceneKind_!=(result==equinox?aura::CutsceneKind::Equinox:aura::CutsceneKind::Breakthrough)))
@@ -1249,7 +1318,9 @@ private:
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: "
                <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
             out<<"Planets: PASS / garden, desert, ocean, forest, volcano, extra, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
-            out<<"Collection: PASS / Normal13 Desert3 Extra4 Administrator1, folder button and row click mapping, navigation preserves progress\nExtra acquisition: PASS / 64 actual rolls, all four exclusive auras acquired, CutScene triggers, equipment preserved\n";
+            out<<"Collection: PASS / Normal13 Desert3 Extra5 Administrator1, folder button and row click mapping, navigation preserves progress\nExtra acquisition: PASS / 64 actual rolls, all five exclusive auras acquired, CutScene triggers, equipment preserved\n";
+            out<<"Frutiger Aero: PASS / grass, sky/clouds, glossy bubbles, animated blue butterflies, <=1000 boards, preview isolation\n"
+               <<"Multiplayer render: PASS / two same-planet block avatars with detailed auras, other-planet filtering, profile window input suppression; actual HTTP covered by separate client/server tests\n";
             out<<"Profile: PASS / UTF-8 username and Discord settings save/restore; editable total 0 / 123456789 / original, AutoRoll stop, inventory/history/best unchanged\n"
                <<"Discord integration: disabled during game smoke; transport and payload covered by isolated fake IPC tests\n";
             out<<"Pixelation: PASS / preview isolation, no progress/history mutation, AutoRoll stop, rolls preserve preview, 24 animated frames, clean aura switching, resize 1000x700 -> 1440x900\n"
@@ -1302,6 +1373,7 @@ private:
         }
         if(!app) return DefWindowProcW(window,message,wp,lp);
         if(message==WM_KEYUP && wp<256) app->keys_[wp]=false;
+        if(message==WM_KEYDOWN && wp==VK_ESCAPE && app->multiplayerOpen_) {app->multiplayerOpen_=false;return 0;}
         if(message==WM_KEYDOWN && wp==VK_F1 && !(lp & (1LL<<30))) { app->pending_=aura::Hit{aura::Action::Debug,0}; return 0; }
         if(app->cutsceneActive() && message==WM_KEYDOWN && wp==VK_ESCAPE) {
             if(!(lp & (1LL<<30))) app->stopCutsceneRequested_=true;
@@ -1390,6 +1462,10 @@ private:
     aura::Roller roller_; aura::Progress progress_; aura::Presentation presentation_; std::vector<aura::LogEntry> log_;
     aura::Music music_,cutsceneMusic_; aura::SoundEffects sfx_;
     aura::DiscordPresence discord_;
+    aura::net::Client multiplayer_;
+    aura::net::Snapshot networkSnapshot_;
+    std::vector<std::uint8_t> profilePhoto_;
+    bool multiplayerOpen_{};
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;
     std::optional<std::size_t> cutscenePreviousPreview_;
@@ -1422,7 +1498,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int) {
     try {
         aura::checked(com,"COM initialization");
         auto opts=options();
-        if(!opts.smoke) {
+        if(!opts.smoke && opts.saveDir.empty()) {
             mutex=CreateMutexW(nullptr,FALSE,L"Local\\AuraRng.v0.1");
             if(!mutex) throw std::runtime_error("Cannot create single instance guard");
             if(GetLastError()==ERROR_ALREADY_EXISTS) throw std::runtime_error("Star's RNG is already running. Close it before opening another instance.");

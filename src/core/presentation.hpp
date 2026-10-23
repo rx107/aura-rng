@@ -37,6 +37,9 @@ struct Settings {
     // Equinoxは通常BGMとCutSceneを別々に合わせます。BPM=拍/分、正の時差=遅くする。
     float equinoxBpm{180.f},equinoxBeatOffset{.044f};
     float equinoxCutsceneBpm{180.f},equinoxCutsceneBeatOffset{.056f};
+    // マルチ参加時は初期名のまま進まず、自分で名前を確定します。ID/秘密鍵は別ファイル。
+    bool usernameConfigured{};
+    std::string serverEndpoint{"http://127.0.0.1:8765"},profilePhotoPath;
 };
 Settings loadSettings(const std::filesystem::path& path);
 void saveSettings(const std::filesystem::path& path, const Settings& settings);
@@ -76,6 +79,8 @@ struct DebugActions {
     std::optional<float> pixelationBpm,pixelationBeatOffset;
     std::optional<std::string> equinoxBgmPath;
     std::optional<float> equinoxBpm,equinoxBeatOffset,equinoxCutsceneBpm,equinoxCutsceneBeatOffset;
+    bool connectMultiplayer{},disconnectMultiplayer{},clearProfilePhoto{},closeMultiplayer{};
+    std::optional<std::string> serverEndpoint,profilePhotoPath;
 };
 // 他の処理から読む共通名。数値の編集場所は tuning/game.hpp に集約。
 inline constexpr float RollCooldown = tuning::game::RollCooldownSeconds;

@@ -10,6 +10,12 @@
 *.zip
 /local-save/
 /assets/
+/server-data/
+/.test-multiplayer-*/
+**/multiplayer_identity.json
+**/identities.json
+**/profile.png
+**/__pycache__/
 *.vrm
 *.mp3
 !data/audio/*.mp3

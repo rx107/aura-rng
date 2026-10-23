@@ -405,6 +405,7 @@ void Renderer::debugUi(const Frame& f) {
         }
         ImGui::End();
     }
+    multiplayerUi(f);
     ImGui::Render();
 }
 void Renderer::createStar() {
@@ -464,6 +465,7 @@ void Renderer::ui(const Frame& f) {
     star(40,40,18,Mint,false); text(L"STAR'S RNG",70,22,225,38,27,White,true);
     rect(281,31,92,23,Panel,11); text(L"ALPHA 0.1",292,35,80,20,10,Mint,true);
     rect(w-330,26,112,28,Panel,12); label(t("DEBUG / F1","デバッグ / F1"),w-316,32,104,21,11,Mint,true);
+    rect(w-458,26,116,28,Panel,12); label(t("MULTIPLAYER","マルチプレイ"),w-448,32,110,21,11,Mint,true);
     rect(w-206,26,104,28,Panel,12); text(L"DX11 / NATIVE",w-194,33,100,20,10,Muted);
     label((f.fps>0?std::to_string(static_cast<int>(f.fps)):"--")+" FPS",w-86,31,70,24,12,Muted);
     rect(24,96,216,h-280,Panel,14); stroke(24,96,216,h-280,Border,14);
@@ -509,6 +511,7 @@ void Renderer::ui(const Frame& f) {
     stroke(w-487,114,130,26,stageHover?Mint:Border,13);
     label(t("PLANETS / TRAVEL","惑星を選択 / 移動"),w-481,120,118,20,10,Mint,true,true);
     const float titleY=h-281;
+    multiplayerLabels(f);
     label(f.presentation.preview?t("DEBUG PREVIEW","デバッグプレビュー"):t("EQUIPPED AURA","装備中のオーラ"),276,titleY,300,20,10,Muted,true);
     label(name(shown),276,titleY+23,w-650,45,32,tint(equipped.color),true);
     label(oddsLabel(defs,shown,f.presentation.settings.biome)+((equipped.id=="singularity" || equipped.id=="pixelation")?"   /   Aura Level "+std::to_string(f.presentation.level(f.progress,defs))+" / 3":""),276,titleY+67,w-650,25,12,Muted);

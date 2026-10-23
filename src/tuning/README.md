@@ -16,11 +16,12 @@
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |
 | Pixelationの機体・尾・キューブ | [pixelation.hpp](pixelation.hpp) | `PlayerBobAmplitude` を `.85 → .4`。PLAYERの上下移動が小さくなる。 |
-| Equinoxの玉・尾・爆発・床文字 | [equinox.hpp](equinox.hpp) | `orbOrbitRadius` を `3.f → 3.5f`。二つの玉がプレイヤーから離れた範囲を周回する。 |
+| Equinoxの玉・速度の強弱・爆発・床回転 | [equinox.hpp](equinox.hpp) | `orbitSpeedVariation` を `.22f → 0.f`。玉の加減速をなくして等速で周回する。 |
 | BreakThrough の通常表示 | [breakthrough.hpp](breakthrough.hpp) | `titleHeight` を `3.85f → 4.1f`。名前を上に移動。 |
 | Nanally | [nanally.hpp](nanally.hpp) | `HeadWidth` を `6.35f → 7.0f`。頭が横に広がる。 |
 | Illusionaryの床・白い光・文字 | [illusionary.hpp](illusionary.hpp) | `OrbitLightRadius` を `1.92f → 2.2f`。白い光が体から離れた場所を回る。 |
 | 砂漠テーマ3種類 | [desert.hpp](desert.hpp) | `PharaohWingWidth` を `3.45f → 4.f`。長短二段の翼が横へ広がる。Dune / Mirageにも個別の半径・速度・粒子数。 |
+| Frutiger Aeroの草原・空・泡・青い蝶 | [frutiger.hpp](frutiger.hpp) | `MeadowRadius` を `4.7f → 5.5f`。丸い草原と小川が広がる。[調整の手順](../../docs/frutiger-aero.md)。 |
 
 オーラ名、確率、標準の輪・粒子の色や数は [data/auras.csv](../../data/auras.csv) を使います。特殊なオーラの形は同名の専用 `.hpp` で調整します。安全な試作用オーラを CSV に追加する例も、[改造ガイド](../../docs/development-guide.md#6-csv-で自作オーラを-1-個追加する) にあります。
 
@@ -46,7 +47,9 @@ CSV を変えた場合も元の `data/auras.csv` を保存し、Develop.cmd を�
 - **Pixelationの光の尾**は`PlayerTrailDuration = .72f`で長さ、`PlayerTrailSegments = 28`で滑らかさを調整します。時間を長くすると飛んできた軌道を長く残し、分割数を増やすとカーブが滑らかになります。尾は機体と同じ3D軌道をたどります。
 - **キューブの鼓動はBGMの再生時刻**を使います。`CageBeatScale = .15f`は1拍で最大15%拡大、`CageBeatBrightness = .20f`は最大20%増光。0でそれぞれの変化を止めます。拍の速さと時差はF1 → 音楽 → キューブの鼓動から変更でき、再ビルド不要です。自動推定が半分・倍に感じる場合はBPMを30〜300で手動指定します。音楽を再生していない間とBGMのないLv0は鼓動しません。
 - **Equinoxは一つの拍の時計を共有**します。通常BGMとCutSceneはF1 → 音楽でBPM・時差を別々に保存します。手動BPMは30〜300、時差は-2〜+2秒、正の値で演出の拍を遅らせます。通常表示では`orbitBeats = 4.f`が4拍で1周、`polarityBeats = 1.f`が1拍で白黒交換、`floorGlyphBeats = 4.f`が4拍で次の床文字です。「陰→陽→衡→無」の一巡は16拍になります。
-- **Equinoxの玉と尾は別の大きさ**です。`orbRadius = 1.55f`を下げると玉だけが小さくなり、`orbOrbitRadius = 3.f`を上げると周回範囲が広がります。`trailBeats = .80f`なら過去0.8拍分の位置を先細りの尾でつなぎ、`trailWidth = .20f`で太さを変えます。以前の波形軌跡と点列の星は描きません。交換時の爆発は`burstRadius = 1.15f`で広がる距離、`burstFragments = 12`で破片の数を変えます。
+- **Equinoxの玉と尾は別の大きさ**です。`orbRadius = 1.80f`を下げると玉だけが小さくなり、`orbOrbitRadius = 3.60f`を上げると周回範囲が広がります。`orbHeight = 2.70f`で玉の高さを変更します。`trailBeats = .80f`なら過去0.8拍分の位置を先細りの尾でつなぎ、`trailWidth = .20f`で太さを変えます。以前の波形軌跡と点列の星は描きません。
+- **Equinoxの速度に強弱を付ける値**は`orbitSpeedVariation = .22f`です。平均の78〜122%で加減速し、`0.f`で等速になります。`orbitSpeedCycleOrbits = 1.f`は1周に1回の強弱、`2.f`なら2周かけて1回変わります。白黒交換・床文字の拍は変えず、玉の位置と尾と爆発の発生位置が同じ計算を使います。強弱は`0`以上`1`未満に保ちます。
+- **Equinoxの床と粒子は一緒に回ります。**`floorRotation = 1.10f`が共通の回転速度です。`.55f`で半分、`0.f`で回転を止め、負にすると逆方向になります。交換時の爆発は`burstRadius = 1.65f`で広がる距離、`burstBrightness = .82f`で明るさ、`burstFragments = 18`で破片の数を変えます。`burstRingWidth = .15f`と`burstFragmentWidth = .070f`は輪と破片の太さです。
 - **BreakThrough の通常表示と CutScene は独立**しています。`breakthrough.hpp`の柱設定を変えても、CutScene の柱は変わらず静止します。`cutscene.hpp`の`BreakthroughOriginalI / BreakthroughOriginalII`は初実装のi・ii、`BreakthroughCoreRush`はiii、`BreakthroughMonolith`で始まる値はivを調整します。`BreakthroughBlackoutEnd`は黒画面が終わる時刻、`BreakthroughFinalDistance`・`BreakthroughFinalPullbackSpeed`・`BreakthroughFinalYawSpeed`は15.05秒以降の7本柱を映すカメラです。[場面と調整値の説明](../../docs/stage-and-cutscene-guide.md#breakthroughの場面とカメラ)に値の意味をまとめています。
 - **後半の2つのテロップは同じ動き**です。`BreakthroughFloatingCaptionAngle = -2.f`は傾きの度数、`BreakthroughFloatingCaptionSpeed = 6.f`は1秒ごとの横移動、`BreakthroughFloatingCaptionMoveSeconds = 4.f`は移動を続ける秒数です。`it wasn't gone`と`with only 5 fragments left`の両方に反映されます。
 - **BreakThroughのiv字幕中だけ白黒二値**になります。`BreakthroughIvCaptionStart = 13.f`以上、`BreakthroughIvCaptionEnd = 14.12f`未満を`breakthroughIvCaptionVisible()`で共有します。`BreakthroughIvInkThreshold = .12f`は白と黒を分ける明るさの境界です。直前の閃光と`get out of my head`以降にはかかりません。

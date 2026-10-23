@@ -26,8 +26,12 @@ inline constexpr float floorInnerRadius=2.1f;
 inline constexpr float floorRingSpacing=.63f;
 inline constexpr float floorRingHeight=.28f;
 inline constexpr float floorRingHeightStep=.07f;
-inline constexpr float floorEvenRotation=.32f; // ラジアン/秒。負にすると逆回転。
-inline constexpr float floorOddRotation=-.50f;
+// 床の面・輪・周囲の粒子で共有する回転速度。単位はラジアン/秒。
+// 1.1で約5.7秒に1周、0で停止、負の値で反時計回りになります。
+// この1か所を変えると、床と粒子が一緒に速く/遅く回ります。
+inline constexpr float floorRotation=1.10f;
+inline constexpr float floorEvenRotation=floorRotation;
+inline constexpr float floorOddRotation=floorRotation;
 inline constexpr float floorWaveHeight=.04f;   // 上下の波の幅。0で平らな輪。
 
 // アバターへ集まる薄い霧。例: mistCount=11で半分の量、mistBrightness=.12で半分の明るさ。
@@ -37,14 +41,20 @@ inline constexpr float mistOuterRadius=4.1f;
 inline constexpr float mistBrightness=.24f;
 
 // 二つの玉。例: orbRadius=1で小さく、orbOrbitRadius=3でプレイヤーから離れます。
-inline constexpr float orbRadius=1.55f;
-inline constexpr float orbOrbitRadius=3.0f;
-inline constexpr float orbHeight=3.1f;
+inline constexpr float orbRadius=1.80f;
+inline constexpr float orbOrbitRadius=3.60f;
+inline constexpr float orbHeight=2.70f;
 inline constexpr float orbBobHeight=.20f; // 上下移動の片側の幅。0で同じ高さを周回。
 // 音楽から受け取る「拍数」を共通の時計にします。BGMなしではfallbackBpmで動きます。
 // 例: orbitBeats=8で周回を半分の速さに、polarityBeats=2で2拍ごとに白黒交換。
 inline constexpr float fallbackBpm=180.f; // 提供BGMの主拍を全曲で計測した既定値。
 inline constexpr float orbitBeats=4.0f;
+// 1周の時間を保ちながら、周回の途中で少し加速・減速します。
+// 0で等速、.22なら平均速度の78〜122%。1未満なので逆走・停止しません。
+// orbitSpeedCycleOrbits=1なら1周に1回、2なら2周かけて強弱が1回変化します。
+// 玉・トレイル・交換時の爆発位置はすべて同じ計算なので、強弱を変えても離れません。
+inline constexpr float orbitSpeedVariation=.22f;
+inline constexpr float orbitSpeedCycleOrbits=1.0f;
 inline constexpr float polarityBeats=1.0f;
 inline constexpr float floorGlyphBeats=4.0f; // 4拍ごとに次の字へ。4文字で16拍のループ。
 inline constexpr float orbFaceRotation=-.14f; // 玉の正面の回転、ラジアン/秒。
@@ -62,10 +72,12 @@ inline constexpr unsigned trailSegments=40;
 // 白黒が入れ替わった瞬間だけ、玉の中心からリングと小さな破片を外へ飛ばします。
 // burstBeatsは表示時間（拍）、burstRadiusは広がる距離。量はburstFragmentsで調整。
 inline constexpr float burstBeats=.42f;
-inline constexpr float burstRadius=1.15f;
-inline constexpr float burstBrightness=.60f;
+inline constexpr float burstRadius=1.65f;
+inline constexpr float burstBrightness=.82f;
+inline constexpr float burstRingWidth=.15f; // 広がる輪の初期の太さ。大きいほど力強く見えます。
+inline constexpr float burstFragmentWidth=.070f; // 外へ飛ぶ光の破片の太さ。
 inline constexpr unsigned burstRingSegments=48;
-inline constexpr unsigned burstFragments=12;
+inline constexpr unsigned burstFragments=18;
 
 // 名前と副題の表示面。高さを増やすと上へ、幅/高さを増やすと文字が横/縦に大きくなります。
 // 例: titleHeight=5.5で名前を少し上へ移動。
@@ -78,17 +90,19 @@ inline constexpr float subtitleTextHeight=.25f;
 
 // 周囲を漂う粒子。例: dustCount=70で約半分、dustRiseSpeed=.44で上昇を2倍速く。
 inline constexpr unsigned dustCount=140;
-inline constexpr float dustRotation=.15f; // ラジアン/秒。
+inline constexpr float dustRotation=floorRotation; // 床と同じ方向・速度。通常はfloorRotationだけ変更。
 inline constexpr float dustRiseSpeed=.22f; // 座標/秒。
 inline constexpr float dustBrightness=.40f;
 
 // 0除算や極端な描画量を防ぐ範囲チェック。初めはこの範囲内で値を試してください。
 static_assert(floorRingCount<=8 && floorRingSegments>=3 && floorRingSegments<=256);
 static_assert(orbRadius>0 && orbOrbitRadius>0 && fallbackBpm>0 && orbitBeats>0);
+static_assert(orbitSpeedVariation>=0 && orbitSpeedVariation<1 && orbitSpeedCycleOrbits>0);
 static_assert(polarityBeats>0 && floorGlyphBeats>0);
 static_assert(orbRimSegments>=3 && orbRimSegments<=256);
 static_assert(trailBeats>=0 && trailWidth>0 && trailSegments>=1 && trailSegments<=128);
 static_assert(burstBeats>0 && burstBeats<polarityBeats && burstRadius>0);
+static_assert(burstRingWidth>0 && burstFragmentWidth>0);
 static_assert(burstRingSegments>=3 && burstRingSegments<=128 && burstFragments<=64);
 static_assert(mistCount<=128 && dustCount<=512);
 } // namespace aura::tuning::equinox

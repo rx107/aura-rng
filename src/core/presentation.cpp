@@ -30,7 +30,8 @@ std::string displayName(const Definition& d, Language language) {
         {"tidal", "潮流"}, {"amethyst", "アメジスト"}, {"solar", "太陽"}, {"aurora", "オーロラ"},
         {"astral", "星界"}, {"eventide", "宵闇"}, {"zenith", "天頂"}, {"pixelation", "ピクセレーション"},
         {"equinox", "エキノックス"}, {"breakthrough", "ブレイクスルー"}, {"nanally", "ナナリー"}, {"singularity", "特異点"},
-        {"illusionary","イリュージョナリー"}, {"dune","砂丘"}, {"mirage","蜃気楼"}, {"pharaoh","ファラオ"}};
+        {"illusionary","イリュージョナリー"}, {"dune","砂丘"}, {"mirage","蜃気楼"}, {"pharaoh","ファラオ"},
+        {"frutiger_aero","フルティガー・エアロ"}};
     for (const auto& [id, name] : names) if (d.id == id) return name;
     return d.name;
 }
@@ -95,7 +96,7 @@ void validate(const Settings& s) {
             throw std::runtime_error("Caption words must have ascending times inside the cutscene");
         previous=second;
     }
-    for (const auto* p:{&s.vrmPath,&s.bgmPath,&s.pixelationBgmPath,&s.pixelationFinalBgmPath,&s.illusionaryBgmPath,&s.equinoxBgmPath})
+    for (const auto* p:{&s.vrmPath,&s.bgmPath,&s.pixelationBgmPath,&s.pixelationFinalBgmPath,&s.illusionaryBgmPath,&s.equinoxBgmPath,&s.profilePhotoPath,&s.serverEndpoint})
         if (p->size()>2048 || p->find_first_of("\r\n\0",0,3)!=std::string::npos)
         throw std::runtime_error("Invalid asset path");
     if (s.language != Language::English && s.language != Language::Japanese) throw std::runtime_error("Invalid language");
@@ -112,7 +113,7 @@ Settings loadSettings(const std::filesystem::path& path) {
     std::getline(input, header);
     int version{};
     std::istringstream headerInput(header); std::string magic,headerExtra;
-    if (!(headerInput>>magic>>version) || magic!="STARS_RNG_SETTINGS" || version<1 || version>8 || (headerInput>>headerExtra))
+    if (!(headerInput>>magic>>version) || magic!="STARS_RNG_SETTINGS" || version<1 || version>9 || (headerInput>>headerExtra))
         throw std::runtime_error("Invalid settings header");
     if (!(input >> kind >> language) || kind != "language" || (language != "en" && language != "ja"))
         throw std::runtime_error("Invalid language setting");
@@ -153,6 +154,14 @@ Settings loadSettings(const std::filesystem::path& path) {
             !(input>>kind>>s.equinoxBpm>>s.equinoxBeatOffset>>s.equinoxCutsceneBpm>>s.equinoxCutsceneBeatOffset) || kind!="equinox_beat"))
             throw std::runtime_error("Invalid Equinox music/beat settings");
     }
+    if(version>=9) {
+        int configured{};
+        if(!(input>>kind>>configured) || kind!="username_configured" || (configured!=0 && configured!=1) ||
+            !(input>>kind>>std::quoted(s.serverEndpoint)) || kind!="server_endpoint" ||
+            !(input>>kind>>std::quoted(s.profilePhotoPath)) || kind!="profile_photo")
+            throw std::runtime_error("Invalid multiplayer profile settings");
+        s.usernameConfigured=configured!=0;
+    } else s.usernameConfigured=s.username!="Player";
     if (input>>extra) throw std::runtime_error("Unexpected settings data");
     validate(s); return s;
 }
@@ -161,7 +170,7 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
     auto temporary = path; temporary += ".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    out << "STARS_RNG_SETTINGS 8\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
+    out << "STARS_RNG_SETTINGS 9\nlanguage " << (settings.language == Language::Japanese ? "ja" : "en")
         << "\nshirt " << std::setprecision(17) << settings.shirt.r << ' ' << settings.shirt.g << ' ' << settings.shirt.b
         << "\nluck "<<settings.luck<<"\navatar "<<static_cast<int>(settings.avatar)<<"\nbiome "<<static_cast<int>(settings.biome)
         <<"\nvolume "<<settings.volume<<"\nvrm "<<std::quoted(settings.vrmPath)<<"\nbgm "<<std::quoted(settings.bgmPath)
@@ -175,7 +184,10 @@ void saveSettings(const std::filesystem::path& path, const Settings& settings) {
         <<"\npixelation_beat "<<settings.pixelationBpm<<' '<<settings.pixelationBeatOffset
         <<"\nequinox_bgm "<<std::quoted(settings.equinoxBgmPath)
         <<"\nequinox_beat "<<settings.equinoxBpm<<' '<<settings.equinoxBeatOffset<<' '
-        <<settings.equinoxCutsceneBpm<<' '<<settings.equinoxCutsceneBeatOffset<<'\n';
+        <<settings.equinoxCutsceneBpm<<' '<<settings.equinoxCutsceneBeatOffset
+        <<"\nusername_configured "<<(settings.usernameConfigured?1:0)
+        <<"\nserver_endpoint "<<std::quoted(settings.serverEndpoint)
+        <<"\nprofile_photo "<<std::quoted(settings.profilePhotoPath)<<'\n';
     out.flush();
     if (!out) throw std::runtime_error("Cannot write settings");
     out.close();

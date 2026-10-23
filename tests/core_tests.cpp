@@ -18,21 +18,28 @@ int main(int argc, char** argv) {
     try {
         check(argc == 2, "Catalog path required");
         const auto defs = aura::loadCatalog(argv[1]);
-        check(defs.size() == 21, "Expected 20 rollable auras and one administrator preview");
+        check(defs.size() == 22, "Expected 21 rollable auras and one administrator preview");
         const auto findAura=[&](const std::string& id) {
             const auto found=std::find_if(defs.begin(),defs.end(),[&](const auto& d){return d.id==id;});
             check(found!=defs.end(),"Required aura ID"); return static_cast<std::size_t>(found-defs.begin());
         };
         const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough"),nanally=findAura("nanally");
-        const auto illusionary=findAura("illusionary"),dune=findAura("dune"),mirage=findAura("mirage"),pharaoh=findAura("pharaoh");
+        const auto illusionary=findAura("illusionary"),dune=findAura("dune"),mirage=findAura("mirage"),pharaoh=findAura("pharaoh"),frutiger=findAura("frutiger_aero");
         const auto previewIndices={nanally};
-        const auto extraIndices={pixelation,equinox,breakthrough,illusionary};
+        const auto extraIndices={pixelation,equinox,breakthrough,illusionary,frutiger};
+        const auto promotedExtraIndices={pixelation,equinox,breakthrough,illusionary};
         check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==1 && defs[nanally].previewOnly,
             "Only Nanally remains an administrator preview");
         check(aura::auraCategory(defs[0])==aura::AuraCategory::Normal && aura::auraCategory(defs[singularity])==aura::AuraCategory::Normal &&
             aura::auraCategory(defs[dune])==aura::AuraCategory::Desert && aura::auraCategory(defs[mirage])==aura::AuraCategory::Desert &&
             aura::auraCategory(defs[pharaoh])==aura::AuraCategory::Desert && aura::auraCategory(defs[nanally])==aura::AuraCategory::Administrator,
             "Collection groups have stable categories independent of CSV order");
+        const auto categoryCount=[&](aura::AuraCategory category) {
+            return std::count_if(defs.begin(),defs.end(),[&](const auto& definition){return aura::auraCategory(definition)==category;});
+        };
+        check(categoryCount(aura::AuraCategory::Normal)==13 && categoryCount(aura::AuraCategory::Desert)==3 &&
+            categoryCount(aura::AuraCategory::Extra)==5 && categoryCount(aura::AuraCategory::Administrator)==1,
+            "Collection contains 13 Normal, 3 Desert, 5 Extra, and 1 Administrator auras");
         aura::Roller roller(defs,42),same(defs,42);
         for(unsigned stage=0;stage<aura::StageCount;++stage) {
             const auto biome=static_cast<aura::Biome>(stage);
@@ -79,10 +86,13 @@ int main(int argc, char** argv) {
         check(roller.luck()==2 && roller.tickets(0)==aura::TicketPool/4 && roller.tickets(dune)==0,
             "Planet change reapplies existing Luck and clears stale desert weights");
         roller.setLuck(1);
-        check(roller.tickets(3)==69'887'505'667ULL,"Extra's fixed rare odds consume only its own Stardust remainder");
+        check(roller.tickets(3)==69'887'305'667ULL,"Extra's five fixed rare odds consume only its own Stardust remainder");
+        check(defs[frutiger].name=="Frutiger Aero" && defs[frutiger].denominator==5'000'000 &&
+            roller.tickets(frutiger)==aura::TicketPool/5'000'000 && !defs[frutiger].previewOnly,
+            "Frutiger Aero has an exact obtainable Extra-only 1 in 5,000,000 interval");
         for(auto extra:extraIndices) {
             check(aura::auraCategory(defs[extra])==aura::AuraCategory::Extra && roller.tickets(extra)>0,
-                "The four former previews can now be obtained in Extra");
+                "All five Extra auras can be obtained only in Extra");
             check(aura::oddsLabel(defs,extra)!="Preview only","Obtainable Extra auras show their editable CSV odds");
         }
         roller.setBiome(aura::Biome::Normal);
@@ -242,7 +252,10 @@ int main(int argc, char** argv) {
         check(!autoRoll && presentation.shown(p)==nanally && p.equipped==3 && p.rolls==prototypeRolls && p.counts==prototypeCounts,
             "Nanally preview stops AutoRoll and leaves equipment, roll history, and inventory untouched");
         const auto settingsPath=dir/"settings.txt";
-        check(aura::loadSettings(settingsPath).language==aura::Language::English,"Settings default");
+        const auto newPlayerSettings=aura::loadSettings(settingsPath);
+        check(newPlayerSettings.language==aura::Language::English && !newPlayerSettings.usernameConfigured &&
+            newPlayerSettings.username=="Player" && newPlayerSettings.serverEndpoint=="http://127.0.0.1:8765" &&
+            newPlayerSettings.profilePhotoPath.empty(),"New players start with an unconfirmed name, a local server, and no profile photo");
         aura::Settings settings; settings.language=aura::Language::Japanese; settings.shirt={.95f,.2f,.3f};
         settings.luck=12.5; settings.avatar=aura::Avatar::Vrm; settings.biome=aura::Biome::Desert;
         settings.vrmPath="C:/モデル/Chocolat.vrm"; settings.bgmPath="C:/Music/Tides of the Outer Reach.mp3"; settings.volume=.35f;
@@ -254,6 +267,9 @@ int main(int argc, char** argv) {
         settings.equinoxBpm=153.35f; settings.equinoxBeatOffset=.11f;
         settings.equinoxCutsceneBpm=181.5f; settings.equinoxCutsceneBeatOffset=-.23f;
         settings.username="星の \"Player\" 🌟"; settings.discordEnabled=false; settings.discordApplicationId="12345678901234567890";
+        settings.usernameConfigured=true;
+        settings.serverEndpoint="https://rng.example.test:8765";
+        settings.profilePhotoPath="C:/写真/星の \"profile\".png";
         aura::saveSettings(settingsPath,settings); const auto loadedSettings=aura::loadSettings(settingsPath);
         check(loadedSettings.language==aura::Language::Japanese && std::abs(loadedSettings.shirt.r-.95f)<.0001f,
             "Language and shirt color round trip");
@@ -270,6 +286,20 @@ int main(int argc, char** argv) {
             "Schema 8 round trips a quoted Unicode Equinox path and independent normal/cutscene beat settings");
         check(loadedSettings.username==settings.username && !loadedSettings.discordEnabled && loadedSettings.discordApplicationId==settings.discordApplicationId,
             "Schema 4 preserves Unicode/quoted usernames and Discord preferences");
+        check(loadedSettings.usernameConfigured && loadedSettings.serverEndpoint==settings.serverEndpoint &&
+            loadedSettings.profilePhotoPath==settings.profilePhotoPath,
+            "Schema 9 round trips the confirmed-name flag, custom server address, and quoted Unicode profile photo path");
+        {
+            auto pending=settings; pending.usernameConfigured=false;
+            aura::saveSettings(settingsPath,pending);
+            check(!aura::loadSettings(settingsPath).usernameConfigured,
+                "Schema 9 keeps an explicitly unconfirmed custom name pending rather than inferring confirmation");
+            pending.username="Player"; pending.usernameConfigured=true;
+            aura::saveSettings(settingsPath,pending);
+            const auto explicitlyConfirmed=aura::loadSettings(settingsPath);
+            check(explicitlyConfirmed.username=="Player" && explicitlyConfirmed.usernameConfigured,
+                "Schema 9 distinguishes a deliberately confirmed Player name from the untouched initial name");
+        }
         settings.breakthroughCaptionOffset=-.18f;
         settings.breakthroughWordTimes={21.f,21.19f,21.4f,21.72f,22.11f,22.24f,22.6f,23.2f};
         for(unsigned i=0;i<aura::StageCount;++i) {
@@ -289,17 +319,37 @@ int main(int argc, char** argv) {
         aura::saveSettings(settingsPath,settings);
         {
             std::ifstream oldSettings(settingsPath); std::string all((std::istreambuf_iterator<char>(oldSettings)),{});
-            check(all.starts_with("STARS_RNG_SETTINGS 8\n"),"New settings use schema 8");
+            check(all.starts_with("STARS_RNG_SETTINGS 9\n"),"New settings use schema 9");
             const auto eraseRow=[&](const char* field) {
                 const auto row=all.find(field);
                 check(row!=std::string::npos,"Settings migration fixture contains the field being removed");
                 all.erase(row,all.find('\n',row)-row+1);
             };
+            // まず直前のschema 8へ戻す。新しい3行を残すと旧形式の正しいfixtureになりません。
+            all.replace(0,20,"STARS_RNG_SETTINGS 8");
+            eraseRow("username_configured "); eraseRow("server_endpoint "); eraseRow("profile_photo ");
+            {std::ofstream legacySettings(settingsPath); legacySettings<<all;}
+            const auto migratedV8=aura::loadSettings(settingsPath);
+            const aura::Settings defaults;
+            check(migratedV8.username==settings.username && migratedV8.usernameConfigured &&
+                migratedV8.serverEndpoint==defaults.serverEndpoint && migratedV8.profilePhotoPath.empty() &&
+                migratedV8.equinoxBgmPath==settings.equinoxBgmPath && migratedV8.equinoxBpm==settings.equinoxBpm &&
+                migratedV8.equinoxBeatOffset==settings.equinoxBeatOffset && migratedV8.equinoxCutsceneBpm==settings.equinoxCutsceneBpm &&
+                migratedV8.equinoxCutsceneBeatOffset==settings.equinoxCutsceneBeatOffset,
+                "Schema 8 preserves existing Equinox settings and infers a configured custom name while defaulting multiplayer fields");
+            auto untouchedName=all;
+            const auto nameRow=untouchedName.find("username ");
+            check(nameRow!=std::string::npos,"Schema 8 fixture has its existing username row");
+            untouchedName.replace(nameRow,untouchedName.find('\n',nameRow)-nameRow,"username \"Player\"");
+            {std::ofstream legacySettings(settingsPath); legacySettings<<untouchedName;}
+            const auto migratedUntouched=aura::loadSettings(settingsPath);
+            check(migratedUntouched.username=="Player" && !migratedUntouched.usernameConfigured &&
+                migratedUntouched.serverEndpoint==defaults.serverEndpoint && migratedUntouched.profilePhotoPath.empty(),
+                "An untouched schema 8 Player name still requires multiplayer name confirmation");
             all.replace(0,20,"STARS_RNG_SETTINGS 7");
             eraseRow("equinox_bgm "); eraseRow("equinox_beat ");
             {std::ofstream legacySettings(settingsPath); legacySettings<<all;}
             const auto migratedV7=aura::loadSettings(settingsPath);
-            const aura::Settings defaults;
             check(migratedV7.pixelationBpm==settings.pixelationBpm && migratedV7.pixelationBeatOffset==settings.pixelationBeatOffset &&
                 migratedV7.illusionaryBgmPath==settings.illusionaryBgmPath && migratedV7.equinoxBgmPath.empty() &&
                 migratedV7.equinoxBpm==defaults.equinoxBpm && migratedV7.equinoxBeatOffset==defaults.equinoxBeatOffset &&
@@ -487,6 +537,10 @@ int main(int argc, char** argv) {
         for(const std::string& invalidPath:{std::string("bad\npath"),std::string("bad\rpath"),std::string("bad\0path",8),std::string(2049,'x')}) {
             auto bad=settings; bad.equinoxBgmPath=invalidPath;
             rejects([&]{aura::saveSettings(settingsPath,bad);});
+            bad=settings; bad.profilePhotoPath=invalidPath;
+            rejects([&]{aura::saveSettings(settingsPath,bad);});
+            bad=settings; bad.serverEndpoint=invalidPath;
+            rejects([&]{aura::saveSettings(settingsPath,bad);});
         }
         for(float invalidTempo:{NAN,INFINITY,-INFINITY,-1.f,0.f,29.f,301.f}) {
             auto bad=settings; bad.equinoxBpm=invalidTempo;
@@ -525,11 +579,31 @@ int main(int argc, char** argv) {
             damagedPath.replace(pathRow,damagedPath.find('\n',pathRow)-pathRow,"equinox_bgm \"bad\npath\"");
             {std::ofstream output(settingsPath);output<<damagedPath;}
             rejects([&]{aura::loadSettings(settingsPath);});
+            // 新規の末尾3行も、値の欠落・不正なbool・改行入りのパスを受け入れない。
+            const auto replaceField=[&](const char* field,const std::string& replacement) {
+                auto damaged=valid;
+                const auto start=damaged.find(field);
+                check(start!=std::string::npos,"Schema 9 fixture contains the multiplayer field under test");
+                damaged.replace(start,damaged.find('\n',start)-start,replacement);
+                {std::ofstream output(settingsPath);output<<damaged;}
+                rejects([&]{aura::loadSettings(settingsPath);});
+            };
+            for(const char* value:{"username_configured -1","username_configured 2","username_configured true","username_configured"})
+                replaceField("username_configured ",value);
+            replaceField("server_endpoint ","server_endpoint \"bad\naddress\"");
+            replaceField("profile_photo ","profile_photo \"bad\rpath\"");
+            replaceField("profile_photo ","profile_photo \""+std::string(2049,'x')+"\"");
+            const auto multiplayerRow=valid.find("username_configured ");
+            {std::ofstream output(settingsPath);output<<valid.substr(0,multiplayerRow);}
+            rejects([&]{aura::loadSettings(settingsPath);});
+            {std::ofstream output(settingsPath);output<<valid<<"username_configured 1\n";}
+            rejects([&]{aura::loadSettings(settingsPath);});
         }
         settings.shirt.g=NAN; rejects([&] { aura::saveSettings(settingsPath,settings); });
         check(aura::displayName(defs[0],aura::Language::Japanese)=="コモン","Japanese aura names");
         check(aura::displayName(defs[pixelation],aura::Language::Japanese)=="ピクセレーション","Japanese Pixelation name");
         check(aura::displayName(defs[equinox],aura::Language::Japanese)=="エキノックス","Japanese Equinox name");
+        check(aura::displayName(defs[frutiger],aura::Language::Japanese)=="フルティガー・エアロ","Japanese Frutiger Aero name");
         check(aura::displayName(defs[breakthrough],aura::Language::Japanese)=="ブレイクスルー","Japanese BreakThrough name");
         check(aura::displayName(defs[nanally],aura::Language::Japanese)=="ナナリー" && aura::displayName(defs[nanally],aura::Language::English)=="Nanally","Bilingual Nanally name");
         check(!aura::cooldownVisual(0).visible && !aura::cooldownVisual(-1).visible,"Cooldown bar disappears at completion");
@@ -549,7 +623,7 @@ int main(int argc, char** argv) {
         check(aura::loadProgress(save,defs).auraLevel(singularity,defs)==3,"Aura Level survives save via stable counts");
         auto historicalCatalog=defs;
         for(auto& definition:historicalCatalog) if(aura::auraCategory(definition)==aura::AuraCategory::Extra) {definition.previewOnly=true; definition.denominator=0;}
-        std::erase_if(historicalCatalog,[](const auto& d){return d.id=="illusionary" || d.id=="dune" || d.id=="mirage" || d.id=="pharaoh";});
+        std::erase_if(historicalCatalog,[](const auto& d){return d.id=="illusionary" || d.id=="dune" || d.id=="mirage" || d.id=="pharaoh" || d.id=="frutiger_aero";});
         auto historicalRollable=historicalCatalog; std::erase_if(historicalRollable,[](const auto& d){return d.previewOnly;});
         auto previousCatalog=historicalRollable; previousCatalog.erase(previousCatalog.begin()+3);
         check(previousCatalog.size()==12 && historicalRollable.size()==13,"Historical rollable catalogs contain 12 and 13 entries");
@@ -605,8 +679,8 @@ int main(int argc, char** argv) {
         aura::saveProgress(save,v010Saved,historicalCatalog);
         const auto v011Restored=aura::loadProgress(save,defs);
         check(v011Restored.rolls==98765 && v011Restored.equipped==singularity && v011Restored.counts[singularity]==1 &&
-            !v011Restored.counts[illusionary] && !v011Restored.counts[dune] && !v011Restored.counts[mirage] && !v011Restored.counts[pharaoh],
-            "Current save keeps inventory, equipment, and edited counter while adding four empty IDs");
+            !v011Restored.counts[illusionary] && !v011Restored.counts[dune] && !v011Restored.counts[mirage] && !v011Restored.counts[pharaoh] && !v011Restored.counts[frutiger],
+            "Current save keeps inventory, equipment, and edited counter while adding five empty IDs");
         aura::Roller historicalRoller(historicalCatalog,42);
         for(std::size_t i=0;i<historicalCatalog.size();++i) if(historicalCatalog[i].id!="stardust")
             check(historicalRoller.tickets(i)==roller.tickets(i),"Desert additions leave every specified old probability unchanged");
@@ -620,18 +694,19 @@ int main(int argc, char** argv) {
         for(auto index:extraIndices) extraProgress.record(index,defs);
         extraProgress.equipped=illusionary; aura::saveProgress(save,extraProgress,defs);
         const auto extraRestored=aura::loadProgress(save,defs);
-        check(extraRestored.rolls==4 && extraRestored.discovered()==4 && extraRestored.equipped==illusionary &&
-            extraRestored.best==illusionary && extraRestored.counts==extraProgress.counts,
+        check(extraRestored.rolls==5 && extraRestored.discovered()==5 && extraRestored.equipped==illusionary &&
+            extraRestored.best==frutiger && extraRestored.counts==extraProgress.counts,
             "Promoted Extra discoveries can be recorded, equipped, saved, and restored independently of the current planet");
         auto oldPreviewCatalog=defs;
-        for(auto index:extraIndices) {oldPreviewCatalog[index].previewOnly=true; oldPreviewCatalog[index].denominator=0;}
+        for(auto index:promotedExtraIndices) {oldPreviewCatalog[index].previewOnly=true; oldPreviewCatalog[index].denominator=0;}
+        std::erase_if(oldPreviewCatalog,[](const auto& d){return d.id=="frutiger_aero";});
         aura::Progress oldPreviewProgress(oldPreviewCatalog.size());
         oldPreviewProgress.record(dune,oldPreviewCatalog); oldPreviewProgress.record(pharaoh,oldPreviewCatalog);
         oldPreviewProgress.record(singularity,oldPreviewCatalog); oldPreviewProgress.equipped=pharaoh; oldPreviewProgress.setRollCount(13579);
         aura::saveProgress(save,oldPreviewProgress,oldPreviewCatalog);
         const auto promotedSave=aura::loadProgress(save,defs);
         check(promotedSave.rolls==13579 && promotedSave.equipped==pharaoh && promotedSave.best==singularity &&
-            promotedSave.counts==oldPreviewProgress.counts,
+            std::equal(oldPreviewProgress.counts.begin(),oldPreviewProgress.counts.end(),promotedSave.counts.begin()) && promotedSave.counts[frutiger]==0,
             "The v0.1.11 save preserves desert discoveries, equipment, and its edited counter when four previews become obtainable");
         const auto reclining=aura::illusionaryPose(1.3f),recliningLater=aura::illusionaryPose(2.9f);
         constexpr float halfPi=1.57079632679f;
@@ -703,9 +778,17 @@ int main(int argc, char** argv) {
                 eq::beatClock(-1,2)==2*style::fallbackBpm/60.f &&
                 eq::beatClock(NAN,2)==eq::beatClock(-1,2) && eq::beatClock(INFINITY,-2)==0 && eq::beatClock(-1,NAN)==0,
                 "Equinox uses the supplied music beat and safely falls back to elapsed time when playback is unavailable");
-            float lowest=INFINITY,highest=-INFINITY;
+            float lowest=INFINITY,highest=-INFINITY,minSpeed=INFINITY,maxSpeed=0;
             for(unsigned frame=0;frame<1000;++frame) {
                 const float beat=frame*.031f;
+                const float speed=eq::orbSpeedScale(beat),angle=eq::orbOrbitAngle(beat);
+                check(std::isfinite(speed) && speed>0 && speed>=1-style::orbitSpeedVariation-.000001f &&
+                    speed<=1+style::orbitSpeedVariation+.000001f && eq::orbOrbitAngle(beat+.001f)>angle,
+                    "Orb speed stays within the configured variation range and the angle always advances without reversal");
+                const float modulationPeriod=style::orbitBeats*style::orbitSpeedCycleOrbits;
+                check(std::abs(eq::orbOrbitAngle(beat+modulationPeriod)-angle-2*eq::Pi*style::orbitSpeedCycleOrbits)<.00005f,
+                    "Acceleration and deceleration preserve the average beat-based orbit over a complete modulation cycle");
+                minSpeed=std::min(minSpeed,speed); maxSpeed=std::max(maxSpeed,speed);
                 const auto a=eq::orbPosition(beat,0),b=eq::orbPosition(beat,1);
                 check(finite(a) && finite(b) && std::abs(std::hypot(a.x,a.z)-style::orbOrbitRadius)<.00005f &&
                     std::abs(std::hypot(b.x,b.z)-style::orbOrbitRadius)<.00005f &&
@@ -735,6 +818,15 @@ int main(int argc, char** argv) {
                 }
             }
             check(highest-lowest>style::orbBobHeight*1.95f,"Equinox covers its intended vertical orbit range");
+            // この分岐はtuningの強さを0へ変えたビルドでも使います。0ならずっと平均速度1です。
+            if constexpr(style::orbitSpeedVariation==0) {
+                check(minSpeed==1 && maxSpeed==1 &&
+                    std::abs(eq::orbOrbitAngle(style::orbitBeats*.5f)-eq::Pi)<.00001f,
+                    "A zero variation setting produces a constant-speed orbit and reaches the opposite side after half a cycle");
+            } else check(maxSpeed-minSpeed>style::orbitSpeedVariation*1.95f,
+                "The configured nonzero variation creates both visible acceleration and deceleration");
+            check(style::floorEvenRotation==style::floorRotation && style::floorOddRotation==style::floorRotation &&
+                style::dustRotation==style::floorRotation,"Floor surface, both ring groups, and particles share their rotation setting");
             for(unsigned event=1;event<=32;++event) {
                 const float boundary=event*style::polarityBeats;
                 const float before=std::nextafter(boundary,-INFINITY);
@@ -754,7 +846,8 @@ int main(int argc, char** argv) {
             for(float invalidBeat:{NAN,INFINITY,-INFINITY}) {
                 check(equal(eq::orbPosition(invalidBeat,0),eq::orbPosition(0,0)) &&
                     equal(eq::orbPosition(invalidBeat,1),eq::orbPosition(0,1)) && eq::polarity(invalidBeat)==0 &&
-                    eq::floorGlyphIndex(invalidBeat)==0 && eq::transitionAge(invalidBeat)==style::polarityBeats,
+                    eq::floorGlyphIndex(invalidBeat)==0 && eq::transitionAge(invalidBeat)==style::polarityBeats &&
+                    eq::orbOrbitAngle(invalidBeat)==eq::orbOrbitAngle(0) && eq::orbSpeedScale(invalidBeat)==eq::orbSpeedScale(0),
                     "Malformed Equinox beat values cannot generate NaN positions or false color-change explosions");
             }
             check(eq::polarity(-1)==0 && eq::floorGlyphIndex(-1)==0 && eq::transitionAge(-1)==style::polarityBeats &&
@@ -925,7 +1018,7 @@ int main(int argc, char** argv) {
             aura::tuning::cutscene::endingOpacity(29.999f,30.f,true)==1 &&
             aura::tuning::cutscene::endingOpacity(30.f,30.f,true)==0,
             "BreakThrough stays opaque until the exact ending and then hard-cuts without crossfade");
-        std::cout << "PASS: exact stage odds, six planets, limited drops, fixed poses, Equinox beat/trails/glyphs, BreakThrough ink bounds, preview isolation, bass envelope, schema 8 migration, save/restore, UTF-8 CSV\n";
+        std::cout << "PASS: 22 auras, exact stage odds, six planets, limited drops, fixed poses, Equinox variable speed/beat/trails/glyphs, BreakThrough ink bounds, preview isolation, bass envelope, schema 9 multiplayer profile migration, save/restore, UTF-8 CSV\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
 }

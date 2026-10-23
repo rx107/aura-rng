@@ -11,6 +11,7 @@
 #include <span>
 #include <future>
 #include "render/vrm.hpp"
+#include "platform/multiplayer.hpp"
 
 struct ImGuiContext;
 
@@ -40,8 +41,11 @@ struct Frame {
     float cutsceneBeat{}; // 実音声の再生位置に同期した拍0〜1。音声がなければ0。
     float auraBeat{},musicBpm{}; // BGMの実再生時刻に同期した拍0〜1と、推定BPM。
     float equinoxBeat{-1}; // 通常Equinoxの連続した経過拍数。負なら設定BPMで代替。
+    const net::Snapshot* multiplayer{};
+    bool multiplayerOpen{};
+    std::span<const std::uint8_t> profilePhoto;
 };
-enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory };
+enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory, Multiplayer };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
 // 描く場所とクリック判定は同じ設計図を使います。座標は1440×900基準の論理ピクセル。
 // 惑星カード i は {x+20, y+112+i*64, width-40, 56}、閉じるは右上の30×30です。
@@ -76,6 +80,8 @@ public:
     std::size_t nanallyCount() const { return nanallyVisible_?nanallyInstances_.size()+pixelationInstances_.size():0; }
     std::size_t illusionaryCount() const { return illusionaryVisible_?illusionaryInk_.size()+pixelationInstances_.size():0; }
     std::size_t desertAuraCount() const { return desertAuraVisible_?pixelationInstances_.size():0; }
+    std::size_t frutigerCount() const { return frutigerVisible_?frutigerInstances_.size():0; }
+    std::size_t remotePlayerCount() const { return playerTags_.size(); }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
     float scale() const { return scale_; }
@@ -112,6 +118,12 @@ private:
     void buildNanally(const Frame& frame);
     void buildIllusionary(const Frame& frame);
     void buildDesert(const Frame& frame);
+    void createFrutiger();
+    void buildFrutiger(const Frame& frame);
+    void multiplayerUi(const Frame& frame);
+    void multiplayerLabels(const Frame& frame);
+    void drawRemotePlayers(const Frame& frame,DirectX::FXMMATRIX viewProjection,DirectX::FXMVECTOR eye,Color fog);
+    void blockAvatar(const Frame& frame,bool useVrm=false);
     void createPixelationTargets();
     void compositePixelation();
     void pixelQuad(DirectX::FXMMATRIX transform,Color color,unsigned style,float opacity);
@@ -153,6 +165,7 @@ private:
     ComPtr<ID3D11PixelShader> breakthroughCutscenePs_;
     ComPtr<ID3D11PixelShader> breakthroughPs_;
     ComPtr<ID3D11PixelShader> nanallyPs_,nanallyGlowPs_;
+    ComPtr<ID3D11PixelShader> frutigerPs_;
     ComPtr<ID3D11ShaderResourceView> breakthroughLettering_;
     ComPtr<ID3D11Buffer> breakthroughConstants_;
     ComPtr<ID3D11Buffer> cutsceneConstants_;
@@ -184,6 +197,18 @@ private:
     std::vector<Instance> equinoxTitles_;
     std::vector<Instance> nanallyInstances_;
     std::vector<Instance> illusionaryInk_; // 黒い帯は発光バッチから分け、黒色を保ちます。
+    std::vector<Instance> frutigerInstances_;
+    bool frutigerVisible_{};
+    struct PlayerTag {float x{},y{};std::string name,id,aura;};
+    std::vector<PlayerTag> playerTags_;
+    struct RemoteMotion {std::string id;float x{},z{},yaw{};};
+    std::vector<RemoteMotion> remoteMotion_;
+    float remoteLastTime_{};
+    struct PhotoTexture {std::string key;ComPtr<ID3D11ShaderResourceView> texture;};
+    std::vector<PhotoTexture> photoTextures_;
+    ID3D11ShaderResourceView* photoTexture(const std::string& key,std::span<const std::uint8_t> bytes);
+    bool multiplayerPanelVisible_{};
+    DirectX::XMFLOAT4 multiplayerBounds_{};
     ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
     ComPtr<ID3D11BlendState> effectBlend_;
     ComPtr<ID3D11BlendState> additiveBlend_;

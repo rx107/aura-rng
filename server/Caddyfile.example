@@ -1,0 +1,8 @@
+# rng.example.com を自分のドメインに変更。DNSのA/AAAAレコードはVPSへ向けます。
+# Caddyは外向きHTTPS :443を担当し、PythonはVPS内127.0.0.1:8765で待ち受けます。
+rng.example.com {
+    request_body {
+        max_size 192KB
+    }
+    reverse_proxy 127.0.0.1:8765
+}
