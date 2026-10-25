@@ -2,11 +2,11 @@
 
 まずは「数字を1つ変えて、画面が変わる」を体験しましょう。C++を全部理解してから始める必要はありません。
 
-v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専用CutSceneを追加しました。[Red johnのガイド](red-john-guide.md)には「顔の大きさを変える」「支える手を広げる」「タイトルを0.1秒遅くする」など、画面と数値を対応させた例があります。
+v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専用CutSceneを追加しました。v0.1.19ではCutSceneの音声だけを、提供MP4から抽出した許可済みの音声へ変更しています。[Red johnのガイド](red-john-guide.md)には「顔の大きさを変える」「支える手を広げる」「タイトルを0.1秒遅くする」など、画面と数値を対応させた例があります。
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.18-alpha.1/StarRng-v0.1.18-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.19-alpha.1/StarRng-v0.1.19-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -161,7 +161,7 @@ auratest,My Test Aura,0,1.0,0.3,0.7,32,1.5,0.7,1
 
 通常抽選へ追加するときは、すべての確率の合計を考える必要があります。詳しい条件は [aura-format.md](aura-format.md) にあります。最初は上のプレビュー行から始めると、確率計算を触らず絵作りに集中できます。
 
-許可済みの7音源と、Red john用のオリジナル導入音はソースZIPにも同梱しています。Red johnの音は`tools/generate_redjohn_audio.py`の数式から合成したもので、参考動画の音声は配布しません。Equinoxの通常表示用の曲とCutScene用M4Aは別ファイルです。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
+Red johnを含む許可済みの8音源はソースZIPにも同梱しています。現在の`Red_John_Cutscene.m4a`は、提供MP4の0秒から約10.89秒のAAC音声を再圧縮せず抽出したものです。`tools/generate_redjohn_audio.py`はv0.1.18の旧合成曲を試す任意ツールで、現在の音声を再生成するものではありません。Equinoxの通常表示用の曲とCutScene用M4Aは別ファイルです。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
 
 ## 7. 変わらない・ビルドできないとき
 

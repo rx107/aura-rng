@@ -27,17 +27,17 @@ EquinoxとRed johnは最後の0.8秒で映像と音楽を一緒にフェード�
 
 終了後の表示は一時プレビューなので、Collectionで選んだ装備は変更しません。F1の装備表示へ戻す操作、またはCollectionでの装備選択で通常の表示へ戻せます。再生中に**Esc**で中断した場合は、再生前の表示へ戻ります。
 
-カットシーンの映像はコードで描いています。参考MP4を動画として画面へ貼り付けているわけではありません。Equinox・BreakThroughの音声は切り出したファイルを、Red johnは数式から合成したオリジナルの短い導入曲を同梱しているため、元の動画がなくても音付きで確認できます。参考画像と元動画は配布しません。
+カットシーンの映像はコードで描いています。参考MP4を動画として画面へ貼り付けているわけではありません。Equinox・BreakThrough・Red johnの音声は、提供者の許可を得て元動画から音声だけを切り出して同梱しています。元の動画がなくても音付きで確認できます。参考画像と元動画は配布しません。
 
 | カットシーン | 同梱する音声 | 演出の長さ |
 | --- | --- | --- |
 | Equinox | `data/audio/Equinox_Cutscene.m4a` | 10.9秒 |
 | BreakThrough | `data/audio/Breakthrough_Cutscene.m4a` | 30秒 |
-| Red john | `data/audio/Red_John_Intro.wav` | 10.9秒 |
+| Red john | `data/audio/Red_John_Cutscene.m4a` | 10.9秒 |
 
 同梱音声がない場合は、手元のDownloadsの`EquinoxReworkedCutscene.mp4.mp4`または`BreakthroughCutsceneV2.mp4.mp4`から音声を探します。BreakThroughの元動画を使う場合だけ、4.5秒を開始位置として読み飛ばします。同梱音声はその区間を切り出し済みなので、0秒から使います。音声が見つからない場合も映像は再生できます。
 
-Red johnは同梱WAVを優先し、ない場合だけDownloadsの`The-Mentalist-SnapYT.App.mp4`をローカル音声の候補にします。映像はどちらの場合もコードで描きます。帯・目・横顔・タイトルの開始秒と、オリジナル音の再生成手順は[Red johnの調整ガイド](red-john-guide.md#cutsceneの出る時刻を変える)へ。
+Red johnはv0.1.19から、提供MP4の0秒から約10.89秒のAAC音声を再圧縮せず抽出した同梱M4Aを使います。同梱M4Aがない場合だけDownloadsの`The-Mentalist-SnapYT.App.mp4`をローカル音声の候補にします。映像はどちらの場合もコードで描きます。帯・目・横顔・タイトルの開始秒と、現在の音声の扱いは[Red johnの調整ガイド](red-john-guide.md#cutsceneの出る時刻を変える)へ。
 
 ## BreakThroughの場面とカメラ
 

@@ -2,7 +2,7 @@
 """Create the three public ZIP files after the game and its tests have passed.
 
 例: python tools/package_release.py --windows-folder package --dest dist
-     --tag v0.1.18-alpha.1
+     --tag v0.1.19-alpha.1
 通常はGitに登録したファイルだけをソースZIPへ入れます。Gitのない作業用
 フォルダーでは --paths-file public-paths.json で明示した一覧を使えます。
 このスクリプト自体はビルド・通信・GitHubへの公開を行いません。
@@ -33,7 +33,7 @@ APPROVED_AUDIO = {
     "equinox_cutscene.m4a",
     "breakthrough_cutscene.m4a",
     "koraii_layers_cut.mpeg",
-    "red_john_intro.wav",  # tools/generate_redjohn_audio.pyで数式から合成したオリジナル導入音
+    "red_john_cutscene.m4a",  # 提供MP4のAACを再圧縮せず抽出。提供者の許可を得たCutScene音声
 }
 AUDIO_SUFFIXES = {".mp3", ".mpeg", ".ogg", ".m4a", ".wav", ".flac", ".aac", ".opus", ".wma", ".aif", ".aiff"}
 PRIVATE_NAMES = {
@@ -164,25 +164,19 @@ def make_zip(destination: Path, top: str, entries: list[tuple[str, Path]]) -> Pa
 def release_notes(tag: str) -> str:
     return f"""Star's RNG Alpha 0.1 / {tag}
 
-## 新オーラ Red john
+## Red johnのCutScene音楽を変更
 
-- 淡い壁の部屋、低いベッド、赤い笑顔をコードで描くExtraオーラを追加しました。基礎確率は1 in 6,000,000、Extraステージだけで入手できます。
-- アバターは片膝を立て、片腕を膝へ乗せ、反対の手でベッドを支えます。ブロックとVRMで姿勢を共有し、移動中も固定ポーズを保ちます。写真の人物の顔や服装は取り込みません。
-- 約10.9秒の専用CutSceneを追加しました。参考動画のテレビ番組風の導入を手がかりに、黒い導入、青・白・黄色の帯、目、アバターの横顔、大きなRED JOHNの文字をGPUとDirect2Dで描きます。参考動画を同梱・再生する方式ではありません。
-- F1のオーラ一覧と「カットシーンのみ再生」から未所持でも確認できます。最後まで再生するとRed johnを一時表示し、Esc・停止では元の表示へ戻ります。プレビューは所持数・実装備・Roll Historyを変えず、AutoRollを停止します。
-- 家具・顔の大きさ、姿勢、演出の各時刻を自分で変えられる日本語ガイドを追加しました。初期のCommon 1/2・Uncommon 1/4と、既存セーブの所持品・装備を引き継ぎます。
+- Red johnのカットシーン音楽を、提供されたMP4の音声へ差し替えました。元動画の0秒から約10.89秒のAAC音声を再圧縮せずM4Aへ取り出し、元の音質を保っています。
+- 提供者の明示的な許可を得て、data/audio/Red_John_Cutscene.m4aをソースとWindows ZIPへ同梱しています。元MP4の映像・ファイル、参考写真、VRMは同梱しません。
+- 入手時とF1の「カットシーンのみ再生」で同じ音声を使います。部屋・ベッド・赤い顔・ポーズ、カットシーン映像と時刻、確率、プレビュー操作はv0.1.18のままです。他のオーラも変更していません。
 
-## 音と素材
-
-Red johnの配布音声はtools/generate_redjohn_audio.pyで数式から合成したオリジナルの導入曲です。
-参考動画の音声・映像、参考写真、私有VRMは配布しません。許可済みの従来7音源は引き続き同梱しています。
+tools/generate_redjohn_audio.pyはv0.1.18の旧合成曲を試す任意ツールとして残しています。現在の音声の再生成や通常のビルドには使いません。
 
 ## 検証
 
 公開ジョブはWindowsのビルド・CTest・DirectX WARP描画試験と、Linuxのコア・サーバー試験が成功してから実行します。
-コア試験では23種の確率・ステージ制限、旧セーブの読み込み、座りポーズと通常歩行の分離、プレビュー非登録を確認します。
-描画試験ではRed johnの部屋、ブロック・VRMの姿勢、視点を回したときの壁、CutSceneの時刻・終了・中止・画面サイズ変更を確認します。
-ZIP作成時には私有VRM・参考動画・個人セーブ・写真・秘密鍵の混入とZIPのCRCを検査し、SHA256SUMS.txtを添付します。
+Red johnのカットシーン開始・自然終了・中止とプレビュー状態を回帰試験で確認します。音声は元動画から再圧縮せず抽出したAACストリームと照合します。
+ZIP作成時には新しいM4Aの収録、私有VRM・参考動画・個人セーブ・写真・秘密鍵の混入とZIPのCRCを検査し、SHA256SUMS.txtを添付します。
 
 ## 互換性・使い方
 
@@ -198,7 +192,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--windows-folder", type=Path, required=True, help="CMake --installで作ったWindows配布フォルダー")
     parser.add_argument("--dest", type=Path, default=Path("dist"), help="ZIPとSHA256SUMS.txtの保存先（初期値: dist）")
-    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.18-alpha.1")
+    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.19-alpha.1")
     parser.add_argument("--paths-file", type=Path, help="Gitがない手元の作業用: 公開パスのJSON配列または1行1パスの一覧")
     args = parser.parse_args()
     version = version_from_cmake()

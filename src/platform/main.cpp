@@ -251,9 +251,9 @@ private:
         cutsceneAudioPath_=downloads_.empty()?std::filesystem::path{}:downloads_/(kind==aura::CutsceneKind::RedJohn?L"The-Mentalist-SnapYT.App.mp4":kind==aura::CutsceneKind::Breakthrough?L"BreakthroughCutsceneV2.mp4.mp4":L"EquinoxReworkedCutscene.mp4.mp4");
         // 配布版は動画ではなく、演出の範囲だけ切り出した音声を読みます。
         // 同梱音声は既にトリミング済みなので、開始位置は0秒です。
-        // Red john の配布音声はコードから生成したオリジナルの短い曲です。
-        // 参考動画はローカル素材の候補としてのみ扱い、配布へ自動コピーしません。
-        const auto bundled=root_/L"data"/L"audio"/(kind==aura::CutsceneKind::RedJohn?L"Red_John_Intro.wav":kind==aura::CutsceneKind::Breakthrough?L"Breakthrough_Cutscene.m4a":L"Equinox_Cutscene.m4a");
+        // Red john は提供された参考MP4の音声だけを抽出して同梱します。
+        // 映像は引き続きコードで描きます。参考MP4自体は配布へコピーしません。
+        const auto bundled=root_/L"data"/L"audio"/(kind==aura::CutsceneKind::RedJohn?L"Red_John_Cutscene.m4a":kind==aura::CutsceneKind::Breakthrough?L"Breakthrough_Cutscene.m4a":L"Equinox_Cutscene.m4a");
         std::error_code bundleError;
         cutsceneAudioStart_=kind==aura::CutsceneKind::Breakthrough?aura::BreakthroughAudioStart:0.f;
         if(std::filesystem::is_regular_file(bundled,bundleError)) {cutsceneAudioPath_=bundled; cutsceneAudioStart_=0;}
@@ -1294,7 +1294,7 @@ private:
         }
         update(.01f);
         if(cutsceneAudioAvailable_ && (!cutsceneMusic_.playing() || !cutsceneMusic_.decodedBytes()))
-            throw std::runtime_error("Red john original intro audio failed to decode");
+            throw std::runtime_error("Red john extracted intro audio failed to decode");
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700));cutsceneTime_=6.5f;render(false);captureExtra(L"-redjohn-cutscene-small");
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900));
         cutsceneTime_=aura::RedJohnCutsceneDuration-.01f;update(.02f);render(false);
@@ -1493,7 +1493,7 @@ private:
             if(opts_.silent) out<<"Audio: disabled by --silent; device playback verified separately on the development PC\n";
             else out<<"Equinox normal BGM: PASS / "<<equinoxAudioBytes<<" PCM bytes, supplied Koraii track, independent BPM/offset settings\n"
                     <<"Illusionary Ogg audio: PASS / "<<illusionaryAudioBytes<<" decoded PCM bytes, loop and stop\n";
-            out<<"Red john: PASS / "<<redJohnInstances<<" room instances, seated block/VRM pose, orbit cutaway, Extra acquisition, intro timing, original audio when available, resize, natural reveal, cancel/stop and preview isolation\n";
+            out<<"Red john: PASS / "<<redJohnInstances<<" room instances, seated block/VRM pose, orbit cutaway, Extra acquisition, intro timing, extracted audio when available, resize, natural reveal, cancel/stop and preview isolation\n";
             out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
                <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";

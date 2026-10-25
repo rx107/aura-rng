@@ -50,9 +50,9 @@ UserName未設定なら参加前に名前を確定します。UserNameと別に�
 
 ## CutSceneと音声
 
-CutSceneの映像はGPUシェーダーとD2D字幕で描き、動画を貼り付けません。Equinox / BreakThroughの同梱M4Aは演出の音声範囲だけ切り出したものです。Red johnの同梱WAVは、`tools/generate_redjohn_audio.py`で数式から合成したオリジナルの短い導入曲です。元MP4は同梱せず、同梱音声がない場合のDownloadsフォールバックとしてだけ使います。
+CutSceneの映像はGPUシェーダーとD2D字幕で描き、動画を貼り付けません。Equinox / BreakThroughの同梱M4Aは演出の音声範囲だけ切り出したものです。v0.1.19のRed johnの`Red_John_Cutscene.m4a`は、提供されたMP4の0秒から約10.89秒のAAC音声を再圧縮せず取り出したもので、元の音質を保ち、提供者の許可を得て配布します。元MP4は同梱せず、同梱音声がない場合のDownloadsフォールバックとしてだけ使います。
 
-Red johnの映像は`src/render/redjohn_cutscene.cpp`です。GPUで横切る帯と粒状感を描き、Direct2Dで目・角のあるアバターの横顔・大きなRED JOHNの文字・赤い顔を重ねます。`src/tuning/redjohn.hpp`で約10.9秒の時間軸を共有し、音楽側の切り替えアクセントは生成スクリプトの`PANEL_ACCENTS`で合わせます。F1の再生でも実際の入手でも同じ演出を使います。
+Red johnの映像は`src/render/redjohn_cutscene.cpp`です。GPUで横切る帯と粒状感を描き、Direct2Dで目・角のあるアバターの横顔・大きなRED JOHNの文字・赤い顔を重ねます。`src/tuning/redjohn.hpp`で約10.9秒の時間軸を共有します。v0.1.19では音声だけを差し替え、映像やその時刻は維持します。F1の再生でも実際の入手でも同じ演出を使います。`tools/generate_redjohn_audio.py`は旧合成曲用の任意ツールで、現在の音声の再生成や通常のビルドには使いません。
 
 `Music::playbackSeconds()` のXAudio2出力サンプル数を映像の時計に使い、初回デコード待ちで音と映像が離れないようにします。再生末尾でSamplesPlayedが0へ戻っても終了時刻を保持し、CutSceneが最初へ戻らないようにしています。
 
@@ -66,7 +66,7 @@ Pixelationのキューブ用には、その低音表の立ち上がりの繰り�
 
 MP3 / M4A / WAVはWindows Media Foundation、Ogg Vorbisは同梱stb_vorbisでPCM16へ変換し、XAudio2で再生します。Pixelationの発射・衝突音は短いオリジナルPCMを合成します。
 
-公開する音源は許可済みの従来7ファイルと、Red johnのオリジナル導入音の計8ファイルです。Equinoxの通常表示用には148.24秒の`Koraii_Layers_Cut.mpeg`を使い、CutSceneは従来の10.9秒の`Equinox_Cutscene.m4a`を使います。通常の曲をCutSceneへ流用しません。元の参考動画・画像・ユーザーのVRMは配布しません。
+公開する音源はRed johnの抽出音声を含む許可済みの計8ファイルです。Equinoxの通常表示用には148.24秒の`Koraii_Layers_Cut.mpeg`を使い、CutSceneは従来の10.9秒の`Equinox_Cutscene.m4a`を使います。通常の曲をCutSceneへ流用しません。元の参考動画・画像・ユーザーのVRMは配布しません。
 
 ## 保存と設定
 

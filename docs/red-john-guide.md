@@ -81,7 +81,9 @@ Extraステージで入手できる初期の基礎確率は **1 in 6,000,000** �
 
 場面の時刻は`PanelsStart < EyeStart < PortraitStart < TitleStart < TitleSettle < EndStart < CutsceneDuration`の順に保ちます。たとえばタイトルだけを遅らせたいときは、まず`TitleStart`と`TitleSettle`の両方へ同じ秒数を足して比べてください。
 
-配布版の短い導入音は、`tools/generate_redjohn_audio.py`で合成したオリジナルです。映像の切り替えへ合わせるアクセントは、同ファイルの`PANEL_ACCENTS=(2.05, 2.85, 3.80, 5.45, 6.05, 8.75)`で指定しています。上の時刻を変えたらこちらも合わせ、`python tools/generate_redjohn_audio.py`でWAVを作り直してからDevelop.cmdを実行します。`SNAP_VOLUME`を下げると切り替え音が弱くなり、`END_FADE`を増やすと最後の余韻が早めに静かになります。参考動画の音声は配布しません。
+v0.1.19の配布音声`data/audio/Red_John_Cutscene.m4a`は、提供された`The-Mentalist-SnapYT.App.mp4`の0秒から約10.89秒のAAC音声を、再圧縮せずM4Aへ取り出したものです。元の音質を保ち、提供者の許可を得て音声だけを同梱しています。映像の開始時刻を変えても、この曲の音や長さは変わりません。F1の再生ボタンで音と映像を一緒に確認してください。
+
+`tools/generate_redjohn_audio.py`はv0.1.18の旧合成曲を試す任意ツールとして残しています。現在の配布音声を再生成するためのスクリプトではありません。旧曲だけを改造して聴く場合は、`--output old_intro.wav`で別名へ保存してください。通常のビルドでは実行しません。
 
 ## 名前と確率を変える
 
@@ -108,7 +110,8 @@ Extraへ分類する処理は`src/core/aura.cpp`の`auraCategory()`です。`ava
 | 見た目の調整値 | `src/tuning/redjohn.hpp` | 部屋・家具・顔・CutSceneの調整に使う数値 |
 | 座りポーズ | `src/tuning/avatar.hpp`、`src/core/animation.cpp` | 首・腕・膝などの角度を決める。移動中も固定ポーズを優先する |
 | CutSceneの映像 | `src/render/redjohn_cutscene.cpp` | 時刻に合わせた帯・シルエット・文字・赤い顔の演出 |
-| CutSceneの音 | `tools/generate_redjohn_audio.py` | 短い鍵盤・ベース・乾いた切り替え音を数式から合成する |
+| 現在のCutScene音声 | `data/audio/Red_John_Cutscene.m4a` | 許可を得て提供MP4から再圧縮せず抽出した約10.89秒のAAC音声。映像とは別に読み込む |
+| 旧合成曲の試作 | `tools/generate_redjohn_audio.py` | v0.1.18の旧曲を任意に作る。現在の配布音声の再生成には使わない |
 | 入手とプレビューの違い | `src/platform/main.cpp` | 入手時の登録、表示だけの確認、演出の開始・終了を管理する |
 
 参考のMP4・写真をゲームへ貼り付けたり配布したりせず、形と動きをコードで作っています。VRMはこれまでどおり各自のPCから読み込み、配布ZIPへ含めません。
