@@ -42,12 +42,12 @@
 | --- | --- | --- |
 | Normal | CommonからSingularityまでの初期オーラ | すべての惑星 |
 | Desert | Dune、Mirage、Pharaoh | 砂漠のみ |
-| Extra | Pixelation、Equinox、BreakThrough、Illusionary | Extraのみ |
+| Extra | Pixelation、Equinox、BreakThrough、Illusionary、Frutiger Aero、Red john | Extraのみ |
 | Administrator | Nanally | F1の表示確認専用。ロールでは出ない |
 
 Collectionはこの4分野をフォルダーのように切り替えて見られます。表示の分類を切り替えても、現在の惑星や装備は変わりません。以前に入手したオーラは、入手場所から別の惑星へ移動しても装備できます。
 
-Extra限定4種類の**Luck 1での基礎確率**は次のとおりです。
+Extra限定6種類の**Luck 1での基礎確率**は次のとおりです。
 
 | オーラ | 基礎確率 |
 | --- | --- |
@@ -55,6 +55,10 @@ Extra限定4種類の**Luck 1での基礎確率**は次のとおりです。
 | Equinox | 1 in 2,500,000 |
 | BreakThrough | 1 in 3,000,000 |
 | Illusionary | 1 in 4,000,000 |
+| Frutiger Aero | 1 in 5,000,000 |
+| Red john | 1 in 6,000,000 |
+
+全体ではNormal13種・Desert3種・Extra6種・Administrator1種の計23種で、Nanally以外の22種を入手できます。追加オーラの形を変える手順は[Frutiger Aero](frutiger-aero.md)・[Red john](red-john-guide.md)のガイドへ。F1のプレビューは未所持でも表示でき、マルチプレイ中は相手にも現在の見た目が共有されます。実際の所持数や装備は変わりません。
 
 ExtraでもNormalのオーラを入手できます。Dune・Mirage・Pharaohは砂漠限定です。惑星で抽選対象が変わり、Stardustはその惑星の抽選表で残った確率を受け持ちます。Luckを変えると実際の抽選分布も変わります。
 

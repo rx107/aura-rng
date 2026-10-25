@@ -81,6 +81,7 @@ public:
     std::size_t illusionaryCount() const { return illusionaryVisible_?illusionaryInk_.size()+pixelationInstances_.size():0; }
     std::size_t desertAuraCount() const { return desertAuraVisible_?pixelationInstances_.size():0; }
     std::size_t frutigerCount() const { return frutigerVisible_?frutigerInstances_.size():0; }
+    std::size_t redJohnCount() const { return redJohnInstances_; }
     std::size_t remotePlayerCount() const { return playerTags_.size(); }
     bool blackHoleVisible() const { return holeVisible_; }
     DirectX::XMFLOAT3 vrmBone(int role) const { return vrm_?vrm_->bonePosition(role):DirectX::XMFLOAT3{}; }
@@ -121,6 +122,10 @@ private:
     void buildDesert(const Frame& frame);
     void createFrutiger();
     void buildFrutiger(const Frame& frame);
+    void buildRedJohn(const Frame& frame);
+    void createRedJohnCutscene();
+    void drawRedJohnCutscene(const Frame& frame);
+    void redJohnCutsceneUi(const Frame& frame);
     void multiplayerUi(const Frame& frame);
     void multiplayerLabels(const Frame& frame);
     void drawRemotePlayers(const Frame& frame,DirectX::FXMMATRIX viewProjection,DirectX::FXMVECTOR eye,Color fog);
@@ -167,6 +172,8 @@ private:
     ComPtr<ID3D11PixelShader> breakthroughPs_;
     ComPtr<ID3D11PixelShader> nanallyPs_,nanallyGlowPs_;
     ComPtr<ID3D11PixelShader> frutigerPs_;
+    ComPtr<ID3D11PixelShader> redJohnCutscenePs_;
+    ComPtr<IDWriteTextFormat> redJohnTitleFont_;
     ComPtr<ID3D11ShaderResourceView> breakthroughLettering_;
     ComPtr<ID3D11Buffer> breakthroughConstants_;
     ComPtr<ID3D11Buffer> cutsceneConstants_;
@@ -200,6 +207,7 @@ private:
     std::vector<Instance> illusionaryInk_; // 黒い帯は発光バッチから分け、黒色を保ちます。
     std::vector<Instance> frutigerInstances_;
     bool frutigerVisible_{};
+    std::size_t redJohnInstances_{};
     struct PlayerTag {float x{},y{};std::string name,id,aura;};
     std::vector<PlayerTag> playerTags_;
     struct RemoteMotion {std::string id;float x{},z{},yaw{};};

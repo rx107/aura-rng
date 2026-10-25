@@ -281,6 +281,15 @@ void Renderer::debugUi(const Frame& f) {
                 ImGui::SameLine();
                 if(ImGui::Button(t("Stop cutscene##equinox","カットシーン停止##equinox"))) debugActions_.stopCutscene=true;
             }
+            for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="red_john") {
+                ImGui::Separator();
+                if(ImGui::Button(t("Preview Red john","Red john を表示"),{-1,34})) debugActions_.preview=i;
+                ImGui::TextWrapped("%s",t("Extra Stage / seated avatar, quiet room and red face. Timings: src/tuning/redjohn.hpp. Preview does not change Collection or history.",
+                    "Extra Stage / 部屋・ベッド・赤い顔と座りポーズ。演出の時刻は src/tuning/redjohn.hpp で調整できます。プレビューは所持数・履歴を変えません。"));
+                if(ImGui::Button(t("Play cutscene only##redjohn","カットシーンのみ再生##redjohn"))) debugActions_.playRedJohnCutscene=true;
+                ImGui::SameLine();
+                if(ImGui::Button(t("Stop cutscene##redjohn","カットシーン停止##redjohn"))) debugActions_.stopCutscene=true;
+            }
             for(std::size_t i=0;i<f.roller.catalog().size();++i) if(f.roller.catalog()[i].id=="breakthrough") {
                 ImGui::Separator();
                 if(ImGui::Button(t("Preview BreakThrough","BreakThrough を表示"),{-1,34})) debugActions_.preview=i;

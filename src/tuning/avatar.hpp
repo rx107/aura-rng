@@ -73,6 +73,23 @@ inline constexpr std::array<float,2> LegPitch={-.18f,.18f};
 inline constexpr std::array<float,2> LegOut={.08f,.15f};
 inline constexpr std::array<float,2> Knee={-.10f,-.45f}; // 脚は浮遊したまま軽く左右差を付ける。
 }
+namespace redJohn {
+// ベッドで片膝を立てる固定ポーズ。画像の人物そのものではなく、体の姿勢だけを再現します。
+// アバターの正面は -Z。配列の 1 個目が -X 側（立てた膝・乗せる腕）、2 個目が支える手の側です。
+inline constexpr float Lift=-.26f; // 下げると腰が低くなる。標準の腰 1.10 + Lift = .84、マット上面 .60 に座る高さ。
+inline constexpr float HipHeight=1.10f; // VRM の腰もこの高さへ揃え、モデルが変わってもベッドの上に座らせる。
+inline constexpr float BodyRoll=-.08f; // 負にすると +X 側の肩が下がり、支える手へ少しだけ体重が乗る。
+inline constexpr float TorsoPitch=-.035f, HeadPitch=.015f; // 胸・顔の前後角度。大きくすると前後に傾く。
+inline constexpr float BreathingAmplitude=.006f, BreathingFrequency=1.35f; // 胸だけがわずかに呼吸する。0 で完全静止。
+inline constexpr std::array<float,2> ArmOut={-.12f,.28f}; // 支える手を外へ出すには 2 個目を増やす。
+inline constexpr std::array<float,2> ArmPitch={1.f,-.10f};
+inline constexpr std::array<float,2> ArmYaw={-1.f,0.f}; // 1 個目を変えると、膝に乗せた前腕の左右位置が変わる。
+inline constexpr std::array<float,2> ElbowPitch={.55f,.04f}; // 片肘を曲げて前腕を膝の高さへ。増やしすぎると手が顔の前へ上がる。
+inline constexpr std::array<float,2> LegPitch={2.40f,1.40f}; // 1 個目を増やすと立てた膝が高くなる。
+inline constexpr std::array<float,2> LegOut={.12f,.50f};
+inline constexpr std::array<float,2> LegYaw={.08f,-.90f}; // 2 個目で折り畳んだ脚を横向きにする。
+inline constexpr std::array<float,2> Knee={-2.32f,-2.30f}; // 膝から先の曲げ。0 だと膝が伸びる。
+}
 static_assert(walking::GaitFrequency>0 && walking::IdleFrequency>0);
 static_assert(singularity::BobFrequency>0 && pixelation::BobFrequency>0 && equinox::BobFrequency>0);
 } // namespace aura::tuning::avatar

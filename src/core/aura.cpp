@@ -133,7 +133,7 @@ AuraCategory auraCategory(const Definition& definition) {
     // 新しい限定オーラを追加するときは、ここへidを足すとCollectionと抽選制限がそろいます。
     const auto& id=definition.id;
     if(id=="dune" || id=="mirage" || id=="pharaoh") return AuraCategory::Desert;
-    if(id=="pixelation" || id=="equinox" || id=="breakthrough" || id=="illusionary" || id=="frutiger_aero") return AuraCategory::Extra;
+    if(id=="pixelation" || id=="equinox" || id=="breakthrough" || id=="illusionary" || id=="frutiger_aero" || id=="red_john") return AuraCategory::Extra;
     if(id=="nanally") return AuraCategory::Administrator;
     return AuraCategory::Normal;
 }

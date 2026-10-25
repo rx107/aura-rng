@@ -18,15 +18,16 @@ int main(int argc, char** argv) {
     try {
         check(argc == 2, "Catalog path required");
         const auto defs = aura::loadCatalog(argv[1]);
-        check(defs.size() == 22, "Expected 21 rollable auras and one administrator preview");
+        check(defs.size() == 23, "Expected 22 rollable auras and one administrator preview");
         const auto findAura=[&](const std::string& id) {
             const auto found=std::find_if(defs.begin(),defs.end(),[&](const auto& d){return d.id==id;});
             check(found!=defs.end(),"Required aura ID"); return static_cast<std::size_t>(found-defs.begin());
         };
         const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough"),nanally=findAura("nanally");
         const auto illusionary=findAura("illusionary"),dune=findAura("dune"),mirage=findAura("mirage"),pharaoh=findAura("pharaoh"),frutiger=findAura("frutiger_aero");
+        const auto redJohn=findAura("red_john");
         const auto previewIndices={nanally};
-        const auto extraIndices={pixelation,equinox,breakthrough,illusionary,frutiger};
+        const auto extraIndices={pixelation,equinox,breakthrough,illusionary,frutiger,redJohn};
         const auto promotedExtraIndices={pixelation,equinox,breakthrough,illusionary};
         check(std::count_if(defs.begin(),defs.end(),[](const auto& d){return d.previewOnly;})==1 && defs[nanally].previewOnly,
             "Only Nanally remains an administrator preview");
@@ -38,8 +39,8 @@ int main(int argc, char** argv) {
             return std::count_if(defs.begin(),defs.end(),[&](const auto& definition){return aura::auraCategory(definition)==category;});
         };
         check(categoryCount(aura::AuraCategory::Normal)==13 && categoryCount(aura::AuraCategory::Desert)==3 &&
-            categoryCount(aura::AuraCategory::Extra)==5 && categoryCount(aura::AuraCategory::Administrator)==1,
-            "Collection contains 13 Normal, 3 Desert, 5 Extra, and 1 Administrator auras");
+            categoryCount(aura::AuraCategory::Extra)==6 && categoryCount(aura::AuraCategory::Administrator)==1,
+            "Collection contains 13 Normal, 3 Desert, 6 Extra, and 1 Administrator auras");
         aura::Roller roller(defs,42),same(defs,42);
         for(unsigned stage=0;stage<aura::StageCount;++stage) {
             const auto biome=static_cast<aura::Biome>(stage);
@@ -86,13 +87,17 @@ int main(int argc, char** argv) {
         check(roller.luck()==2 && roller.tickets(0)==aura::TicketPool/4 && roller.tickets(dune)==0,
             "Planet change reapplies existing Luck and clears stale desert weights");
         roller.setLuck(1);
-        check(roller.tickets(3)==69'887'305'667ULL,"Extra's five fixed rare odds consume only its own Stardust remainder");
+        check(roller.tickets(3)==69'887'139'001ULL,"Extra's six fixed rare odds consume only its own Stardust remainder");
         check(defs[frutiger].name=="Frutiger Aero" && defs[frutiger].denominator==5'000'000 &&
             roller.tickets(frutiger)==aura::TicketPool/5'000'000 && !defs[frutiger].previewOnly,
             "Frutiger Aero has an exact obtainable Extra-only 1 in 5,000,000 interval");
+        check(defs[redJohn].name=="Red john" && defs[redJohn].denominator==6'000'000 &&
+            roller.tickets(redJohn)==aura::TicketPool/6'000'000 && !defs[redJohn].previewOnly &&
+            aura::oddsInLabel(defs,redJohn)=="1 in 6,000,000",
+            "Red john has a reachable Extra-only interval and its editable 1 in 6,000,000 label");
         for(auto extra:extraIndices) {
             check(aura::auraCategory(defs[extra])==aura::AuraCategory::Extra && roller.tickets(extra)>0,
-                "All five Extra auras can be obtained only in Extra");
+                "All six Extra auras can be obtained only in Extra");
             check(aura::oddsLabel(defs,extra)!="Preview only","Obtainable Extra auras show their editable CSV odds");
         }
         roller.setBiome(aura::Biome::Normal);
@@ -251,6 +256,9 @@ int main(int argc, char** argv) {
         autoRoll=true; presentation.showPreview(nanally,defs.size(),autoRoll);
         check(!autoRoll && presentation.shown(p)==nanally && p.equipped==3 && p.rolls==prototypeRolls && p.counts==prototypeCounts,
             "Nanally preview stops AutoRoll and leaves equipment, roll history, and inventory untouched");
+        autoRoll=true; presentation.showPreview(redJohn,defs.size(),autoRoll);
+        check(!autoRoll && presentation.shown(p)==redJohn && p.equipped==3 && p.rolls==prototypeRolls && p.counts==prototypeCounts,
+            "Unowned Red john preview stops AutoRoll without recording a discovery or changing equipment");
         const auto settingsPath=dir/"settings.txt";
         const auto newPlayerSettings=aura::loadSettings(settingsPath);
         check(newPlayerSettings.language==aura::Language::English && !newPlayerSettings.usernameConfigured &&
@@ -604,6 +612,8 @@ int main(int argc, char** argv) {
         check(aura::displayName(defs[pixelation],aura::Language::Japanese)=="ピクセレーション","Japanese Pixelation name");
         check(aura::displayName(defs[equinox],aura::Language::Japanese)=="エキノックス","Japanese Equinox name");
         check(aura::displayName(defs[frutiger],aura::Language::Japanese)=="フルティガー・エアロ","Japanese Frutiger Aero name");
+        check(aura::displayName(defs[redJohn],aura::Language::Japanese)=="レッド・ジョン" &&
+            aura::displayName(defs[redJohn],aura::Language::English)=="Red john","Bilingual Red john name");
         check(aura::displayName(defs[breakthrough],aura::Language::Japanese)=="ブレイクスルー","Japanese BreakThrough name");
         check(aura::displayName(defs[nanally],aura::Language::Japanese)=="ナナリー" && aura::displayName(defs[nanally],aura::Language::English)=="Nanally","Bilingual Nanally name");
         check(!aura::cooldownVisual(0).visible && !aura::cooldownVisual(-1).visible,"Cooldown bar disappears at completion");
@@ -623,7 +633,7 @@ int main(int argc, char** argv) {
         check(aura::loadProgress(save,defs).auraLevel(singularity,defs)==3,"Aura Level survives save via stable counts");
         auto historicalCatalog=defs;
         for(auto& definition:historicalCatalog) if(aura::auraCategory(definition)==aura::AuraCategory::Extra) {definition.previewOnly=true; definition.denominator=0;}
-        std::erase_if(historicalCatalog,[](const auto& d){return d.id=="illusionary" || d.id=="dune" || d.id=="mirage" || d.id=="pharaoh" || d.id=="frutiger_aero";});
+        std::erase_if(historicalCatalog,[](const auto& d){return d.id=="illusionary" || d.id=="dune" || d.id=="mirage" || d.id=="pharaoh" || d.id=="frutiger_aero" || d.id=="red_john";});
         auto historicalRollable=historicalCatalog; std::erase_if(historicalRollable,[](const auto& d){return d.previewOnly;});
         auto previousCatalog=historicalRollable; previousCatalog.erase(previousCatalog.begin()+3);
         check(previousCatalog.size()==12 && historicalRollable.size()==13,"Historical rollable catalogs contain 12 and 13 entries");
@@ -679,8 +689,8 @@ int main(int argc, char** argv) {
         aura::saveProgress(save,v010Saved,historicalCatalog);
         const auto v011Restored=aura::loadProgress(save,defs);
         check(v011Restored.rolls==98765 && v011Restored.equipped==singularity && v011Restored.counts[singularity]==1 &&
-            !v011Restored.counts[illusionary] && !v011Restored.counts[dune] && !v011Restored.counts[mirage] && !v011Restored.counts[pharaoh] && !v011Restored.counts[frutiger],
-            "Current save keeps inventory, equipment, and edited counter while adding five empty IDs");
+            !v011Restored.counts[illusionary] && !v011Restored.counts[dune] && !v011Restored.counts[mirage] && !v011Restored.counts[pharaoh] && !v011Restored.counts[frutiger] && !v011Restored.counts[redJohn],
+            "Current save keeps inventory, equipment, and edited counter while adding six empty IDs");
         aura::Roller historicalRoller(historicalCatalog,42);
         for(std::size_t i=0;i<historicalCatalog.size();++i) if(historicalCatalog[i].id!="stardust")
             check(historicalRoller.tickets(i)==roller.tickets(i),"Desert additions leave every specified old probability unchanged");
@@ -694,20 +704,29 @@ int main(int argc, char** argv) {
         for(auto index:extraIndices) extraProgress.record(index,defs);
         extraProgress.equipped=illusionary; aura::saveProgress(save,extraProgress,defs);
         const auto extraRestored=aura::loadProgress(save,defs);
-        check(extraRestored.rolls==5 && extraRestored.discovered()==5 && extraRestored.equipped==illusionary &&
-            extraRestored.best==frutiger && extraRestored.counts==extraProgress.counts,
+        check(extraRestored.rolls==6 && extraRestored.discovered()==6 && extraRestored.equipped==illusionary &&
+            extraRestored.best==redJohn && extraRestored.counts==extraProgress.counts,
             "Promoted Extra discoveries can be recorded, equipped, saved, and restored independently of the current planet");
         auto oldPreviewCatalog=defs;
         for(auto index:promotedExtraIndices) {oldPreviewCatalog[index].previewOnly=true; oldPreviewCatalog[index].denominator=0;}
-        std::erase_if(oldPreviewCatalog,[](const auto& d){return d.id=="frutiger_aero";});
+        std::erase_if(oldPreviewCatalog,[](const auto& d){return d.id=="frutiger_aero" || d.id=="red_john";});
         aura::Progress oldPreviewProgress(oldPreviewCatalog.size());
         oldPreviewProgress.record(dune,oldPreviewCatalog); oldPreviewProgress.record(pharaoh,oldPreviewCatalog);
         oldPreviewProgress.record(singularity,oldPreviewCatalog); oldPreviewProgress.equipped=pharaoh; oldPreviewProgress.setRollCount(13579);
         aura::saveProgress(save,oldPreviewProgress,oldPreviewCatalog);
         const auto promotedSave=aura::loadProgress(save,defs);
         check(promotedSave.rolls==13579 && promotedSave.equipped==pharaoh && promotedSave.best==singularity &&
-            std::equal(oldPreviewProgress.counts.begin(),oldPreviewProgress.counts.end(),promotedSave.counts.begin()) && promotedSave.counts[frutiger]==0,
+            std::equal(oldPreviewProgress.counts.begin(),oldPreviewProgress.counts.end(),promotedSave.counts.begin()) && promotedSave.counts[frutiger]==0 && promotedSave.counts[redJohn]==0,
             "The v0.1.11 save preserves desert discoveries, equipment, and its edited counter when four previews become obtainable");
+        auto previousV017Catalog=defs;
+        std::erase_if(previousV017Catalog,[](const auto& d){return d.id=="red_john";});
+        aura::Progress beforeRedJohn(previousV017Catalog.size());
+        beforeRedJohn.record(frutiger,previousV017Catalog); beforeRedJohn.equipped=frutiger; beforeRedJohn.setRollCount(17000);
+        aura::saveProgress(save,beforeRedJohn,previousV017Catalog);
+        const auto withRedJohn=aura::loadProgress(save,defs);
+        check(withRedJohn.rolls==17000 && withRedJohn.equipped==frutiger && withRedJohn.best==frutiger &&
+            withRedJohn.counts[frutiger]==1 && withRedJohn.counts[redJohn]==0,
+            "Adding Red john preserves a v0.1.17 save and starts the new stable ID with no discovery");
         const auto reclining=aura::illusionaryPose(1.3f),recliningLater=aura::illusionaryPose(2.9f);
         constexpr float halfPi=1.57079632679f;
         check(reclining.fixed && reclining.lift>0 && std::abs(reclining.bodyRoll)<.2f &&
@@ -741,6 +760,7 @@ int main(int argc, char** argv) {
         presentation.preview=equinox; check(presentation.level(levels,defs)==0,"Equinox has no borrowed Aura Level");
         presentation.preview=breakthrough; check(presentation.level(levels,defs)==0,"BreakThrough has no borrowed Aura Level");
         presentation.preview=nanally; check(presentation.level(levels,defs)==0,"Nanally has no borrowed Aura Level");
+        presentation.preview=redJohn; check(presentation.level(levels,defs)==0,"Red john has no borrowed Aura Level");
         presentation.pixelationLevel.reset(); presentation.preview=pixelation;
         check(presentation.level(levels,defs)==0,"Restoring Pixelation's owned level returns to zero");
         auto futurePixelation=defs; futurePixelation[pixelation].previewOnly=false; futurePixelation[pixelation].denominator=2'000'000;
@@ -756,6 +776,20 @@ int main(int argc, char** argv) {
         const auto idle=aura::avatarPose(2.4f,0,0,false),walkA=aura::avatarPose(2.4f,.5f,1,false),walkB=aura::avatarPose(2.4f,1.5f,1,false);
         check(!idle.fixed && idle.legPitch[0]==0 && walkA.legPitch[0]*walkA.legPitch[1]<0 && walkA.legPitch!=walkB.legPitch,
             "Standing has no gait; walking alternates legs");
+        const auto seated=aura::redJohnPose(0),seatedLater=aura::redJohnPose(50);
+        check(seated.fixed && seated.seatedHipHeight>0 && seated.legPitch[0]>seated.legPitch[1] &&
+            seated.knee[0]<-1.f && seated.knee[1]<-1.f && seated.armPitch[0]>seated.armPitch[1] &&
+            seated.elbowPitch[0]>seated.elbowPitch[1],
+            "Red john sits with a raised knee, a folded leg, a resting arm, and a straighter supporting arm");
+        check(seatedLater.fixed && seated.lift==seatedLater.lift && seated.seatedHipHeight==seatedLater.seatedHipHeight &&
+            seated.armPitch==seatedLater.armPitch && seated.armOut==seatedLater.armOut && seated.armYaw==seatedLater.armYaw &&
+            seated.elbowPitch==seatedLater.elbowPitch && seated.legPitch==seatedLater.legPitch &&
+            seated.legOut==seatedLater.legOut && seated.legYaw==seatedLater.legYaw && seated.knee==seatedLater.knee,
+            "Red john's fixed seated joints stay stable over time while the chest may breathe");
+        check(idle.seatedHipHeight<0 && walkA.seatedHipHeight<0 &&
+            idle.armYaw==std::array<float,2>{} && idle.legYaw==std::array<float,2>{} &&
+            walkA.armYaw==std::array<float,2>{} && walkA.legYaw==std::array<float,2>{},
+            "New seated height and yaw channels leave normal standing and walking unchanged");
         const auto pixelPose=aura::pixelationPose(2.4f);
         check(pixelPose.fixed && std::isfinite(pixelPose.lift) && std::isfinite(pixelPose.bodyRoll) &&
             pixelPose.armOut[0]==pixelPose.armOut[1] && pixelPose.armOut[0]>.5f && pixelPose.lift>.3f,
@@ -765,6 +799,10 @@ int main(int argc, char** argv) {
             equinoxPose.armOut[0]==equinoxPose.armOut[1] && equinoxPose.armOut[0]>.3f && equinoxPose.lift>.23f &&
             equinoxPose.legPitch[0]==0 && equinoxPose.legPitch[1]==0,"Equinox has a finite calm fixed floating pose");
         check(aura::EquinoxCutsceneDuration==10.9f,"Equinox cutscene has one shared duration");
+        check(aura::RedJohnCutsceneDuration>0 && aura::cutsceneDuration(aura::CutsceneKind::RedJohn)==aura::tuning::redjohn::CutsceneDuration &&
+            aura::cutsceneDuration(aura::CutsceneKind::Equinox)==aura::EquinoxCutsceneDuration &&
+            aura::cutsceneDuration(aura::CutsceneKind::Breakthrough)==aura::BreakthroughCutsceneDuration,
+            "Each cutscene uses its own shared duration instead of borrowing another aura's timeline");
         {
             namespace eq=aura::equinox;
             namespace style=aura::tuning::equinox;
@@ -1018,7 +1056,7 @@ int main(int argc, char** argv) {
             aura::tuning::cutscene::endingOpacity(29.999f,30.f,true)==1 &&
             aura::tuning::cutscene::endingOpacity(30.f,30.f,true)==0,
             "BreakThrough stays opaque until the exact ending and then hard-cuts without crossfade");
-        std::cout << "PASS: 22 auras, exact stage odds, six planets, limited drops, fixed poses, Equinox variable speed/beat/trails/glyphs, BreakThrough ink bounds, preview isolation, bass envelope, schema 9 multiplayer profile migration, save/restore, UTF-8 CSV\n";
+        std::cout << "PASS: 23 auras, exact stage odds, six planets, limited drops, fixed poses, Equinox variable speed/beat/trails/glyphs, BreakThrough ink bounds, Red john catalog/save/preview/cutscene isolation, bass envelope, schema 9 multiplayer profile migration, save/restore, UTF-8 CSV\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << '\n'; return 1; }
 }

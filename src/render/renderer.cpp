@@ -223,6 +223,7 @@ void Renderer::updateVrm(const Frame& f) {
     });
 }
 void Renderer::world(const Frame& f) {
+    redJohnInstances_=0;
     // 1. 前フレームの絵を消す → 2. ステージ → 3. アバター → 4. 表示オーラ → 5. GPUへ送る。
     // この関数は描画専用です。所持数・ロール回数を書き換えません。
     instances_.clear(); starInstances_.clear(); pixelationInstances_.clear(); equinoxOrbs_.clear(); equinoxTitles_.clear(); nanallyInstances_.clear(); illusionaryInk_.clear(); frutigerInstances_.clear(); holeVisible_=false;
@@ -511,13 +512,14 @@ void Renderer::world(const Frame& f) {
     const bool nanally=d.id=="nanally";
     const bool illusionary=d.id=="illusionary";
     const bool frutiger=d.id=="frutiger_aero"; frutigerVisible_=frutiger;
+    const bool redJohn=d.id=="red_john";
     const bool desertAura=d.id=="dune" || d.id=="mirage" || d.id=="pharaoh";
     pixelationVisible_=pixelated; equinoxVisible_=equinox; breakthroughVisible_=breakthrough;
     nanallyVisible_=nanally;
     illusionaryVisible_=illusionary; desertAuraVisible_=desertAura;
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
     const float actionTime=f.actionTime>=0?f.actionTime:pixelationActionTime(f.time,pixelated?level:0);
-    const auto pose=illusionary?illusionaryPose(f.time):pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
+    const auto pose=d.id=="red_john"?redJohnPose(f.time):illusionary?illusionaryPose(f.time):pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
     // Illusionary は胴の中心を支点に後傾し、腰・首・肘を別々に曲げます。
     // 他のポーズは追加角度が 0 なので、従来の位置と形を保ちます。
     const float posePivot=illusionary?1.45f:0.f;
@@ -525,12 +527,12 @@ void Renderer::world(const Frame& f) {
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift+posePivot,f.avatarZ);
     blockAvatar(f,useVrm);
     const float t=f.time*d.speed;
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && !frutiger && i<tuning::world::StandardRingSegments;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && !frutiger && !redJohn && i<tuning::world::StandardRingSegments;++i) {
         const float a=i*2*Pi/tuning::world::StandardRingSegments+t*tuning::world::StandardRingAngularSpeed;
         if(floating && level>0) particleStar(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.085f,d.color,a,f);
         else box(f.avatarX+std::cos(a)*d.radius,tuning::world::StandardRingHeight,f.avatarZ+std::sin(a)*d.radius,.11f,.045f,.11f,d.color,a,1);
     }
-    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && !frutiger && i<d.particles;++i) {
+    for (unsigned i=0;!pixelated && !equinox && !breakthrough && !nanally && !illusionary && !desertAura && !frutiger && !redJohn && i<d.particles;++i) {
         const float u=static_cast<float>(i)/std::max(1u,d.particles),a=u*2*Pi*3+t;
         const float y=.4f+std::fmod(u*3.3f+f.time*tuning::world::StandardParticleRiseSpeed,3.3f);
         const float r=d.radius*(.70f+.25f*std::sin(y*1.4f+u*5));
@@ -556,9 +558,10 @@ void Renderer::world(const Frame& f) {
     if(illusionary) buildIllusionary(f);
     if(desertAura) buildDesert(f);
     if(frutiger) buildFrutiger(f);
+    if(redJohn) {const auto before=instances_.size();buildRedJohn(f);redJohnInstances_=instances_.size()-before;}
     const float worldW=logicalW_-596,worldH=logicalH_-280;
     D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
-    const float focus=illusionary?tuning::game::CameraFocusIllusionary:breakthrough?tuning::game::CameraFocusBreakthrough:nanally?tuning::game::CameraFocusNanally:
+    const float focus=redJohn?2.3f:illusionary?tuning::game::CameraFocusIllusionary:breakthrough?tuning::game::CameraFocusBreakthrough:nanally?tuning::game::CameraFocusNanally:
         holeVisible_?tuning::game::CameraFocusBlackHole:equinox?tuning::game::CameraFocusEquinox:
         (floating || pixelated)?tuning::game::CameraFocusFloating:tuning::game::CameraFocusNormal;
     const float cameraDistance=f.cameraDistance+(illusionary?2.5f:0.f);
@@ -566,7 +569,7 @@ void Renderer::world(const Frame& f) {
         focus+std::sin(f.cameraPitch)*cameraDistance,f.avatarZ-std::cos(f.cameraYaw)*std::cos(f.cameraPitch)*cameraDistance,1);
     const auto view=XMMatrixLookAtLH(eye,XMVectorSet(f.avatarX,focus,f.avatarZ,1),XMVectorSet(0,1,0,0));
     const auto projection=XMMatrixPerspectiveFovLH(tuning::game::FieldOfView,worldW/worldH,.1f,160);
-    const float tagHeight=nanally?6.8f:breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
+    const float tagHeight=redJohn?3.05f:nanally?6.8f:breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
     XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,tagHeight,f.avatarZ,1),
         viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));
     nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=!breakthrough && !illusionary && tag.z>0 && tag.z<1;
@@ -630,13 +633,18 @@ void Renderer::draw(const Frame& frame,bool present) {
         pixelationVisible_=equinoxVisible_=breakthroughVisible_=holeVisible_=false;
         nanallyVisible_=false;
         illusionaryVisible_=desertAuraVisible_=frutigerVisible_=false;
+        redJohnInstances_=0;
         }
-        if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame); else drawCutscene(frame);
+        if(frame.cutsceneKind==CutsceneKind::Breakthrough) drawBreakthroughCutscene(frame);
+        else if(frame.cutsceneKind==CutsceneKind::RedJohn) drawRedJohnCutscene(frame);
+        else drawCutscene(frame);
     } else world(frame);
     context_->OMSetRenderTargets(0,nullptr,nullptr);
     d2d_->BeginDraw(); d2d_->SetTransform(D2D1::Matrix3x2F::Scale(scale_,scale_));
     if(frame.cutsceneTime>=0) {
-        if(frame.cutsceneKind==CutsceneKind::Breakthrough) breakthroughCutsceneUi(frame); else cutsceneUi(frame);
+        if(frame.cutsceneKind==CutsceneKind::Breakthrough) breakthroughCutsceneUi(frame);
+        else if(frame.cutsceneKind==CutsceneKind::RedJohn) redJohnCutsceneUi(frame);
+        else cutsceneUi(frame);
     } else ui(frame);
     checked(d2d_->EndDraw(), "Draw UI");
     context_->OMSetRenderTargets(1,&view,nullptr);

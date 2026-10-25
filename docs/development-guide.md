@@ -2,9 +2,11 @@
 
 まずは「数字を1つ変えて、画面が変わる」を体験しましょう。C++を全部理解してから始める必要はありません。
 
+v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専用CutSceneを追加しました。[Red johnのガイド](red-john-guide.md)には「顔の大きさを変える」「支える手を広げる」「タイトルを0.1秒遅くする」など、画面と数値を対応させた例があります。
+
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.17-alpha.1/StarRng-v0.1.17-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.18-alpha.1/StarRng-v0.1.18-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -80,6 +82,10 @@ inline constexpr float HeadWidth = 7.0f;
 | Frutiger Aeroの泡を減らす | 同上 → `BubbleCount` | `22` → `12`。周りを飛ぶ泡が減る。大きい目印の泡2つは残る |
 | Frutiger Aeroの蝶を大きくする | 同上 → `ButterflySize` | `.62f` → `.85f`。青い羽と模様が見やすくなる |
 | Frutiger Aeroの雲を遅くする | 同上 → `CloudSpeed` | `.025f` → `.0125f`。雲が半分の速さで流れる |
+| Red johnの顔を大きくする | `src/tuning/redjohn.hpp` → `FaceRadius` | `1.06f` → `1.25f`。壁の赤い顔だけが大きくなる |
+| Red johnのペンキを太くする | 同上 → `PaintWidth` | `.063f` → `.09f`。赤い輪・目・口の線が太くなる |
+| Red johnの題名を遅くする | 同上 → `TitleStart` | `5.45f` → `5.55f`。大きなRED JOHNの文字が0.1秒遅く出始める。着地の`TitleSettle`も合わせる |
+| Red johnの支える手を広げる | `src/tuning/avatar.hpp` → `redJohn::ArmOut` | `{-.12f,.28f}`の2個目を`.38f`。ベッドを支える腕が体から外へ広がる |
 | ロケットの乗降空間を高くする | `src/tuning/stages.hpp` → `RocketBoardingClearance` | `3.f` → `4.f`。機体だけ1単位上へ移動。発着地点は中央のまま |
 
 `HalfExtent`は全幅の**半分**です。32なら全幅64。処理を軽く保つため、範囲チェックでは12〜48を指定できるようにしています。
@@ -92,7 +98,9 @@ Equinoxは通常表示とCutSceneの音楽が異なるため、F1 → 音楽でB
 
 玉の強弱はBPMを変えずに`orbitSpeedVariation`で調整します。初期値`.22f`は平均速度の78〜122%で、止まったり逆走したりしません。許可範囲は0以上1未満です。尾と爆発位置も同じ動きを使うため、強弱を変更しても玉から離れません。床の`floorRotation`はラジアン/秒で、`1.10f`なら約5.7秒に1周です。粒子の回転もこの値へ連動します。
 
-Frutiger AeroはCollectionのExtraにあり、Extraステージ限定・基礎確率1 in 5,000,000です。v0.1.16のカタログは22種類で、Nanallyを除いた21種類を取得できます。草・空・雲・泡の反射・青い蝶を作る処理と詳しい変更例は[Frutiger Aeroのガイド](frutiger-aero.md)を参照してください。
+Frutiger AeroはCollectionのExtraにあり、Extraステージ限定・基礎確率1 in 5,000,000です。草・空・雲・泡の反射・青い蝶を作る処理と詳しい変更例は[Frutiger Aeroのガイド](frutiger-aero.md)を参照してください。
+
+v0.1.18のカタログは23種類で、Nanallyを除いた22種類を取得できます。追加したRed johnはExtraステージ限定・基礎確率1 in 6,000,000です。部屋の形は`src/render/redjohn.cpp`、座り方は共通のアニメーション、専用CutSceneは`src/render/redjohn_cutscene.cpp`で処理します。見た目と字幕の時刻は[Red johnのガイド](red-john-guide.md)へ。
 
 BreakThroughの`breakthrough.hpp`は**通常表示用**です。柱の浮遊幅や位置を変えても、別の処理で描くCutSceneの柱は変更されません。CutSceneの構造物は静止し、周回・後退・急接近・前進するカメラは`cutscene.hpp`で調整します。iv字幕中だけの白黒表示は`BreakthroughIvInkThreshold = .35f`が白と黒の境界です。[場面とカメラの調整表](stage-and-cutscene-guide.md#breakthroughの場面とカメラ)を参照してください。
 
@@ -153,7 +161,7 @@ auratest,My Test Aura,0,1.0,0.3,0.7,32,1.5,0.7,1
 
 通常抽選へ追加するときは、すべての確率の合計を考える必要があります。詳しい条件は [aura-format.md](aura-format.md) にあります。最初は上のプレビュー行から始めると、確率計算を触らず絵作りに集中できます。
 
-許可済みの7音源はソースZIPにも同梱しています。Equinoxの通常表示用の曲とCutScene用M4Aは別ファイルです。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
+許可済みの7音源と、Red john用のオリジナル導入音はソースZIPにも同梱しています。Red johnの音は`tools/generate_redjohn_audio.py`の数式から合成したもので、参考動画の音声は配布しません。Equinoxの通常表示用の曲とCutScene用M4Aは別ファイルです。VRMは自分のPCのファイルをF1から指定します。ソースZIPにはモデルや参考動画を含めていません。
 
 ## 7. 変わらない・ビルドできないとき
 

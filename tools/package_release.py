@@ -2,7 +2,7 @@
 """Create the three public ZIP files after the game and its tests have passed.
 
 例: python tools/package_release.py --windows-folder package --dest dist
-     --tag v0.1.17-alpha.1
+     --tag v0.1.18-alpha.1
 通常はGitに登録したファイルだけをソースZIPへ入れます。Gitのない作業用
 フォルダーでは --paths-file public-paths.json で明示した一覧を使えます。
 このスクリプト自体はビルド・通信・GitHubへの公開を行いません。
@@ -33,6 +33,7 @@ APPROVED_AUDIO = {
     "equinox_cutscene.m4a",
     "breakthrough_cutscene.m4a",
     "koraii_layers_cut.mpeg",
+    "red_john_intro.wav",  # tools/generate_redjohn_audio.pyで数式から合成したオリジナル導入音
 }
 AUDIO_SUFFIXES = {".mp3", ".mpeg", ".ogg", ".m4a", ".wav", ".flac", ".aac", ".opus", ".wma", ".aif", ".aiff"}
 PRIVATE_NAMES = {
@@ -50,6 +51,7 @@ REFERENCE_NAMES = {
     "chocolat", "newpixelationcollection", "equinoxnewcollection",
     "nanally-ultimate", "breakthroughnewcollection", "illusionaryingamegif",
     "codex-clipboard-",
+    "the-mentalist",
 }
 TEXT_SUFFIXES = {".py", ".cpp", ".hpp", ".h", ".c", ".md", ".txt", ".json", ".yml", ".yaml", ".cmd", ".service", ".example", ".csv", ".manifest"}
 SERVER_FILES = (
@@ -162,26 +164,33 @@ def make_zip(destination: Path, top: str, entries: list[tuple[str, Path]]) -> Pa
 def release_notes(tag: str) -> str:
     return f"""Star's RNG Alpha 0.1 / {tag}
 
-## マルチプレイの操作・プレビュー修正
+## 新オーラ Red john
 
-- 参加に成功するとプロフィール画面を自動で閉じ、移動・右ドラッグ・Rollへ戻れるようにしました。
-- 「ゲームに戻る」・Escでプロフィールだけを閉じられます。サーバーへの接続は続きます。
-- F1でプロフィールからデバッグへ切り替えられ、未所持オーラやAura Levelもプレビューできます。
-- 相手にも現在表示しているオーラとLevelを共有します。プレビューによって所持数・実装備・Roll Historyは増えません。
-- 接続済みのプロフィールを開き直した場合や名前・写真を変更した場合は、編集画面を保ちます。接続失敗時もエラーを確認できます。
+- 淡い壁の部屋、低いベッド、赤い笑顔をコードで描くExtraオーラを追加しました。基礎確率は1 in 6,000,000、Extraステージだけで入手できます。
+- アバターは片膝を立て、片腕を膝へ乗せ、反対の手でベッドを支えます。ブロックとVRMで姿勢を共有し、移動中も固定ポーズを保ちます。写真の人物の顔や服装は取り込みません。
+- 約10.9秒の専用CutSceneを追加しました。参考動画のテレビ番組風の導入を手がかりに、黒い導入、青・白・黄色の帯、目、アバターの横顔、大きなRED JOHNの文字をGPUとDirect2Dで描きます。参考動画を同梱・再生する方式ではありません。
+- F1のオーラ一覧と「カットシーンのみ再生」から未所持でも確認できます。最後まで再生するとRed johnを一時表示し、Esc・停止では元の表示へ戻ります。プレビューは所持数・実装備・Roll Historyを変えず、AutoRollを停止します。
+- 家具・顔の大きさ、姿勢、演出の各時刻を自分で変えられる日本語ガイドを追加しました。初期のCommon 1/2・Uncommon 1/4と、既存セーブの所持品・装備を引き継ぎます。
+
+## 音と素材
+
+Red johnの配布音声はtools/generate_redjohn_audio.pyで数式から合成したオリジナルの導入曲です。
+参考動画の音声・映像、参考写真、私有VRMは配布しません。許可済みの従来7音源は引き続き同梱しています。
 
 ## 検証
 
 公開ジョブはWindowsのビルド・CTest・DirectX WARP描画試験と、Linuxのコア・サーバー試験が成功してから実行します。
-操作の回帰試験では、接続成功後の移動と視点操作、Esc・戻る・F1、表示オーラとLevel、所持品・履歴の分離を確認します。
+コア試験では23種の確率・ステージ制限、旧セーブの読み込み、座りポーズと通常歩行の分離、プレビュー非登録を確認します。
+描画試験ではRed johnの部屋、ブロック・VRMの姿勢、視点を回したときの壁、CutSceneの時刻・終了・中止・画面サイズ変更を確認します。
 ZIP作成時には私有VRM・参考動画・個人セーブ・写真・秘密鍵の混入とZIPのCRCを検査し、SHA256SUMS.txtを添付します。
 
 ## 互換性・使い方
 
-v0.1.16の専用サーバーと互換性があります（protocol=1）。サーバーの更新や契約変更は不要です。
+既存の専用サーバーと互換性があります（protocol=1）。サーバーの更新や契約変更は不要です。
 ゲームを展開してStarRng.exeを起動し、Multiplayerで普段のHTTPS URLへ接続してください。
 ロール回数・所持品は各PCに保存します。自分のVRMや個人セーブは配布ZIPへ含めません。
 改造する場合はsource ZIP、専用サーバーを新しく設置する場合だけserver ZIPを使ってください。
+Red johnの改造手順はdocs/red-john-guide.md、設定値の一覧はsrc/tuning/README.mdにあります。
 """
 
 
@@ -189,7 +198,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--windows-folder", type=Path, required=True, help="CMake --installで作ったWindows配布フォルダー")
     parser.add_argument("--dest", type=Path, default=Path("dist"), help="ZIPとSHA256SUMS.txtの保存先（初期値: dist）")
-    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.17-alpha.1")
+    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.18-alpha.1")
     parser.add_argument("--paths-file", type=Path, help="Gitがない手元の作業用: 公開パスのJSON配列または1行1パスの一覧")
     args = parser.parse_args()
     version = version_from_cmake()

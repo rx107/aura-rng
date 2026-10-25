@@ -22,6 +22,7 @@
 | Illusionaryの床・白い光・文字 | [illusionary.hpp](illusionary.hpp) | `OrbitLightRadius` を `1.92f → 2.2f`。白い光が体から離れた場所を回る。 |
 | 砂漠テーマ3種類 | [desert.hpp](desert.hpp) | `PharaohWingWidth` を `3.45f → 4.f`。長短二段の翼が横へ広がる。Dune / Mirageにも個別の半径・速度・粒子数。 |
 | Frutiger Aeroの草原・空・泡・青い蝶 | [frutiger.hpp](frutiger.hpp) | `MeadowRadius` を `4.7f → 5.5f`。丸い草原と小川が広がる。[調整の手順](../../docs/frutiger-aero.md)。 |
+| Red johnの部屋・ベッド・赤い顔・CutScene | [redjohn.hpp](redjohn.hpp) | `FaceRadius`を`1.06f → 1.25f`で壁の赤い顔が大きくなる。座り方は[avatar.hpp](avatar.hpp)で変更。[最初の手順](../../docs/red-john-guide.md)。 |
 
 オーラ名、確率、標準の輪・粒子の色や数は [data/auras.csv](../../data/auras.csv) を使います。特殊なオーラの形は同名の専用 `.hpp` で調整します。安全な試作用オーラを CSV に追加する例も、[改造ガイド](../../docs/development-guide.md#6-csv-で自作オーラを-1-個追加する) にあります。
 

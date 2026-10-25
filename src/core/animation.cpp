@@ -53,6 +53,21 @@ AvatarPose illusionaryPose(float time) {
     p.legPitch=pose::LegPitch; p.legOut=pose::LegOut; p.knee=pose::Knee;
     return p;
 }
+AvatarPose redJohnPose(float time) {
+    namespace pose=tuning::avatar::redJohn;
+    AvatarPose p; p.fixed=true;
+    // ベッドに座り、片膝に腕を乗せ、反対の手で体を支える姿勢。
+    // walkPhase / movement を受け取らないため、移動しても歩行に切り替わりません。
+    p.lift=pose::Lift;
+    p.seatedHipHeight=pose::HipHeight;
+    p.bodyRoll=pose::BodyRoll;
+    p.torsoPitch=pose::TorsoPitch+pose::BreathingAmplitude*std::sin(time*pose::BreathingFrequency);
+    p.headPitch=pose::HeadPitch;
+    p.armOut=pose::ArmOut; p.armPitch=pose::ArmPitch; p.armYaw=pose::ArmYaw;
+    p.elbowPitch=pose::ElbowPitch;
+    p.legPitch=pose::LegPitch; p.legOut=pose::LegOut; p.legYaw=pose::LegYaw; p.knee=pose::Knee;
+    return p;
+}
 float pixelationMotionSpeed(unsigned level) {
     namespace effect=tuning::pixelation;
     return level>=3?effect::FinalMotionSpeed:(level>=1?effect::BoostedSpeed:effect::BaseSpeed);

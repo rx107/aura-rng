@@ -133,16 +133,16 @@ std::unique_ptr<VrmAvatar> VrmAvatar::load(ID3D11Device* device,const std::files
     if(!data->scene) throw std::runtime_error("VRM has no default scene");
     for(std::size_t i=0;i<data->scene->nodes_count;++i) mark(data->scene->nodes[i],0);
     for(std::size_t i=0;i<data->nodes_count;++i) world(&data->nodes[i],0);
-    // 0〜5 は従来の公開番号。追加分は 6/7=肘、8=頭、9=腰から上です。
+    // 0〜5 は従来の公開番号。追加分は 6/7=肘、8=頭、9=腰から上、10=座る高さの基準の腰です。
     // VRM 0.x / 1.0 の正式な humanoid 定義から探し、同名の服ボーンにも適用します。
     const char* roleNames[]={"leftUpperArm","rightUpperArm","leftUpperLeg","rightUpperLeg","leftLowerLeg","rightLowerLeg",
-        "leftLowerArm","rightLowerArm","head","spine"};
+        "leftLowerArm","rightLowerArm","head","spine","hips"};
     std::unordered_map<std::string,int> roles; std::vector<int> directRoles(data->nodes_count,-1);
     if(extension.contains("humanoid") && extension["humanoid"].contains("humanBones")) {
         const auto& humanBones=extension["humanoid"]["humanBones"];
         auto addRole=[&](const std::string& name,int index) {
             if(index<0 || static_cast<std::size_t>(index)>=data->nodes_count) return;
-            for(int role=0;role<10;++role) if(name==roleNames[role]) {
+            for(int role=0;role<11;++role) if(name==roleNames[role]) {
                 directRoles[index]=role;
                 if(data->nodes[index].name) roles[boneKey(data->nodes[index].name)]=role;
             }
@@ -318,8 +318,10 @@ void VrmAvatar::animate(const AvatarPose& pose) {
         auto local=XMLoadFloat4x4(&node.local);
         if(node.role>=0) {
             float pitch=0,roll=0,yaw=0; const int side=(legacy_?-node.side:node.side)<0?0:1;
-            if(node.role<2) {pitch=pose.armPitch[side]*pitchSign; roll=-node.side*(XM_PIDIV2-pose.armOut[side]);}
-            else if(node.role<4) {pitch=pose.legPitch[side]*pitchSign; roll=node.side*pose.legOut[side];}
+            // VRM 0.x は X、1.0 は Z を反転して正面を揃えるので、水平回転の符号は共に反転します。
+            // 既存ポーズの Yaw は 0 のため形は変わらず、Red john の座った腕・脚だけを横へ向けます。
+            if(node.role<2) {pitch=pose.armPitch[side]*pitchSign; roll=-node.side*(XM_PIDIV2-pose.armOut[side]); yaw=-pose.armYaw[side];}
+            else if(node.role<4) {pitch=pose.legPitch[side]*pitchSign; roll=node.side*pose.legOut[side]; yaw=-pose.legYaw[side];}
             else if(node.role<6) pitch=pose.knee[side]*pitchSign;
             // VRM の初期姿勢は T ポーズなので、前腕は X 方向へ伸びています。
             // この段階の Y 軸で肘を曲げ、その後で親の肩の回転を継承します。
@@ -347,7 +349,18 @@ void VrmAvatar::draw(ID3D11DeviceContext* c,FXMMATRIX vp,CXMMATRIX model,const A
     c->VSSetShader(vs_.Get(),nullptr,0); c->PSSetShader(ps_.Get(),nullptr,0); c->RSSetState(raster_.Get());
     ID3D11Buffer* cb=constants_.Get(); c->VSSetConstantBuffers(0,1,&cb); c->PSSetConstantBuffers(0,1,&cb);
     ID3D11SamplerState* sampler=sampler_.Get(); c->PSSetSamplers(0,1,&sampler);
-    Constants constants{}; XMStoreFloat4x4(&constants.vp,vp); XMStoreFloat4x4(&constants.model,XMLoadFloat4x4(&normalization_)*model);
+    Constants constants{}; XMStoreFloat4x4(&constants.vp,vp);
+    auto normalized=XMLoadFloat4x4(&normalization_);
+    if(pose.seatedHipHeight>=0) {
+        // 立った全高を揃えても、モデルごとに腰の位置は違います。
+        // 座るときだけ実際の hips の位置から補正し、お尻がマットから浮くのを防ぎます。
+        const auto hip=std::find_if(nodes_.begin(),nodes_.end(),[](const auto& node){return node.role==10;});
+        if(hip!=nodes_.end()) {
+            const auto anchor=XMVector3TransformCoord(XMVectorSet(hip->animated._41,hip->animated._42,hip->animated._43,1),normalized);
+            normalized=normalized*XMMatrixTranslation(0,pose.seatedHipHeight-XMVectorGetY(anchor),0);
+        }
+    }
+    XMStoreFloat4x4(&constants.model,normalized*model);
     for(const auto& mesh:meshes_) {
         constants.color=mesh.color; constants.options={mesh.cutoff,mesh.blend?1.f:0.f,0,0};
         if(mesh.skin<0) constants.bones[0]=nodes_[mesh.node].animated;

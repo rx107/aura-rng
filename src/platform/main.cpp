@@ -246,12 +246,14 @@ private:
         if(renderer_->debugOpen()) renderer_->toggleDebug();
         cutsceneKind_=kind;
         for(std::size_t i=0;i<roller_.catalog().size();++i)
-            if(roller_.catalog()[i].id==(kind==aura::CutsceneKind::Breakthrough?"breakthrough":"equinox"))
+            if(roller_.catalog()[i].id==(kind==aura::CutsceneKind::RedJohn?"red_john":kind==aura::CutsceneKind::Breakthrough?"breakthrough":"equinox"))
                 presentation_.showPreview(i,roller_.catalog().size(),auto_);
-        cutsceneAudioPath_=downloads_.empty()?std::filesystem::path{}:downloads_/(kind==aura::CutsceneKind::Breakthrough?L"BreakthroughCutsceneV2.mp4.mp4":L"EquinoxReworkedCutscene.mp4.mp4");
+        cutsceneAudioPath_=downloads_.empty()?std::filesystem::path{}:downloads_/(kind==aura::CutsceneKind::RedJohn?L"The-Mentalist-SnapYT.App.mp4":kind==aura::CutsceneKind::Breakthrough?L"BreakthroughCutsceneV2.mp4.mp4":L"EquinoxReworkedCutscene.mp4.mp4");
         // 配布版は動画ではなく、演出の範囲だけ切り出した音声を読みます。
         // 同梱音声は既にトリミング済みなので、開始位置は0秒です。
-        const auto bundled=root_/L"data"/L"audio"/(kind==aura::CutsceneKind::Breakthrough?L"Breakthrough_Cutscene.m4a":L"Equinox_Cutscene.m4a");
+        // Red john の配布音声はコードから生成したオリジナルの短い曲です。
+        // 参考動画はローカル素材の候補としてのみ扱い、配布へ自動コピーしません。
+        const auto bundled=root_/L"data"/L"audio"/(kind==aura::CutsceneKind::RedJohn?L"Red_John_Intro.wav":kind==aura::CutsceneKind::Breakthrough?L"Breakthrough_Cutscene.m4a":L"Equinox_Cutscene.m4a");
         std::error_code bundleError;
         cutsceneAudioStart_=kind==aura::CutsceneKind::Breakthrough?aura::BreakthroughAudioStart:0.f;
         if(std::filesystem::is_regular_file(bundled,bundleError)) {cutsceneAudioPath_=bundled; cutsceneAudioStart_=0;}
@@ -289,6 +291,7 @@ private:
         persist();
         if(roller_.catalog()[result].id=="equinox") startCutscene();
         if(roller_.catalog()[result].id=="breakthrough") startCutscene(aura::CutsceneKind::Breakthrough);
+        if(roller_.catalog()[result].id=="red_john") startCutscene(aura::CutsceneKind::RedJohn);
     }
     void action(aura::Hit hit) {
         // 画面のボタン・キー入力をゲームの操作へ変換する場所。
@@ -434,6 +437,7 @@ private:
         }
         if(commands.playEquinoxCutscene) startCutscene();
         if(commands.playBreakthroughCutscene) startCutscene(aura::CutsceneKind::Breakthrough);
+        if(commands.playRedJohnCutscene) startCutscene(aura::CutsceneKind::RedJohn);
     }
     void update(float dt) {
         // 毎フレームの更新。例: dt=.016なら、およそ1/60秒ぶん進めます。
@@ -597,7 +601,7 @@ private:
         // 4フォルダーを実際にクリックし、表示番号とクリック判定の一致を確認。
         const auto categoryRolls=progress_.rolls,categoryLogs=log_.size();
         const auto categoryCounts=progress_.counts;
-        constexpr std::array<std::size_t,4> categorySizes={13,3,5,1};
+        constexpr std::array<std::size_t,4> categorySizes={13,3,6,1};
         for(unsigned category=0;category<4;++category) {
             const float scale=renderer_->scale();
             SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(static_cast<int>((82+(category%2)*100)*scale),
@@ -1255,6 +1259,57 @@ private:
             do {render(false); Sleep(10);} while(!renderer_->vrmReady() && Clock::now()<deadline && renderer_->vrmLoading());
             if(!renderer_->vrmReady()) throw std::runtime_error("VRM reload failed");
         }
+        // 新オーラの確認でも、本人のセーブ・写真・参照動画を公開物へコピーしません。
+        const auto redJohn=findAura("red_john");
+        const auto redCounts=progress_.counts;const auto redRolls=progress_.rolls,redLogs=log_.size();
+        const auto redEquipment=progress_.equipped;
+        const auto redOriginalPresentation=presentation_;const float redX=x_,redZ=z_,redYaw=yaw_,redPitch=pitch_,redFacing=facing_,redDistance=distance_;
+        aura::DebugActions redPreview;redPreview.preview=redJohn;redPreview.avatar=aura::Avatar::Block;
+        auto_=true;applyDebugActions(redPreview);x_=8;z_=-2;facing_=0;distance_=10;pitch_=.24f;yaw_=.18f;time_=2;
+        movement_=0;walk_=0;render(false);captureExtra(L"-redjohn-front");
+        const auto redJohnInstances=renderer_->redJohnCount();
+        if(auto_ || redJohnInstances<150 || redJohnInstances>440 || renderer_->pixelationCount() || renderer_->frutigerCount())
+            throw std::runtime_error("Red john room preview or batch bounds failed");
+        for(float angle:{1.5707963f,3.1415926f,4.712389f}) {
+            yaw_=angle;movement_=1;walk_+=.7f;render(false);
+            if(!renderer_->redJohnCount())throw std::runtime_error("Red john orbit cutaway lost the room");
+            const auto suffix=L"-redjohn-angle-"+std::to_wstring(static_cast<int>(angle*100));captureExtra(suffix.c_str());
+        }
+        yaw_=.18f;movement_=0;walk_=0;
+        if(!opts_.vrm.empty() && renderer_->vrmReady()) {
+            aura::DebugActions redVrm;redVrm.avatar=aura::Avatar::Vrm;applyDebugActions(redVrm);
+            render(false);captureExtra(L"-redjohn-vrm");const auto knee=renderer_->vrmBone(4);
+            movement_=1;walk_=2;render(false);const auto movedKnee=renderer_->vrmBone(4);
+            if(std::abs(knee.x-movedKnee.x)+std::abs(knee.y-movedKnee.y)+std::abs(knee.z-movedKnee.z)>.00001f)
+                throw std::runtime_error("Moving changed Red john VRM seated pose");
+            redVrm.avatar=aura::Avatar::Block;applyDebugActions(redVrm);
+        }
+        aura::DebugActions redPlay;redPlay.playRedJohnCutscene=true;auto_=true;keys_['W']=true;applyDebugActions(redPlay);
+        if(!cutsceneActive() || cutsceneKind_!=aura::CutsceneKind::RedJohn || auto_ || keys_['W'])
+            throw std::runtime_error("Red john CutScene did not suspend controls");
+        for(float second:{0.f,2.3f,3.2f,4.5f,5.65f,6.5f,8.4f,9.4f,10.5f}) {
+            cutsceneTime_=second;render(false);
+            const auto suffix=L"-redjohn-cutscene-"+std::to_wstring(static_cast<int>(second*100));captureExtra(suffix.c_str());
+            if(second<10.1f && renderer_->redJohnCount())throw std::runtime_error("Red john room leaked through an opaque CutScene");
+        }
+        update(.01f);
+        if(cutsceneAudioAvailable_ && (!cutsceneMusic_.playing() || !cutsceneMusic_.decodedBytes()))
+            throw std::runtime_error("Red john original intro audio failed to decode");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700));cutsceneTime_=6.5f;render(false);captureExtra(L"-redjohn-cutscene-small");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900));
+        cutsceneTime_=aura::RedJohnCutsceneDuration-.01f;update(.02f);render(false);
+        if(cutsceneActive() || cutsceneMusic_.playing() || presentation_.shown(progress_)!=redJohn || !renderer_->redJohnCount())
+            throw std::runtime_error("Red john natural end did not reveal room");
+        redPreview.preview=0;applyDebugActions(redPreview);applyDebugActions(redPlay);
+        SendMessageW(window_,WM_KEYDOWN,VK_ESCAPE,0);update(0);render(false);
+        if(cutsceneActive() || presentation_.shown(progress_)!=0 || renderer_->redJohnCount())
+            throw std::runtime_error("Red john cancel did not restore previous aura");
+        applyDebugActions(redPlay);aura::DebugActions redStop;redStop.stopCutscene=true;applyDebugActions(redStop);
+        if(cutsceneActive() || cutsceneMusic_.playing() || presentation_.shown(progress_)!=0)
+            throw std::runtime_error("Red john debug stop did not restore previous aura");
+        if(progress_.counts!=redCounts || progress_.rolls!=redRolls || log_.size()!=redLogs || progress_.equipped!=redEquipment)
+            throw std::runtime_error("Red john preview or CutScene changed inventory / history");
+        presentation_=redOriginalPresentation;x_=redX;z_=redZ;yaw_=redYaw;pitch_=redPitch;facing_=redFacing;distance_=redDistance;movement_=0;walk_=0;
         if(progress_.rolls!=beforeSettingsRolls || log_.size()!=beforeSettingsLogs) throw std::runtime_error("World/avatar/audio settings modified roll history");
         const auto profileCounts=progress_.counts; const auto profileRolls=progress_.rolls;
         const auto profileBest=progress_.best,profileLogs=log_.size();
@@ -1373,20 +1428,20 @@ private:
         render(false);render(false);
         if(renderer_->remotePlayerCount()!=0 || worldInputBlocked())throw std::runtime_error("Offline players or profile input block remained");
         frutigerStage.biome=frutigerOriginalStage;applyDebugActions(frutigerStage);x_=frutigerOriginalX;z_=frutigerOriginalZ;
-        // 実際のApp::rollを高Luckで64回通し、Extraの5種の取得・演出発火を確認。
+        // 実際のApp::rollを高Luckで64回通し、Extraの6種の取得・演出発火を確認。
         const auto beforeExtra=progress_.rolls; const auto extraEquipment=progress_.equipped;
         const auto originalStage=presentation_.settings.biome; const auto originalLuck=roller_.luck();
         aura::DebugActions extraWorld; extraWorld.biome=aura::Biome::Extra; extraWorld.luck=1'000'000; applyDebugActions(extraWorld);
-        std::array<bool,5> obtained{};
+        std::array<bool,6> obtained{};
         for(unsigned i=0;i<64;++i) {
             if(cutsceneActive()) stopCutscene();
             cooldown_=0; roll();
             const auto result=log_.back().aura;
             if(!aura::availableInBiome(roller_.catalog()[result],aura::Biome::Extra)) throw std::runtime_error("Offstage aura acquired in Extra");
-            const std::array<std::size_t,5> ids={pixelation,equinox,breakthrough,illusionary,frutiger};
+            const std::array<std::size_t,6> ids={pixelation,equinox,breakthrough,illusionary,frutiger,redJohn};
             for(std::size_t a=0;a<ids.size();++a) if(result==ids[a]) obtained[a]=true;
-            if((result==equinox || result==breakthrough) && (!cutsceneActive() ||
-                cutsceneKind_!=(result==equinox?aura::CutsceneKind::Equinox:aura::CutsceneKind::Breakthrough)))
+            if((result==equinox || result==breakthrough || result==redJohn) && (!cutsceneActive() ||
+                cutsceneKind_!=(result==redJohn?aura::CutsceneKind::RedJohn:result==equinox?aura::CutsceneKind::Equinox:aura::CutsceneKind::Breakthrough)))
                 throw std::runtime_error("Acquired Extra aura did not trigger its CutScene");
         }
         if(cutsceneActive()) stopCutscene();
@@ -1406,7 +1461,7 @@ private:
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: "
                <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
             out<<"Planets: PASS / garden, desert, ocean, forest, volcano, extra, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
-            out<<"Collection: PASS / Normal13 Desert3 Extra5 Administrator1, folder button and row click mapping, navigation preserves progress\nExtra acquisition: PASS / 64 actual rolls, all five exclusive auras acquired, CutScene triggers, equipment preserved\n";
+            out<<"Collection: PASS / Normal13 Desert3 Extra6 Administrator1, folder button and row click mapping, navigation preserves progress\nExtra acquisition: PASS / 64 actual rolls, all six exclusive auras acquired, CutScene triggers, equipment preserved\n";
             out<<"Frutiger Aero: PASS / grass, sky/clouds, glossy bubbles, animated blue butterflies, <=1000 boards, preview isolation\n"
                <<"Multiplayer render: PASS / two same-planet block avatars with detailed auras, other-planet filtering, profile window input suppression; actual HTTP covered by separate client/server tests\n"
                <<"Multiplayer input/preview: PASS / success auto-return including skipped Connecting, movement, right-drag, reopen, Esc/Back preserves connection, F1, displayed aura/level payload, failure remains visible, inventory/history isolation\n";
@@ -1438,6 +1493,7 @@ private:
             if(opts_.silent) out<<"Audio: disabled by --silent; device playback verified separately on the development PC\n";
             else out<<"Equinox normal BGM: PASS / "<<equinoxAudioBytes<<" PCM bytes, supplied Koraii track, independent BPM/offset settings\n"
                     <<"Illusionary Ogg audio: PASS / "<<illusionaryAudioBytes<<" decoded PCM bytes, loop and stop\n";
+            out<<"Red john: PASS / "<<redJohnInstances<<" room instances, seated block/VRM pose, orbit cutaway, Extra acquisition, intro timing, original audio when available, resize, natural reveal, cancel/stop and preview isolation\n";
             out<<"Nanally: PASS / preview-only, AutoRoll stop, clean switching, resize, movement and camera angles, cutscene restore, inventory/history unchanged\n"
                <<"Nanally instances: "<<nanallyInstances<<"\nMean Nanally frame submission time: "<<meanNanallyMs
                <<" ms/frame (60 offscreen frames, no vsync)\n";

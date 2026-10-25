@@ -3,6 +3,7 @@
 #include "core/stages.hpp"
 #include "tuning/cutscene.hpp"
 #include "tuning/game.hpp"
+#include "tuning/redjohn.hpp"
 #include "tuning/world.hpp"
 #include <array>
 #include <optional>
@@ -10,7 +11,7 @@
 namespace aura {
 enum class Language { English, Japanese };
 enum class Avatar { Block, Vrm };
-enum class CutsceneKind { Equinox, Breakthrough };
+enum class CutsceneKind { Equinox, Breakthrough, RedJohn };
 inline const char* tr(Language language, const char* english, const char* japanese) {
     return language == Language::Japanese ? japanese : english;
 }
@@ -62,7 +63,7 @@ struct DebugActions {
     std::optional<unsigned> auraLevel;
     bool pixelationActualLevel{};
     std::optional<unsigned> pixelationLevel;
-    bool playEquinoxCutscene{},playBreakthroughCutscene{},stopCutscene{};
+    bool playEquinoxCutscene{},playBreakthroughCutscene{},playRedJohnCutscene{},stopCutscene{};
     std::optional<std::size_t> preview;
     std::optional<Language> language;
     std::optional<Color> shirt;
@@ -87,8 +88,13 @@ inline constexpr float RollCooldown = tuning::game::RollCooldownSeconds;
 inline constexpr float EquinoxCutsceneDuration = 10.9f;
 inline constexpr float BreakthroughCutsceneDuration = tuning::cutscene::BreakthroughDuration;
 inline constexpr float BreakthroughAudioStart = tuning::cutscene::BreakthroughAudioStart;
+inline constexpr float RedJohnCutsceneDuration = tuning::redjohn::CutsceneDuration;
 inline constexpr float cutsceneDuration(CutsceneKind kind) {
-    return kind==CutsceneKind::Breakthrough?BreakthroughCutsceneDuration:EquinoxCutsceneDuration;
+    switch(kind) {
+    case CutsceneKind::Breakthrough: return BreakthroughCutsceneDuration;
+    case CutsceneKind::RedJohn: return RedJohnCutsceneDuration;
+    default: return EquinoxCutsceneDuration;
+    }
 }
 inline constexpr float StageHalfExtent = tuning::world::HalfExtent;
 inline constexpr float StageWalkLimit = StageHalfExtent-tuning::world::EdgeWalkPadding;

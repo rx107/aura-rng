@@ -50,6 +50,7 @@ void Renderer::createEffects() {
     createBreakthrough();
     createNanally();
     createFrutiger();
+    createRedJohnCutscene();
 }
 void Renderer::particleStar(float x,float y,float z,float size,Color color,float rotation,const Frame& f) {
     if(starInstances_.size()>=512 || size<=.001f) return;

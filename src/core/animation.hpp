@@ -13,6 +13,11 @@ struct AvatarPose {
     // 0 のままなら元の姿勢を保ち、Illusionary のような反り返る姿勢だけで使います。
     float torsoPitch{},headPitch{};
     std::array<float,2> armPitch{},armOut{},legPitch{},legOut{},knee{},elbowPitch{};
+    // Yaw は水平に向きを変える角度。0 なら従来通りで、座るときの腕・脚を内側へ折るために使います。
+    std::array<float,2> armYaw{},legYaw{};
+    // VRM はモデルごとに脚の長さが違うため、座る姿勢だけ腰の高さをブロックと揃えます。
+    // -1 なら補正しません。0 以上なら lift を足す前の腰の目標高さです。
+    float seatedHipHeight{-1.f};
 };
 // 姿勢を計算するだけの処理。描画は renderer.cpp / vrm.cpp が担当します。
 // ブロックと VRM で共通。見た目を調整する入口は tuning/avatar.hpp です。
@@ -20,6 +25,7 @@ AvatarPose avatarPose(float time,float walkPhase,float movement,bool singularity
 AvatarPose pixelationPose(float time);
 AvatarPose equinoxPose(float time);
 AvatarPose illusionaryPose(float time);
+AvatarPose redJohnPose(float time);
 float pixelationMotionSpeed(unsigned level);
 float pixelationMotionTime(float elapsed,unsigned level);
 float pixelationActionSpeed(unsigned level);

@@ -31,7 +31,7 @@ std::string displayName(const Definition& d, Language language) {
         {"astral", "星界"}, {"eventide", "宵闇"}, {"zenith", "天頂"}, {"pixelation", "ピクセレーション"},
         {"equinox", "エキノックス"}, {"breakthrough", "ブレイクスルー"}, {"nanally", "ナナリー"}, {"singularity", "特異点"},
         {"illusionary","イリュージョナリー"}, {"dune","砂丘"}, {"mirage","蜃気楼"}, {"pharaoh","ファラオ"},
-        {"frutiger_aero","フルティガー・エアロ"}};
+        {"frutiger_aero","フルティガー・エアロ"}, {"red_john","レッド・ジョン"}};
     for (const auto& [id, name] : names) if (d.id == id) return name;
     return d.name;
 }

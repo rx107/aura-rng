@@ -1,4 +1,4 @@
-# Star's RNG — Alpha 0.1 / v0.1.17
+# Star's RNG — Alpha 0.1 / v0.1.18
 
 C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームです。
 
@@ -6,8 +6,9 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 
 ## 今回の変更
 
-- **マルチプレイ接続後に操作できなくなる問題を修正。** 接続成功時はプロフィールを閉じてゲームへ戻ります。「ゲームに戻る」またはEscでも閉じられ、接続は続きます。[使い方](docs/multiplayer.md)
-- **接続中のF1プレビューを修正。** F1でプロフィールからデバッグ画面へ切り替え、未所持オーラやLevelを表示できます。相手にも現在表示中のオーラとLevelを共有し、実際の装備・所持数・履歴は変更しません。
+- **新オーラRed johnを追加。** 淡い壁の部屋、低いベッド、赤い笑顔と、片膝を立てて座るアバターです。Extraステージ限定、基礎確率は1 in 6,000,000。ブロックとVRMで座りポーズを共有します。[見た目とポーズの調整](docs/red-john-guide.md)
+- **約10.9秒の専用CutSceneを追加。** 黒い導入から青・白・黄色の帯、目の接写、横顔、大きなRED JOHNの文字へ進む演出です。映像はコードで描き、音は数式で合成したオリジナル導入曲を同梱しています。
+- **F1から未所持でも確認可能。** オーラ一覧のRed johnと「カットシーンのみ再生」で試せます。最後まで再生するとRed johnを一時表示し、Esc・停止では元の表示へ戻ります。プレビューは所持数・実装備・Roll Historyを変えません。
 
 ## 遊び方と入手場所
 
@@ -19,14 +20,14 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 | --- | --- | --- |
 | Normal | 13 | Common〜Singularity。すべてのステージ |
 | Desert | 3 | Dune / Mirage / Pharaoh。砂漠だけ |
-| Extra | 5 | Pixelation / Equinox / BreakThrough / Illusionary / Frutiger Aero。Extraだけ |
+| Extra | 6 | Pixelation / Equinox / BreakThrough / Illusionary / Frutiger Aero / Red john。Extraだけ |
 | Administrator | 1 | Nanally。F1のプレビュー専用 |
 
-Commonは正確に1/2、Uncommonは1/4。Duneは1/50、Mirageは1/5,000、Pharaohは1/250,000。Extraの5種の基礎確率は順に1/2,000,000、1/2,500,000、1/3,000,000、1/4,000,000、1/5,000,000です。これらは `data/auras.csv` で変更できます。Commonなどの既存分母は維持し、余りをStardustに割り当てます。ステージごとに合計100%となります。
+Commonは正確に1/2、Uncommonは1/4。Duneは1/50、Mirageは1/5,000、Pharaohは1/250,000。Extraの6種の基礎確率は順に1/2,000,000、1/2,500,000、1/3,000,000、1/4,000,000、1/5,000,000、1/6,000,000です。これらは `data/auras.csv` で変更できます。Commonなどの既存分母は維持し、余りをStardustに割り当てます。ステージごとに合計100%となります。
 
 Luck L倍は「基礎抽選をL回した中で最もレアな結果」と同じ分布をCDFで計算し、結果を1個だけ記録します。入手対象外のオーラはLuckを上げても出ません。F1 → ワールドで現在の惑星の実確率を確認できます。[詳しい確率仕様](docs/aura-format.md)
 
-取得済みオーラはCollectionの行を選んで装備します。普通のRollでは表示オーラを変更しません。Equinox / BreakThroughの当選時だけ入手CutSceneを流し、最後にそのオーラを一時プレビューします。**保存される装備はCollectionから変更**します。
+取得済みオーラはCollectionの行を選んで装備します。普通のRollでは表示オーラを変更しません。Equinox / BreakThrough / Red johnの当選時は入手CutSceneを流し、最後にそのオーラを一時プレビューします。**保存される装備はCollectionから変更**します。
 
 ## マルチプレイを試す
 
@@ -58,7 +59,7 @@ Equinoxは同じ拍を玉・文字・トレイル・爆発で共有します。�
 
 ## 音声・VRM・Discord
 
-提供者の許可を得た7つの音源をソースとWindows ZIPに同梱しています。The WeirdosはOgg Vorbisを同梱デコーダーで再生するため、追加コーデックは不要です。Equinoxの通常表示用の曲とCutScene用のM4Aは別の音源です。CutSceneの音声は必要な範囲だけ切り出しており、元動画のCollection部分は再生しません。[音声の一覧](data/audio/README.md)
+提供者の許可を得た7つの音源と、Red john用に合成したオリジナル導入音をソースとWindows ZIPに同梱しています。Red johnの音は`tools/generate_redjohn_audio.py`から再生成でき、参考動画の音声は配布しません。The WeirdosはOgg Vorbisを同梱デコーダーで再生するため、追加コーデックは不要です。Equinoxの通常表示用の曲とCutScene用のM4Aは別の音源です。Equinox / BreakThroughのCutScene音声は必要な範囲だけ切り出しており、元動画のCollection部分は再生しません。[音声の一覧](data/audio/README.md)
 
 **VRM・元の参考画像・参考動画は配布しません。** F1から自分のPCのVRMを選択してください。`Start-with-local-assets.cmd` はDownloadsのChocolat.vrmを指定する補助起動です。通常の立ち姿・歩行と、各オーラの固定ポーズをブロックとVRMで共有します。固定ポーズ中は移動しても歩行を混ぜません。VRM 0.x / 1.0の自己完結GLB、スキン、初期モーフ、ベースカラーに対応。Spring Bone・表情・MToon固有の影や輪郭は未対応です。
 
@@ -66,7 +67,7 @@ Discordデスクトップ版を起動すると、ユーザー名とロール回�
 
 ## 初心者向けの改造入口
 
-[改造用ソースZIP v0.1.17](https://github.com/rx107/aura-rng/releases/download/v0.1.17-alpha.1/StarRng-v0.1.17-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
+[改造用ソースZIP v0.1.18](https://github.com/rx107/aura-rng/releases/download/v0.1.18-alpha.1/StarRng-v0.1.18-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
 
 1. `src/tuning` の数字を1つだけ変更して保存。
 2. ゲームを閉じて `Develop.cmd` を実行。

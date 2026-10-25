@@ -14,10 +14,10 @@ void Renderer::blockAvatar(const Frame& f,bool useVrm) {
     const auto& d=f.roller.catalog()[f.presentation.shown(f.progress)];
     const auto level=f.presentation.level(f.progress,f.roller.catalog());
     const bool floating=d.id=="singularity",pixelated=d.id=="pixelation",equinox=d.id=="equinox";
-    const bool breakthrough=d.id=="breakthrough",illusionary=d.id=="illusionary";
+    const bool breakthrough=d.id=="breakthrough",illusionary=d.id=="illusionary",redJohn=d.id=="red_john";
     const float effectTime=f.effectTime>=0?f.effectTime:pixelationMotionTime(f.time,pixelated?level:0);
     const float actionTime=f.actionTime>=0?f.actionTime:pixelationActionTime(f.time,pixelated?level:0);
-    const auto pose=illusionary?illusionaryPose(f.time):pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
+    const auto pose=redJohn?redJohnPose(f.time):illusionary?illusionaryPose(f.time):pixelated?pixelationPose(actionTime):(equinox || breakthrough)?equinoxPose(f.time):avatarPose(f.time,f.walk,f.movement,floating);
     const float posePivot=illusionary?1.45f:0.f;
     const auto base=XMMatrixTranslation(0,-posePivot,0)*XMMatrixRotationX(pose.bodyPitch)*XMMatrixRotationZ(pose.bodyRoll)*
         XMMatrixRotationY(f.facing)*XMMatrixTranslation(f.avatarX,pose.lift+posePivot,f.avatarZ);
@@ -39,13 +39,13 @@ void Renderer::blockAvatar(const Frame& f,bool useVrm) {
     const auto torso=XMMatrixTranslation(0,-1.08f,0)*XMMatrixRotationX(pose.torsoPitch)*XMMatrixTranslation(0,1.08f,0);
     for(int side=0;side<2;++side) {
         const float sign=side?1.f:-1.f;
-        const auto arm=XMMatrixRotationZ(sign*pose.armOut[side])*XMMatrixRotationX(pose.armPitch[side])*
+        const auto arm=XMMatrixRotationZ(sign*pose.armOut[side])*XMMatrixRotationX(pose.armPitch[side])*XMMatrixRotationY(pose.armYaw[side])*
             XMMatrixTranslation(sign*.76f,2.02f,0)*torso;
         // 上腕と前腕に分け、肘を中心に曲げる。elbowPitch=0 なら元の一本腕と同じ外形です。
         part(0,-.22f,0,.43f,.48f,.54f,skin,arm);
         const auto elbow=XMMatrixRotationX(pose.elbowPitch[side])*XMMatrixTranslation(0,-.46f,0)*arm;
         part(0,-.24f,0,.43f,.48f,.54f,skin,elbow);
-        const auto hip=XMMatrixRotationZ(sign*pose.legOut[side])*XMMatrixRotationX(pose.legPitch[side])*XMMatrixTranslation(sign*.27f,1.10f,0);
+        const auto hip=XMMatrixRotationZ(sign*pose.legOut[side])*XMMatrixRotationX(pose.legPitch[side])*XMMatrixRotationY(pose.legYaw[side])*XMMatrixTranslation(sign*.27f,1.10f,0);
         part(0,-.24f,0,.46f,.48f,.52f,pants,hip);
         const auto knee=XMMatrixRotationX(pose.knee[side])*XMMatrixTranslation(0,-.48f,0)*hip;
         part(0,-.24f,0,.46f,.48f,.52f,pants,knee);
@@ -111,9 +111,10 @@ void Renderer::drawRemotePlayers(const Frame& source,FXMMATRIX vp,FXMVECTOR eye,
             else if(id=="nanally") {nanallyVisible_=true;buildNanally(f);}
             else if(id=="illusionary") {illusionaryVisible_=true;buildIllusionary(f);}
             else if(id=="frutiger_aero") {frutigerVisible_=true;buildFrutiger(f);}
+            else if(id=="red_john") buildRedJohn(f);
             else if(auraCategory(*found)==AuraCategory::Desert) {desertAuraVisible_=true;buildDesert(f);}
         }
-        if(pixelationInstances_.empty() && frutigerInstances_.empty()) {
+        if(pixelationInstances_.empty() && frutigerInstances_.empty() && !(id=="red_john" && number<4)) {
             // 通常オーラと遠い人は少ない星で表現。1人につき24個で上限を決めます。
             for(unsigned j=0;j<24;++j) {
                 const float angle=j*6.283185307f/24+source.time*found->speed;

@@ -15,26 +15,29 @@
 **F1 → ワールド → 惑星 / ステージ** からは、ロケット演出を挟まずに景観を直接切り替えられます。
 ステージの制作中に、すぐ見比べたいときに使ってください。
 
-ロケットは各惑星のリスポーン地点にあります。Extra限定はPixelation・Illusionary・BreakThrough・Equinox・Frutiger Aeroの5種類です。Frutiger Aeroは基礎確率1 in 5,000,000で、草原・青空・雲・光沢のある泡・青い蝶をまといます。[Frutiger Aeroの調整ガイド](frutiger-aero.md)と、[Collectionの4分野](illusionary-and-extra-guide.md)も参照してください。カタログ全体は22種類、Nanallyを除いて取得可能なものは21種類です。
+ロケットは各惑星のリスポーン地点にあります。Extra限定はPixelation・Illusionary・BreakThrough・Equinox・Frutiger Aero・Red johnの6種類です。Frutiger Aeroは基礎確率1 in 5,000,000で、草原・青空・雲・光沢のある泡・青い蝶をまといます。Red johnは1 in 6,000,000で、座るアバターと部屋・ベッド・赤い顔を表示します。[Frutiger Aero](frutiger-aero.md)・[Red john](red-john-guide.md)の調整ガイドと、[Collectionの4分野](illusionary-and-extra-guide.md)も参照してください。カタログ全体は23種類、Nanallyを除いて取得可能なものは22種類です。
 
-マルチプレイへ参加中は同じ惑星の相手がワールドに表示されます。たとえば片方が庭園、もう片方がExtraなら、Extraへ移動すると会えます。ロケット移動でUserNameや10桁のUserIDは変わりません。接続方法とXServer VPSの準備は[マルチプレイのガイド](multiplayer.md)にあります。VPSへの実配備は別作業です。
+マルチプレイへ参加中は同じ惑星の相手がワールドに表示されます。たとえば片方が庭園、もう片方がExtraなら、Extraへ移動すると会えます。ロケット移動でUserNameや10桁のUserIDは変わりません。F1のオーラプレビューも現在の見た目として相手へ共有しますが、所持品は増えません。接続方法とXServer VPSの準備は[マルチプレイのガイド](multiplayer.md)にあります。接続先はホストのHTTPS URLを使用してください。
 
 ## カットシーンを試す
 
-**F1 → オーラ / Auras → Equinox または BreakThrough → カットシーンのみ再生**で確認できます。試しに再生しても、オーラの所持数とRoll Historyは増えません。AutoRollは停止します。
+**F1 → オーラ / Auras → Equinox・BreakThrough・Red john → カットシーンのみ再生**で確認できます。試しに再生しても、オーラの所持数とRoll Historyは増えません。AutoRollは停止します。
 
-Equinoxは最後の0.8秒で映像と音楽を一緒にフェードし、対応するオーラへ切り替えます。BreakThroughは終わる直前まで映像と音量を保ち、30秒で即座に対応オーラへ切り替えます。入手時もF1の確認用再生も同じ動きです。
+EquinoxとRed johnは最後の0.8秒で映像と音楽を一緒にフェードし、対応するオーラへ切り替えます。BreakThroughは終わる直前まで映像と音量を保ち、30秒で即座に対応オーラへ切り替えます。入手時もF1の確認用再生も同じ動きです。
 
 終了後の表示は一時プレビューなので、Collectionで選んだ装備は変更しません。F1の装備表示へ戻す操作、またはCollectionでの装備選択で通常の表示へ戻せます。再生中に**Esc**で中断した場合は、再生前の表示へ戻ります。
 
-カットシーンの映像はコードで描いています。参考MP4を動画として画面へ貼り付けているわけではありません。音声だけを切り出したファイルは同梱しているため、元の動画がなくても音付きで確認できます。参考画像と元動画は配布しません。
+カットシーンの映像はコードで描いています。参考MP4を動画として画面へ貼り付けているわけではありません。Equinox・BreakThroughの音声は切り出したファイルを、Red johnは数式から合成したオリジナルの短い導入曲を同梱しているため、元の動画がなくても音付きで確認できます。参考画像と元動画は配布しません。
 
 | カットシーン | 同梱する音声 | 演出の長さ |
 | --- | --- | --- |
 | Equinox | `data/audio/Equinox_Cutscene.m4a` | 10.9秒 |
 | BreakThrough | `data/audio/Breakthrough_Cutscene.m4a` | 30秒 |
+| Red john | `data/audio/Red_John_Intro.wav` | 10.9秒 |
 
 同梱音声がない場合は、手元のDownloadsの`EquinoxReworkedCutscene.mp4.mp4`または`BreakthroughCutsceneV2.mp4.mp4`から音声を探します。BreakThroughの元動画を使う場合だけ、4.5秒を開始位置として読み飛ばします。同梱音声はその区間を切り出し済みなので、0秒から使います。音声が見つからない場合も映像は再生できます。
+
+Red johnは同梱WAVを優先し、ない場合だけDownloadsの`The-Mentalist-SnapYT.App.mp4`をローカル音声の候補にします。映像はどちらの場合もコードで描きます。帯・目・横顔・タイトルの開始秒と、オリジナル音の再生成手順は[Red johnの調整ガイド](red-john-guide.md#cutsceneの出る時刻を変える)へ。
 
 ## BreakThroughの場面とカメラ
 
