@@ -190,10 +190,12 @@ void Renderer::createTargets() {
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_IGNORE),96,96);
     checked(d2dFactory_->CreateDxgiSurfaceRenderTarget(surface.Get(),props,&d2d_), "Direct2D surface");
     checked(d2d_->CreateSolidColorBrush(White,&brush_), "UI brush");
+    loadBranding();
 }
 void Renderer::resize(unsigned width,unsigned height) {
     if (!width || !height || !swap_ || (width==width_ && height==height_)) return;
     context_->OMSetRenderTargets(0,nullptr,nullptr);
+    for(auto& bitmap:brandingBitmaps_) bitmap.Reset();
     brush_.Reset(); d2d_.Reset(); target_.Reset(); depth_.Reset(); context_->Flush();
     width_=width; height_=height;
     checked(swap_->ResizeBuffers(0,width,height,DXGI_FORMAT_UNKNOWN,0), "Resize buffers"); createTargets();

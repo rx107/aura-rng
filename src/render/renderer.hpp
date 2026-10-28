@@ -88,6 +88,7 @@ public:
     float scale() const { return scale_; }
     bool handleMessage(HWND window, UINT message, WPARAM wp, LPARAM lp) noexcept;
     bool wantsKeyboard() const;
+    bool brandingReady() const { return brandingBitmaps_[0].Get() && brandingBitmaps_[1].Get() && brandingBitmaps_[2].Get(); }
     void releaseInputFocus();
     void toggleDebug() { debugOpen_ = !debugOpen_; }
     bool debugOpen() const { return debugOpen_; }
@@ -103,6 +104,8 @@ private:
     struct Vertex { DirectX::XMFLOAT3 position, normal; };
     struct Instance { DirectX::XMFLOAT4X4 world; DirectX::XMFLOAT4 color; };
     void createTargets();
+    void loadBranding();
+    void drawBranding(const Frame& frame);
     void createPipeline();
     void createEffects();
     void createPixelation();
@@ -193,6 +196,9 @@ private:
     ComPtr<ID2D1Factory> d2dFactory_;
     ComPtr<ID2D1RenderTarget> d2d_;
     ComPtr<ID2D1SolidColorBrush> brush_;
+    // 0=星と輪、1=タイトル、2=ロケット。D2Dターゲットを作り直す際に再読み込みします。
+    std::array<ComPtr<ID2D1Bitmap>,3> brandingBitmaps_;
+    std::array<D2D1_RECT_F,3> brandingBounds_{};
     ComPtr<ID2D1PathGeometry> starGeometry_;
     ComPtr<ID2D1StrokeStyle> roundStroke_;
     ComPtr<IDWriteFactory> write_;

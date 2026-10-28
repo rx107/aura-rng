@@ -2,11 +2,13 @@
 
 まずは「数字を1つ変えて、画面が変わる」を体験しましょう。C++を全部理解してから始める必要はありません。
 
+v0.1.20では左上の星・タイトルを提供画像へ変更し、輪に沿ってロケットが回る表示を追加しました。[ヘッダー画像のガイド](branding-guide.md)では、位置・大きさ・周回速度を変える手順を説明します。
+
 v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専用CutSceneを追加しました。v0.1.19ではCutSceneの音声だけを、提供MP4から抽出した許可済みの音声へ変更しています。[Red johnのガイド](red-john-guide.md)には「顔の大きさを変える」「支える手を広げる」「タイトルを0.1秒遅くする」など、画面と数値を対応させた例があります。
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.19-alpha.1/StarRng-v0.1.19-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.20-alpha.1/StarRng-v0.1.20-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -54,6 +56,7 @@ inline constexpr float HeadWidth = 7.0f;
 | 森の木を高くする | 同上 → `ForestTreeHeight` | `4.6f` → `6.f`。森を大きな木々が囲む |
 | サックスと字幕を合わせる | F1 → オーラ → BreakThrough → 字幕タイミング / 秒 | 全体の時差 `-.10f` で0.1秒早く。再ビルド不要。[操作手順](stage-and-cutscene-guide.md) |
 | UIの色を変える | `src/tuning/ui.hpp` → `Accent` | `{1.f,.55f,.20f}` で共通のミント色をオレンジへ |
+| 左上のロケットをゆっくり回す | `src/tuning/branding.hpp` → `OrbitSeconds` | `5.f` → `8.f`で1周が5秒から8秒へ。[位置や大きさの例](branding-guide.md) |
 | 無重力ポーズを高くする | `src/tuning/avatar.hpp` → `singularity` の `Lift` | `.55f` → `.85f`。ブロックとVRMが少し高く浮く |
 | Pixelation Lv3の周囲だけ速くする | `src/tuning/pixelation.hpp` → `FinalMotionSpeed` | `3.f` → `4.f`。弾と浮遊の速さは変えない |
 | PixelationのPLAYERを速くする | 同上 → `PlayerOrbitSpeed` | `1.55` → `1.8`。2機の周回と尾だけが速くなり、弾がぶつかる間隔は変わらない |
@@ -213,6 +216,7 @@ UserNameとUserIDは別です。たとえば名前を`Player A`から`星の旅�
 | `src/platform/multiplayer.cpp` | WinHTTPの専用ワーカー。約10回/秒の位置更新、IDと秘密鍵の保護、参加・切断を扱う |
 | `server/serve.py` / `stars-rng.service` / `Caddyfile.example` | 専用サーバー本体 / Linuxで常時起動 / HTTPSを受けてサーバーへ転送 |
 | `src/render/ui.cpp` の `debugUi()` | F1のImGuiパネル。命令を作り、main.cppに処理を依頼する |
+| `src/render/branding.cpp` / `src/tuning/branding.hpp` | 左上の透過画像の読み込みと周回ロケット / 位置・大きさ・速さの調整値 |
 | `src/platform/audio.cpp` / `discord.cpp` | 音声の再生 / Discordとの通信 |
 | `third_party` | 同梱ライブラリの元コード。ゲーム独自の改造はsrcから始める |
 

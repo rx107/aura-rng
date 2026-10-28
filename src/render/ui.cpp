@@ -480,7 +480,7 @@ void Renderer::ui(const Frame& f) {
     auto t=[&](const char* en,const char* ja){return std::string(tr(language,en,ja));};
     auto name=[&](std::size_t i){return displayName(defs[i],language);};
     rect(0,0,w,80,D2D1::ColorF(.035f,.053f,.075f));
-    star(40,40,18,Mint,false); text(L"STAR'S RNG",70,22,225,38,27,White,true);
+    drawBranding(f);
     rect(281,31,92,23,Panel,11); text(L"ALPHA 0.1",292,35,80,20,10,Mint,true);
     rect(w-330,26,112,28,Panel,12); label(t("DEBUG / F1","デバッグ / F1"),w-316,32,104,21,11,Mint,true);
     rect(w-458,26,116,28,Panel,12); label(t("MULTIPLAYER","マルチプレイ"),w-448,32,110,21,11,Mint,true);

@@ -550,6 +550,15 @@ private:
         };
         const auto singularity=findAura("singularity"),pixelation=findAura("pixelation"),equinox=findAura("equinox"),breakthrough=findAura("breakthrough"),nanally=findAura("nanally");
         const auto startingRolls=progress_.rolls;
+        if(!renderer_->brandingReady()) throw std::runtime_error("Header PNG branding assets did not load");
+        if(!opts_.capture.empty()) {
+            // 周回の8地点を同じゲーム状態で撮る。ロールやセーブを進めず、絵だけを確認します。
+            for(unsigned phase=0;phase<8;++phase) {
+                auto headerFrame=frame();headerFrame.time=phase*.625f;
+                renderer_->draw(headerFrame,false);
+                renderer_->capture(opts_.capture.parent_path()/(L"branding-phase-"+std::to_wstring(phase)+L".png"));
+            }
+        }
         const auto initialEquipped=progress_.equipped;
         // Exercise the actual window input path, cooldown, auto toggle and resizing.
         RECT client{}; GetClientRect(window_,&client);
@@ -591,10 +600,12 @@ private:
         if(dragging_) throw std::runtime_error("Orbit capture loss did not cancel drag");
         renderer_->toggleDebug();
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700)); render(false);
+        if(!renderer_->brandingReady()) throw std::runtime_error("Header images were not recreated after resize");
         if(!opts_.capture.empty()) {
             auto captureSmall=opts_.capture.parent_path()/(opts_.capture.stem().wstring()+L"-small.png"); renderer_->capture(captureSmall);
         }
         SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900)); render(false);
+        if(!renderer_->brandingReady()) throw std::runtime_error("Header images were not restored at original size");
         for(int i=0;i<18;++i) { cooldown_=0; roll(); }
         action({aura::Action::Equip,progress_.best});
         const auto chosen=progress_.equipped;

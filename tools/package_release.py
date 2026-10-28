@@ -2,7 +2,7 @@
 """Create the three public ZIP files after the game and its tests have passed.
 
 例: python tools/package_release.py --windows-folder package --dest dist
-     --tag v0.1.19-alpha.1
+     --tag v0.1.20-alpha.1
 通常はGitに登録したファイルだけをソースZIPへ入れます。Gitのない作業用
 フォルダーでは --paths-file public-paths.json で明示した一覧を使えます。
 このスクリプト自体はビルド・通信・GitHubへの公開を行いません。
@@ -164,27 +164,27 @@ def make_zip(destination: Path, top: str, entries: list[tuple[str, Path]]) -> Pa
 def release_notes(tag: str) -> str:
     return f"""Star's RNG Alpha 0.1 / {tag}
 
-## Red johnのCutScene音楽を変更
+## 星・タイトル画像と周回ロケット
 
-- Red johnのカットシーン音楽を、提供されたMP4の音声へ差し替えました。元動画の0秒から約10.89秒のAAC音声を再圧縮せずM4Aへ取り出し、元の音質を保っています。
-- 提供者の明示的な許可を得て、data/audio/Red_John_Cutscene.m4aをソースとWindows ZIPへ同梱しています。元MP4の映像・ファイル、参考写真、VRMは同梱しません。
-- 入手時とF1の「カットシーンのみ再生」で同じ音声を使います。部屋・ベッド・赤い顔・ポーズ、カットシーン映像と時刻、確率、プレビュー操作はv0.1.18のままです。他のオーラも変更していません。
+- 左上の星を、提供された金色の星と白い輪の画像へ変更しました。Star’s RNGの文字も、提供された手書き風の画像で表示します。
+- 提供されたロケット画像が輪に沿って周回し、機首が進む方向を向きます。星の奥と手前を回る重なりも表現します。
+- 3枚の透過PNGをdata/uiへ同梱し、透明な余白は読み込み時に取り除いて表示領域をそろえます。参考画像から別の絵を生成する処理ではありません。
+- 位置・大きさ・周回速度はsrc/tuning/branding.hppにまとめました。docs/branding-guide.mdで、値を変えると画面がどう変わるかを説明しています。
 
-tools/generate_redjohn_audio.pyはv0.1.18の旧合成曲を試す任意ツールとして残しています。現在の音声の再生成や通常のビルドには使いません。
+オーラの演出・確率・所持品・音楽・マルチプレイの通信形式は変更していません。Red johnはv0.1.19で変更したMP4抽出音声をそのまま使います。
 
-## 検証
+## 検証と配布
 
 公開ジョブはWindowsのビルド・CTest・DirectX WARP描画試験と、Linuxのコア・サーバー試験が成功してから実行します。
-Red johnのカットシーン開始・自然終了・中止とプレビュー状態を回帰試験で確認します。音声は元動画から再圧縮せず抽出したAACストリームと照合します。
-ZIP作成時には新しいM4Aの収録、私有VRM・参考動画・個人セーブ・写真・秘密鍵の混入とZIPのCRCを検査し、SHA256SUMS.txtを添付します。
+ヘッダーは画像の透明部分、ロケットの向きと周回、画面サイズ変更後の表示を確認します。
+提供されたブランド画像3枚はUI素材としてソースとWindows ZIPへ同梱します。私有VRM、オーラの参考動画・画像、個人セーブ・プロフィール写真・秘密鍵は同梱しません。
+ZIPのCRCと公開ファイルを検査し、SHA256SUMS.txtを添付します。
 
 ## 互換性・使い方
 
-既存の専用サーバーと互換性があります（protocol=1）。サーバーの更新や契約変更は不要です。
-ゲームを展開してStarRng.exeを起動し、Multiplayerで普段のHTTPS URLへ接続してください。
-ロール回数・所持品は各PCに保存します。自分のVRMや個人セーブは配布ZIPへ含めません。
-改造する場合はsource ZIP、専用サーバーを新しく設置する場合だけserver ZIPを使ってください。
-Red johnの改造手順はdocs/red-john-guide.md、設定値の一覧はsrc/tuning/README.mdにあります。
+既存の専用サーバーと互換性があります（protocol=1）。VPSの更新や契約変更は不要です。
+展開した新しいStarRng.exeを起動してください。ゲーム内の保存先は従来どおりです。
+改造する場合はsource ZIPを使い、docs/branding-guide.mdを開いてください。
 """
 
 
@@ -192,7 +192,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--windows-folder", type=Path, required=True, help="CMake --installで作ったWindows配布フォルダー")
     parser.add_argument("--dest", type=Path, default=Path("dist"), help="ZIPとSHA256SUMS.txtの保存先（初期値: dist）")
-    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.19-alpha.1")
+    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.20-alpha.1")
     parser.add_argument("--paths-file", type=Path, help="Gitがない手元の作業用: 公開パスのJSON配列または1行1パスの一覧")
     args = parser.parse_args()
     version = version_from_cmake()
