@@ -2,13 +2,15 @@
 
 まずは「数字を1つ変えて、画面が変わる」を体験しましょう。C++を全部理解してから始める必要はありません。
 
-v0.1.20では左上の星・タイトルを提供画像へ変更し、輪に沿ってロケットが回る表示を追加しました。[ヘッダー画像のガイド](branding-guide.md)では、位置・大きさ・周回速度を変える手順を説明します。
+v0.1.21では3D画面をウィンドウの内側全体へ広げ、左上の星と右下の三本線から開くメニューへ整理しました。左の4項目はダミー、右のImGui・接続先設定・終了は実際に動作します。[全面画面とメニューのガイド](screen-menu-guide.md)では、透明度・幅・星が1回転する時間を変える手順を説明します。
+
+左上の星・タイトル画像と周回ロケットはv0.1.20の表示を引き継ぎます。[ヘッダー画像のガイド](branding-guide.md)では、画像の位置・大きさと、ロケットが輪を1周する速度の変更を説明します。星を押したときの1回転とは別の調整値です。
 
 v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専用CutSceneを追加しました。v0.1.19ではCutSceneの音声だけを、提供MP4から抽出した許可済みの音声へ変更しています。[Red johnのガイド](red-john-guide.md)には「顔の大きさを変える」「支える手を広げる」「タイトルを0.1秒遅くする」など、画面と数値を対応させた例があります。
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.20-alpha.1/StarRng-v0.1.20-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.21-alpha.1/StarRng-v0.1.21-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -56,6 +58,7 @@ inline constexpr float HeadWidth = 7.0f;
 | 森の木を高くする | 同上 → `ForestTreeHeight` | `4.6f` → `6.f`。森を大きな木々が囲む |
 | サックスと字幕を合わせる | F1 → オーラ → BreakThrough → 字幕タイミング / 秒 | 全体の時差 `-.10f` で0.1秒早く。再ビルド不要。[操作手順](stage-and-cutscene-guide.md) |
 | UIの色を変える | `src/tuning/ui.hpp` → `Accent` | `{1.f,.55f,.20f}` で共通のミント色をオレンジへ |
+| メニューからゲームをもっと透かす | `src/tuning/shell.hpp` → `PanelOpacity` | `.68f` → `.50f`。パネルの不透明度が下がり、後ろのステージが見えやすくなる。[幅・回転時間も調整](screen-menu-guide.md) |
 | 左上のロケットをゆっくり回す | `src/tuning/branding.hpp` → `OrbitSeconds` | `5.f` → `8.f`で1周が5秒から8秒へ。[位置や大きさの例](branding-guide.md) |
 | 無重力ポーズを高くする | `src/tuning/avatar.hpp` → `singularity` の `Lift` | `.55f` → `.85f`。ブロックとVRMが少し高く浮く |
 | Pixelation Lv3の周囲だけ速くする | `src/tuning/pixelation.hpp` → `FinalMotionSpeed` | `3.f` → `4.f`。弾と浮遊の速さは変えない |
@@ -101,7 +104,7 @@ Equinoxは通常表示とCutSceneの音楽が異なるため、F1 → 音楽でB
 
 玉の強弱はBPMを変えずに`orbitSpeedVariation`で調整します。初期値`.22f`は平均速度の78〜122%で、止まったり逆走したりしません。許可範囲は0以上1未満です。尾と爆発位置も同じ動きを使うため、強弱を変更しても玉から離れません。床の`floorRotation`はラジアン/秒で、`1.10f`なら約5.7秒に1周です。粒子の回転もこの値へ連動します。
 
-Frutiger AeroはCollectionのExtraにあり、Extraステージ限定・基礎確率1 in 5,000,000です。草・空・雲・泡の反射・青い蝶を作る処理と詳しい変更例は[Frutiger Aeroのガイド](frutiger-aero.md)を参照してください。
+Frutiger Aeroは保存データのExtra分類にあり、Extraステージ限定・基礎確率1 in 5,000,000です。v0.1.21の左「オーラ」はダミーなので、表示確認にはF1のオーラプレビューを使います。草・空・雲・泡の反射・青い蝶を作る処理と詳しい変更例は[Frutiger Aeroのガイド](frutiger-aero.md)を参照してください。
 
 v0.1.18のカタログは23種類で、Nanallyを除いた22種類を取得できます。追加したRed johnはExtraステージ限定・基礎確率1 in 6,000,000です。部屋の形は`src/render/redjohn.cpp`、座り方は共通のアニメーション、専用CutSceneは`src/render/redjohn_cutscene.cpp`で処理します。見た目と字幕の時刻は[Red johnのガイド](red-john-guide.md)へ。
 
@@ -176,7 +179,7 @@ Red johnを含む許可済みの8音源はソースZIPにも同梱していま�
 | キューブが鼓動しない | PixelationのLevel 1〜3でBGMが再生されているか確認。自動推定が0なら手動BPMを指定。Level 0にはBGMがない |
 | キューブの鼓動が半分・倍に感じる | F1 → 音楽から自動推定を外し、BPMを手動指定。少しのずれは拍の時差で調整 |
 | Equinoxの拍が音楽と合わない | F1 → 音楽で通常表示とCutSceneのどちらを直すか選ぶ。BPMで間隔、時差で出る瞬間を合わせる |
-| マルチプレイの参加ボタンが押せない | 画面右上のマルチプレイを開き、名前を入力して「ユーザー名を確定・保存」を押す |
+| マルチプレイの接続ボタンが押せない | 右下の三本線 → マルチプレイヤーIPを設定を開き、改行のない名前を入力する。左のマルチプレイヤーはダミー |
 | サーバーに接続できない | 接続先とサーバーの起動を確認。PC内テストは`http://127.0.0.1:8765`、友達と遊ぶVPSはHTTPSを使う。[接続手順](multiplayer.md) |
 | ファイルを上書きできない | ゲームを閉じてから再ビルド |
 | C++のエラーが出る | 最初のエラーを見る。変更した1行を元に戻し、`;`や`,`や`f`を確認 |
@@ -188,9 +191,9 @@ Red johnを含む許可済みの8音源はソースZIPにも同梱していま�
 
 ## マルチプレイを手元で試す
 
-マルチプレイの基礎接続はv0.1.16で追加しました。[マルチプレイの手順](multiplayer.md)にPC内での試験とVPSへの配置方法があります。画面右上の**マルチプレイ**でUserNameを確定し、必要ならPNG/JPEG/BMPの写真を選び、ホストから教わったHTTPS接続先を入力します。接続成功後は画面が閉じて操作へ戻ります。プロフィールを開き直した時は「ゲームに戻る」かEscで閉じられ、F1ならデバッグへ切り替えられます。名前・写真・接続先は再ビルドせずに変更できます。
+マルチプレイの基礎接続はv0.1.16で追加しました。[マルチプレイの手順](multiplayer.md)にPC内での試験とVPSへの配置方法があります。v0.1.21は**右下の三本線 → マルチプレイヤーIPを設定**から接続先とUserNameを入力し、「接続する」を押します。「接続先を保存」だけなら保存して接続しません。「ゲームに戻る」かEscで設定画面を閉じると、参加を続けながら操作へ戻れます。左メニューの「マルチプレイヤー」はダミーです。[画面の操作と調整](screen-menu-guide.md)
 
-UserNameとUserIDは別です。たとえば名前を`Player A`から`星の旅人`へ変えても、最初に作った10桁のIDは変わりません。写真は中央を160×160の正方形にして共有し、元の写真は送信しません。相手はブロックアバターで表示します。同じ惑星へ移動するとワールドで会えます。
+UserNameとUserIDは別です。たとえば名前を`Player A`から`星の旅人`へ変えても、最初に作った10桁のIDは変わりません。保存済みの写真は中央を160×160の正方形にしたデータで共有し、元の写真は送信しません。今回の接続先画面には写真選択欄は置いていません。相手はブロックアバターで表示します。同じ惑星へ移動するとワールドで会えます。
 
 接続しても、抽選・所持品・Luckは自分のPCに保存します。今のサーバーが受け持つのは参加者と見た目の同期です。`local-save`などの保存フォルダー、`multiplayer_identity.json`、変換後の`profile.png`、サーバーの`server-data`は、自作オーラのソースと一緒に公開しないでください。VPSで起動するファイル、HTTPS、自動起動の説明は[サーバーのガイド](multiplayer.md)にあります。
 
@@ -211,11 +214,13 @@ UserNameとUserIDは別です。たとえば名前を`Player A`から`星の旅�
 | `src/render/nanally.cpp` など | それぞれの特殊オーラの形・発光・粒子を作る |
 | `src/render/frutiger.cpp` | 草原・空と雲・泡の反射・蝶を描く。大きさや数は`src/tuning/frutiger.hpp`で変更 |
 | `src/render/multiplayer.cpp` の `blockAvatar()` | 自分と相手で共通のブロックアバターを組み立てる。近い人のオーラと相手の位置補間もここ |
-| `src/render/multiplayer_ui.cpp` | 名前・写真・接続先の設定画面。通信済みの小さな写真をテクスチャとして再利用 |
+| `src/render/server_settings_ui.cpp` | 右メニューの接続先・名前の入力と保存・接続・切断ボタン。処理そのものはmain.cppへ依頼 |
+| `src/render/multiplayer_ui.cpp` | 旧プロフィール画面の実装と写真テクスチャ。今回の左ダミーボタンからは開かない |
 | `src/platform/profile_photo.cpp` | WICで写真を読み、中央を160×160 PNGへ変換して保存 |
 | `src/platform/multiplayer.cpp` | WinHTTPの専用ワーカー。約10回/秒の位置更新、IDと秘密鍵の保護、参加・切断を扱う |
 | `server/serve.py` / `stars-rng.service` / `Caddyfile.example` | 専用サーバー本体 / Linuxで常時起動 / HTTPSを受けてサーバーへ転送 |
 | `src/render/ui.cpp` の `debugUi()` | F1のImGuiパネル。命令を作り、main.cppに処理を依頼する |
+| `src/core/shell.hpp` / `src/tuning/shell.hpp` | 左右メニューの状態と共通のクリック範囲 / 幅・不透明度・星の回転時間 |
 | `src/render/branding.cpp` / `src/tuning/branding.hpp` | 左上の透過画像の読み込みと周回ロケット / 位置・大きさ・速さの調整値 |
 | `src/platform/audio.cpp` / `discord.cpp` | 音声の再生 / Discordとの通信 |
 | `third_party` | 同梱ライブラリの元コード。ゲーム独自の改造はsrcから始める |

@@ -1,5 +1,7 @@
 #include "render/renderer.hpp"
 #include "tuning/ui.hpp"
+#include "core/shell.hpp"
+#include "tuning/shell.hpp"
 #include "imgui.h"
 #include "backends/imgui_impl_dx11.h"
 #include "backends/imgui_impl_win32.h"
@@ -77,14 +79,14 @@ bool Renderer::handleMessage(HWND window,UINT message,WPARAM wp,LPARAM lp) noexc
         const LRESULT handled=ImGui_ImplWin32_WndProcHandler(window,message,wp,lp);
         const auto& io=ImGui::GetIO();
         // 閉じた画面の前フレームのCapture値で、ゲームの入力まで捨てないようにします。
-        const bool uiVisible=debugOpen_ || multiplayerPanelVisible_;
+        const bool uiVisible=debugOpen_ || multiplayerPanelVisible_ || serverSettingsPanelVisible_;
         if (message>=WM_MOUSEFIRST && message<=WM_MOUSELAST) return uiVisible && io.WantCaptureMouse;
         if (message>=WM_KEYFIRST && message<=WM_KEYLAST) return uiVisible && io.WantCaptureKeyboard;
         return handled!=0;
     } catch (...) { return false; }
 }
 bool Renderer::wantsKeyboard() const {
-    if (!imguiContext_ || (!debugOpen_ && !multiplayerPanelVisible_)) return false;
+    if (!imguiContext_ || (!debugOpen_ && !multiplayerPanelVisible_ && !serverSettingsPanelVisible_)) return false;
     ImGui::SetCurrentContext(imguiContext_); return ImGui::GetIO().WantCaptureKeyboard;
 }
 void Renderer::releaseInputFocus() {
@@ -93,6 +95,7 @@ void Renderer::releaseInputFocus() {
     // InputTextとキーボードナビのフォーカスを解除。画面を閉じただけでは残る場合があります。
     ImGui::SetWindowFocus(nullptr);
     multiplayerPanelVisible_=false;
+    serverSettingsPanelVisible_=false;
 }
 DebugActions Renderer::takeDebugActions() { return std::exchange(debugActions_,{}); }
 void Renderer::debugUi(const Frame& f) {
@@ -424,6 +427,7 @@ void Renderer::debugUi(const Frame& f) {
         ImGui::End();
     }
     multiplayerUi(f);
+    serverSettingsUi(f);
     ImGui::Render();
 }
 void Renderer::createStar() {
@@ -474,121 +478,115 @@ void Renderer::cooldown(float x,float y,float width,float remaining) {
     star(x+width*visual.progress,y+visual.waveY,7.5f,trail,true,std::sin(visual.progress*2*Pi)*12);
 }
 void Renderer::ui(const Frame& f) {
-    const float w=logicalW_,h=logicalH_,right=w-314;
-    const auto& defs=f.roller.catalog(); const auto shown=f.presentation.shown(f.progress); const auto& equipped=defs[shown];
+    // ゲームを覆う常設の枠は描かず、必要な操作だけを3D画面へ重ねます。
+    const float w=logicalW_,h=logicalH_;
     const auto language=f.presentation.settings.language;
     auto t=[&](const char* en,const char* ja){return std::string(tr(language,en,ja));};
-    auto name=[&](std::size_t i){return displayName(defs[i],language);};
-    rect(0,0,w,80,D2D1::ColorF(.035f,.053f,.075f));
+    const auto& defs=f.roller.catalog();const auto shown=f.presentation.shown(f.progress);
+    const auto& equipped=defs[shown];
+    const float mouseX=f.mouseX/scale_,mouseY=f.mouseY/scale_;
+    auto hovered=[&](const shell::UiRect& r){return inside(mouseX,mouseY,r.x,r.y,r.width,r.height);};
+    const auto glass=D2D1::ColorF(.018f,.028f,.037f,tuning::shell::PanelOpacity);
+    const auto line=D2D1::ColorF(.81f,.88f,.91f,.18f);
+    const auto muted=D2D1::ColorF(.76f,.83f,.87f,.88f);
     drawBranding(f);
-    rect(281,31,92,23,Panel,11); text(L"ALPHA 0.1",292,35,80,20,10,Mint,true);
-    rect(w-330,26,112,28,Panel,12); label(t("DEBUG / F1","デバッグ / F1"),w-316,32,104,21,11,Mint,true);
-    rect(w-458,26,116,28,Panel,12); label(t("MULTIPLAYER","マルチプレイ"),w-448,32,110,21,11,Mint,true);
-    rect(w-206,26,104,28,Panel,12); text(L"DX11 / NATIVE",w-194,33,100,20,10,Muted);
-    label((f.fps>0?std::to_string(static_cast<int>(f.fps)):"--")+" FPS",w-86,31,70,24,12,Muted);
-    rect(24,96,216,h-280,Panel,14); stroke(24,96,216,h-280,Border,14);
-    label(t("COLLECTION","コレクション"),42,114,180,24,12,Muted,true);
-    std::size_t collectionTotal=0,collectionDiscovered=0;
-    for(std::size_t i=0;i<defs.size();++i) if(!defs[i].previewOnly) {
-        ++collectionTotal; if(f.progress.counts[i]) ++collectionDiscovered;
-    }
-    label(std::to_string(collectionDiscovered)+" / "+std::to_string(collectionTotal),42,146,170,42,30,White,true);
-    label(t("Auras discovered","発見したオーラ"),42,187,170,22,12,Muted);
-    rect(42,220,180,3,Border,1);
-    rect(42,220,collectionTotal?180*static_cast<float>(collectionDiscovered)/static_cast<float>(collectionTotal):0,3,Mint,1);
-    // フォルダーを切り替えて、長い一覧をテーマごとに読みやすくします。
-    constexpr const char* folders[]={"Normal","Desert","Extra","Administrator"};
-    for(unsigned category=0;category<4;++category) {
-        const float x=34+(category%2)*100.f,y=235+(category/2)*29.f;
-        const bool selected=static_cast<unsigned>(f.collectionCategory)==category;
-        rect(x,y,96,24,selected?D2D1::ColorF(.11f,.24f,.25f):D2D1::ColorF(.055f,.09f,.12f),5);
-        stroke(x,y,96,24,selected?Mint:Border,5);
-        label(folders[category],x+3,y+5,90,18,category==3?9.f:11.f,selected?Mint:Muted,selected,true);
-    }
-    const auto items=collectionItems(f);
-    const int visible=std::max(1,static_cast<int>((h-500)/48));
-    const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(items.size())-visible));
-    for (int row=0;row<visible && start+row<static_cast<int>(items.size());++row) {
-        const auto i=items[start+row]; const float y=306+row*48.f;
-        const bool owned=!defs[i].previewOnly && f.progress.counts[i]!=0,selected=!defs[i].previewOnly && i==f.progress.equipped;
-        if (selected) rect(34,y-5,196,43,D2D1::ColorF(.09f,.15f,.17f),6);
-        star(47,y+11,7.5f,tint(defs[i].color,owned?1.f:.42f),owned);
-        label(name(i),64,y,155,21,14,owned?White:Muted,selected);
-        label(oddsLabel(defs,i,f.presentation.settings.biome)+(defs[i].previewOnly?"":owned?"   x"+formatNumber(f.progress.counts[i]):"   "+t("LOCKED","未所持")),64,y+22,157,18,9,Muted);
-    }
-    if (static_cast<int>(items.size())>visible) {
-        rect(234,306,2,h-510,Border,1);
-        rect(234,306+(h-510)*static_cast<float>(start)/static_cast<float>(items.size()),2,
-            (h-510)*static_cast<float>(visible)/static_cast<float>(items.size()),Mint,1);
-    }
-    stroke(256,96,w-596,h-280,Border,14);
-    label(t("PLANET SANCTUARY","惑星のサンクチュアリ"),276,116,240,25,12,White,true);
-    label(stageDisplayName(f.presentation.settings.biome,language),276,140,300,20,10,Muted);
-    rect(w-487,114,130,26,D2D1::ColorF(.05f,.10f,.12f,.90f),13);
-    const bool stageHover=inside(f.mouseX/scale_,f.mouseY/scale_,w-487,114,130,26);
-    stroke(w-487,114,130,26,stageHover?Mint:Border,13);
-    label(t("PLANETS / TRAVEL","惑星を選択 / 移動"),w-481,120,118,20,10,Mint,true,true);
-    const float titleY=h-281;
+
+    // 名前はアバターの頭上だけに置きます。旧コレクション横の大きな帯はありません。
     multiplayerLabels(f);
-    label(f.presentation.preview?t("DEBUG PREVIEW","デバッグプレビュー"):t("EQUIPPED AURA","装備中のオーラ"),276,titleY,300,20,10,Muted,true);
-    label(name(shown),276,titleY+23,w-650,45,32,tint(equipped.color),true);
-    label(oddsLabel(defs,shown,f.presentation.settings.biome)+((equipped.id=="singularity" || equipped.id=="pixelation")?"   /   Aura Level "+std::to_string(f.presentation.level(f.progress,defs))+" / 3":""),276,titleY+67,w-650,25,12,Muted);
     if(nameplateVisible_) {
-        d2d_->PushAxisAlignedClip(D2D1::RectF(258,172,w-342,h-294),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        const float width=std::min(440.f,w-624),x=std::clamp(nameplate_.x-width*.5f,264.f,w-348-width),y=nameplate_.y;
+        d2d_->PushAxisAlignedClip(D2D1::RectF(12,80,w-12,h-116),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        const float width=std::min(440.f,w-40);
+        const float x=std::clamp(nameplate_.x-width*.5f,20.f,w-20-width),y=nameplate_.y;
         if(equipped.id!="equinox") {
-            label(name(shown),x+1,y+1,width,32,23,D2D1::ColorF(0,0,0,.8f),true,true);
-            label(name(shown),x,y,width,32,23,tint(equipped.color),true,true);
+            const auto name=displayName(equipped,language);
+            label(name,x+1,y+1,width,32,23,D2D1::ColorF(0,0,0,.70f),true,true);
+            label(name,x,y,width,32,23,tint(equipped.color),true,true);
         }
         label(oddsInLabel(defs,shown,f.presentation.settings.biome),x,y+(equipped.id=="equinox"?0:31),width,25,14,White,false,true);
-        if(equipped.id=="singularity" || equipped.id=="pixelation") label("Aura Level "+std::to_string(f.presentation.level(f.progress,defs)),x,y+56,width,24,12,Mint,true,true);
+        if(equipped.id=="singularity" || equipped.id=="pixelation")
+            label("Aura Level "+std::to_string(f.presentation.level(f.progress,defs)),x,y+56,width,24,12,Mint,true,true);
         d2d_->PopAxisAlignedClip();
     }
-    rect(right,96,290,h-280,Panel,14); stroke(right,96,290,h-280,Border,14);
-    label(t("ROLL HISTORY","ロール履歴"),right+20,114,240,24,12,Muted,true);
-    star(right+23,155,4,Mint); label(t("THIS SESSION / UTC","今回の起動中 / UTC"),right+35,147,220,20,10,Mint);
-    const int logVisible=std::max(1,static_cast<int>((h-402)/56));
-    const int logStart=std::clamp(f.logScroll,0,std::max(0,static_cast<int>(f.logs.size())-logVisible));
-    if (f.logs.empty()) {
-        label(t("Your first aura is waiting.","最初のオーラが待っています。"),right+20,207,250,25,16,White);
-        label(t("Press ROLL to begin.","ロールを押して始めましょう。"),right+20,237,250,24,12,Muted);
+
+    // メニューの小さい絵も線と円だけ。アイコン画像や追加のフォントは不要です。
+    auto menuIcon=[&](unsigned kind,float x,float y,D2D1_COLOR_F color) {
+        brush_->SetColor(color);
+        auto drawLine=[&](float ax,float ay,float bx,float by){d2d_->DrawLine({x+ax,y+ay},{x+bx,y+by},brush_.Get(),1.6f,roundStroke_.Get());};
+        auto circle=[&](float cx,float cy,float rx,float ry){d2d_->DrawEllipse(D2D1::Ellipse({x+cx,y+cy},rx,ry),brush_.Get(),1.5f);};
+        if(kind==0)star(x,y,9,color,false);
+        else if(kind==1) {
+            circle(-4,-4,3.3f,3.3f);circle(5,-2,2.6f,2.6f);
+            drawLine(-10,7,-9,3);drawLine(-9,3,-4,1);drawLine(-4,1,1,3);drawLine(1,3,2,7);
+            drawLine(3,2,8,3);drawLine(8,3,10,7);
+        }else if(kind==2) {
+            circle(0,0,6,6);circle(0,0,2,2);
+            for(unsigned i=0;i<8;++i){const float a=i*Pi/4;drawLine(std::cos(a)*6,std::sin(a)*6,std::cos(a)*9,std::sin(a)*9);}
+        }else if(kind==3) {
+            d2d_->DrawRectangle(D2D1::RectF(x-7,y-9,x+7,y+9),brush_.Get(),1.4f);
+            drawLine(-3,-4,4,-4);drawLine(-3,0,4,0);drawLine(-3,4,2,4);
+        }else if(kind==4) {
+            d2d_->DrawRectangle(D2D1::RectF(x-9,y-7,x+9,y+7),brush_.Get(),1.4f);
+            drawLine(-5,-3,-2,0);drawLine(-2,0,-5,3);drawLine(1,3,5,3);
+        }else if(kind==5) {
+            circle(0,0,8,8);circle(0,0,3.5f,8);drawLine(-8,0,8,0);
+        }else {
+            circle(0,1,7,7);drawLine(0,-10,0,0);
+        }
+    };
+    auto panel=[&](const shell::UiRect& r) {
+        rect(r.x,r.y,r.width,r.height,glass);stroke(r.x,r.y,r.width,r.height,line);
+    };
+    auto row=[&](const shell::UiRect& r,const std::string& value,unsigned icon) {
+        const bool hover=hovered(r);
+        if(hover)rect(r.x,r.y,r.width,r.height,D2D1::ColorF(.86f,.93f,.96f,tuning::shell::HoverOpacity));
+        menuIcon(icon,r.x+18,r.y+r.height*.5f,hover?Mint:White);
+        label(value,r.x+43,r.y+(r.height-25)*.5f,r.width-48,28,icon==5?15.f:18.f,hover?Mint:White,true);
+    };
+    if(f.leftMenuOpen) {
+        panel(shell::leftMenuLayout(w,h));
+        const std::array<std::string,4> names={t("Auras","オーラ"),t("Multiplayer","マルチプレイヤー"),t("Settings","設定"),t("Credits","クレジット")};
+        // この4行は見た目を確認するためのダミーです。実際の操作はAppにも登録しません。
+        for(unsigned i=0;i<names.size();++i)row(shell::leftMenuRow(w,h,i),names[i],i);
     }
-    for (int row=0;row<logVisible && row+logStart<static_cast<int>(f.logs.size());++row) {
-        const auto& e=f.logs[f.logs.size()-1-static_cast<std::size_t>(row+logStart)]; const auto& d=defs[e.aura]; const float y=182+row*56.f;
-        star(right+23,y+12,5.5f,tint(d.color)); label(name(e.aura),right+38,y,169,22,15,tint(d.color),true);
-        label("#"+formatNumber(e.roll),right+214,y+3,58,19,10,Muted);
-        label(oddsLabel(defs,e.aura),right+38,y+24,169,18,10,Muted);
-        label(e.time.size()>=19?e.time.substr(11,8):"",right+210,y+24,65,18,10,Muted);
-        rect(right+20,y+49,250,1,D2D1::ColorF(.08f,.12f,.15f));
+    if(f.rightMenuOpen) {
+        panel(shell::rightMenuLayout(w,h));
+        const std::array<std::string,3> names={t("Debug menu (ImGui)","デバッグメニューを表示"),
+            t("Multiplayer server IP","マルチプレイヤーIPを設定"),t("Quit game","ゲーム終了")};
+        for(unsigned i=0;i<names.size();++i)row(shell::rightMenuRow(w,h,i),names[i],i+4);
     }
-    rect(24,h-166,w-48,100,Panel,14); stroke(24,h-166,w-48,100,Border,14);
-    label(t("TOTAL ROLLS","総ロール数"),44,h-148,140,20,10,Muted,true);
-    label(formatNumber(f.progress.rolls),44,h-125,170,40,30,White,true);
-    label(t("BEST DISCOVERY","最もレアな発見"),230,h-148,180,20,10,Muted,true);
-    label(f.progress.discovered()?name(f.progress.best):t("Waiting for a roll","最初のロールを待っています"),230,h-121,205,26,17,White,true);
-    const float bx=w*.5f-105,by=h-146; const bool ready=f.cooldown<=0;
-    const bool hover=inside(f.mouseX/scale_,f.mouseY/scale_,bx,by,210,62);
-    rect(bx,by,210,62,ready?(hover?D2D1::ColorF(.68f,1,.88f):Mint):D2D1::ColorF(.18f,.31f,.32f),10);
-    label(ready?t("ROLL","ロール"):t("ROLLING...","ロール中..."),bx+42,by+13,160,36,24,ready?Panel:White,true);
-    cooldown(bx+12,by+70,186,f.cooldown);
-    const float ax=bx+228;
-    rect(ax,by,134,62,f.autoRoll?D2D1::ColorF(.10f,.22f,.20f):D2D1::ColorF(.08f,.12f,.15f),10);
-    stroke(ax,by,134,62,f.autoRoll?Mint:Border,10);
-    label(t("AUTO ROLL","自動ロール"),ax+21,by+12,110,22,12,f.autoRoll?Mint:White,true);
-    label(f.autoRoll?t("ON / F","オン / F"):t("OFF / F","オフ / F"),ax+35,by+34,100,20,10,Muted);
-    rect(w-179,by,130,62,D2D1::ColorF(.08f,.12f,.15f),10);
-    label(t("OPEN LOGS","ログを開く"),w-158,by+14,110,24,12,White,true);
-    text(L"CSV / UTC",w-147,by+36,100,18,10,Muted);
-    label(t("SPACE / ROLL   WASD / MOVE   RIGHT DRAG / ORBIT   WHEEL / ZOOM   M / PLANETS   F1 / DEBUG",
-        "SPACE / ロール   WASD / 移動   右ドラッグ / 回転   ホイール / ズーム   M / 惑星   F1 / デバッグ"),24,h-39,w-200,23,11,Muted);
-    std::ostringstream luckText; luckText<<t("LUCK ","幸運 ")<<std::fixed<<std::setprecision(f.roller.luck()>=1000?0:2)<<f.roller.luck()<<"x";
-    label(luckText.str(),w-150,h-39,134,22,11,Mint,true);
-    if (!f.notice.empty()) {
-        rect(276,174,w-650,56,D2D1::ColorF(.23f,.13f,.10f,.94f),8);
-        label(f.notice,288,188,w-680,28,12,D2D1::ColorF(1,.75f,.56f));
+    const auto hamburger=shell::hamburgerLayout(w,h);
+    rect(hamburger.x,hamburger.y,hamburger.width,hamburger.height,
+        D2D1::ColorF(.018f,.028f,.037f,hovered(hamburger)?.78f:.58f));
+    stroke(hamburger.x,hamburger.y,hamburger.width,hamburger.height,line);
+    brush_->SetColor(f.rightMenuOpen?Mint:White);
+    for(unsigned i=0;i<3;++i) {
+        const float y=hamburger.y+hamburger.height*.5f+(static_cast<int>(i)-1)*8.f;
+        d2d_->DrawLine({hamburger.x+15,y},{hamburger.x+hamburger.width-15,y},brush_.Get(),1.8f,roundStroke_.Get());
     }
-    if(f.stageSelectOpen) stageSelectUi(f);
-    if(f.stageTravelProgress>=0) stageTravelUi(f);
+
+    // ロール操作だけは小さく常設し、遊べる状態を保ちます。背景の大きいパネルは作りません。
+    const auto roll=shell::rollLayout(w,h),automatic=shell::autoRollLayout(w,h);
+    const bool cooling=f.cooldown>0;
+    const bool blocked=f.leftMenuOpen || f.rightMenuOpen || f.logoSpinProgress>=0 || f.serverSettingsOpen || f.multiplayerOpen || f.stageSelectOpen || f.stageTravelProgress>=0;
+    const bool ready=!cooling && !blocked;
+    rect(roll.x,roll.y,roll.width,roll.height,ready?(hovered(roll)?D2D1::ColorF(.68f,1,.88f,.95f):D2D1::ColorF(.55f,.96f,.82f,.86f)):
+        D2D1::ColorF(.08f,.16f,.17f,.64f));
+    label(cooling?t("ROLLING...","ロール中..."):t("ROLL","ロール"),roll.x+12,roll.y+10,roll.width-24,32,22,ready?Panel:White,true,true);
+    cooldown(roll.x+12,roll.y+roll.height+14,roll.width-24,f.cooldown);
+    rect(automatic.x,automatic.y,automatic.width,automatic.height,D2D1::ColorF(.018f,.028f,.037f,.60f));
+    stroke(automatic.x,automatic.y,automatic.width,automatic.height,f.autoRoll?D2D1::ColorF(.55f,.96f,.82f,.72f):line);
+    label(t("AUTO ROLL","自動ロール"),automatic.x+7,automatic.y+9,automatic.width-14,22,12,f.autoRoll?Mint:White,true,true);
+    label(f.autoRoll?t("ON / F","オン / F"):t("OFF / F","オフ / F"),automatic.x+7,automatic.y+31,automatic.width-14,17,10,muted,false,true);
+    label(t("SPACE / Roll   WASD / Move   Right drag / Orbit   M / Planets",
+        "SPACE / ロール  WASD / 移動  右ドラッグ / 視点  M / 惑星"),20,h-28,470,18,10,D2D1::ColorF(.82f,.88f,.91f,.72f));
+
+    if(!f.notice.empty()) {
+        const float width=std::min(520.f,w-360),x=(w-width)*.5f;
+        rect(x,20,width,50,D2D1::ColorF(.16f,.055f,.035f,.83f));
+        label(f.notice,x+14,34,width-28,28,12,D2D1::ColorF(1,.80f,.66f));
+    }
+    if(f.stageSelectOpen)stageSelectUi(f);
+    if(f.stageTravelProgress>=0)stageTravelUi(f);
 }
 void Renderer::stageSelectUi(const Frame& f) {
     // この画面は描画だけを担当します。クリック判定はRenderer::hit、移動はAppが担当。
@@ -597,7 +595,7 @@ void Renderer::stageSelectUi(const Frame& f) {
     auto t=[&](const char* en,const char* ja){return std::string(tr(language,en,ja));};
     const auto layout=stageSelectLayout(logicalW_,logicalH_);
     const float x=layout.x,y=layout.y,w=layout.width;
-    rect(0,80,logicalW_,logicalH_-80,D2D1::ColorF(.005f,.012f,.025f,.68f));
+    rect(0,0,logicalW_,logicalH_,D2D1::ColorF(.005f,.012f,.025f,.68f));
     rect(x,y,w,layout.height,D2D1::ColorF(.025f,.047f,.068f,.99f),16);
     stroke(x,y,w,layout.height,D2D1::ColorF(.19f,.36f,.37f),16);
     star(x+32,y+31,8,Mint,false);

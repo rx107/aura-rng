@@ -561,8 +561,10 @@ void Renderer::world(const Frame& f) {
     if(desertAura) buildDesert(f);
     if(frutiger) buildFrutiger(f);
     if(redJohn) {const auto before=instances_.size();buildRedJohn(f);redJohnInstances_=instances_.size()-before;}
-    const float worldW=logicalW_-596,worldH=logicalH_-280;
-    D3D11_VIEWPORT viewport{256*scale_,96*scale_,worldW*scale_,worldH*scale_,0,1}; context_->RSSetViewports(1,&viewport);
+    // 3Dの描画先はウィンドウの内側全体。メニューはこの上へ透明なUIとして重ねます。
+    // 以前の左256/上96の余白を引かず、カメラの縦横比も実際の描画先と一致させます。
+    const float worldW=static_cast<float>(width_),worldH=static_cast<float>(height_);
+    D3D11_VIEWPORT viewport{0,0,worldW,worldH,0,1}; context_->RSSetViewports(1,&viewport);
     const float focus=redJohn?2.3f:illusionary?tuning::game::CameraFocusIllusionary:breakthrough?tuning::game::CameraFocusBreakthrough:nanally?tuning::game::CameraFocusNanally:
         holeVisible_?tuning::game::CameraFocusBlackHole:equinox?tuning::game::CameraFocusEquinox:
         (floating || pixelated)?tuning::game::CameraFocusFloating:tuning::game::CameraFocusNormal;
@@ -574,7 +576,9 @@ void Renderer::world(const Frame& f) {
     const float tagHeight=redJohn?3.05f:nanally?6.8f:breakthrough?5.2f:equinox?4.80f:(pixelated && level>=2?4.5f:3.7f)+pose.lift;
     XMFLOAT3 tag; XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(f.avatarX,tagHeight,f.avatarZ,1),
         viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,0,1,projection,view,XMMatrixIdentity()));
-    nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,178.f,logicalH_-400)}; nameplateVisible_=!breakthrough && !illusionary && tag.z>0 && tag.z<1;
+    // 名前も全画面の投影位置から配置します。旧サイドバー内へ押し込まないよう上下余白だけを残します。
+    nameplate_={tag.x/scale_,std::clamp(tag.y/scale_,16.f,std::max(16.f,logicalH_-110.f))};
+    nameplateVisible_=!breakthrough && !illusionary && tag.z>0 && tag.z<1;
     struct Camera { XMFLOAT4X4 vp; XMFLOAT4 eye,light; } camera{};
     XMStoreFloat4x4(&camera.vp,view*projection); XMStoreFloat4(&camera.eye,eye); camera.eye.w=pixelated?effectTime:f.time;
     const auto fogColor=stageFog(biome);
@@ -655,9 +659,11 @@ void Renderer::draw(const Frame& frame,bool present) {
 }
 Hit Renderer::hit(float px,float py,const Frame& f) const {
     if(f.cutsceneTime>=0) return {};
-    const float x=px/scale_,y=py/scale_,w=logicalW_,h=logicalH_,bx=w*.5f-105,by=h-146;
-    if(inside(x,y,w-458,26,116,28)) return {Action::Multiplayer,0};
-    if(inside(x,y,w-330,26,112,28)) return {Action::Debug,0};
+    // ImGuiは最後に描くので、その実際のウィンドウの中では背後のメニューを押さない。
+    if(debugOpen_ && inside(px,py,debugBounds_.x,debugBounds_.y,debugBounds_.z,debugBounds_.w))return {};
+    if(serverSettingsPanelVisible_ && inside(px,py,serverSettingsBounds_.x,serverSettingsBounds_.y,serverSettingsBounds_.z,serverSettingsBounds_.w))return {};
+    if(multiplayerPanelVisible_ && inside(px,py,multiplayerBounds_.x,multiplayerBounds_.y,multiplayerBounds_.z,multiplayerBounds_.w))return {};
+    const float x=px/scale_,y=py/scale_,w=logicalW_,h=logicalH_;
     if(f.stageTravelProgress>=0) return {};
     if(f.stageSelectOpen) {
         const auto panel=stageSelectLayout(w,h);
@@ -667,29 +673,32 @@ Hit Renderer::hit(float px,float py,const Frame& f) const {
                 static_cast<Biome>(i)!=f.presentation.settings.biome) return {Action::Travel,i};
         return {};
     }
-    if(inside(x,y,w-487,114,130,26)) return {Action::Stages,0};
-    if(inside(x,y,bx,by,210,62)) return {Action::Roll,0};
-    if(inside(x,y,bx+228,by,134,62)) return {Action::Auto,0};
-    if(inside(x,y,w-179,by,130,62)) return {Action::Logs,0};
-    for(unsigned category=0;category<4;++category)
-        if(inside(x,y,34+(category%2)*100.f,235+(category/2)*29.f,96,24)) return {Action::CollectionCategory,category};
-    const auto items=collectionItems(f);
-    const int visible=std::max(1,static_cast<int>((h-500)/48));
-    const int start=std::clamp(f.collectionScroll,0,std::max(0,static_cast<int>(items.size())-visible));
-    for(int row=0;row<visible && start+row<static_cast<int>(items.size());++row)
-        if(inside(x,y,34,301+row*48.f,196,43)) return {Action::Equip,items[start+row]};
+    if(shell::starMenuLayout(w,h).contains(x,y)) return {Action::StarMenu,0};
+    if(shell::hamburgerLayout(w,h).contains(x,y)) return {Action::DeveloperMenu,0};
+    if(f.multiplayerOpen || f.serverSettingsOpen) return {};
+    if(f.leftMenuOpen) {
+        for(std::size_t i=0;i<4;++i) if(shell::leftMenuRow(w,h,i).contains(x,y))return {Action::DummyMenu,i};
+        if(shell::leftMenuLayout(w,h).contains(x,y))return {};
+    }
+    if(f.rightMenuOpen) {
+        constexpr Action actions[]={Action::ShowDebug,Action::ServerSettings,Action::Quit};
+        for(std::size_t i=0;i<3;++i)if(shell::rightMenuRow(w,h,i).contains(x,y))return {actions[i],0};
+        if(shell::rightMenuLayout(w,h).contains(x,y))return {};
+    }
+    if(f.leftMenuOpen || f.rightMenuOpen || f.logoSpinProgress>=0)return {Action::CloseShellMenus,0};
+    if(shell::rollLayout(w,h).contains(x,y))return {Action::Roll,0};
+    if(shell::autoRollLayout(w,h).contains(x,y))return {Action::Auto,0};
     return {};
 }
-int Renderer::region(float px,float py) const {
-    const float x=px/scale_,y=py/scale_;
-    if(inside(x,y,24,96,216,logicalH_-280)) return 1;
-    if(inside(x,y,logicalW_-314,96,290,logicalH_-280)) return 2;
-    return 0;
-}
+int Renderer::region(float,float) const {return 0;} // 常設のCollection/Historyを廃止。見えない領域に入力を残さない。
 bool Renderer::canOrbit(float px,float py) const {
     if(multiplayerPanelVisible_ && inside(px,py,multiplayerBounds_.x,multiplayerBounds_.y,multiplayerBounds_.z,multiplayerBounds_.w)) return false;
+    if(serverSettingsPanelVisible_ && inside(px,py,serverSettingsBounds_.x,serverSettingsBounds_.y,serverSettingsBounds_.z,serverSettingsBounds_.w)) return false;
     if(debugOpen_ && inside(px,py,debugBounds_.x,debugBounds_.y,debugBounds_.z,debugBounds_.w)) return false;
-    return inside(px/scale_,py/scale_,256,96,logicalW_-596,logicalH_-280);
+    const float x=px/scale_,y=py/scale_;
+    if(inside(x,y,0,0,280,84) || shell::hamburgerLayout(logicalW_,logicalH_).contains(x,y) ||
+        shell::rollLayout(logicalW_,logicalH_).contains(x,y) || shell::autoRollLayout(logicalW_,logicalH_).contains(x,y))return false;
+    return inside(x,y,0,0,logicalW_,logicalH_);
 }
 void Renderer::capture(const std::filesystem::path& path) {
     ComPtr<ID3D11Texture2D> back; checked(swap_->GetBuffer(0,IID_PPV_ARGS(&back)), "Capture back buffer");

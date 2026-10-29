@@ -2,7 +2,7 @@
 """Create the three public ZIP files after the game and its tests have passed.
 
 例: python tools/package_release.py --windows-folder package --dest dist
-     --tag v0.1.20-alpha.1
+     --tag v0.1.21-alpha.1
 通常はGitに登録したファイルだけをソースZIPへ入れます。Gitのない作業用
 フォルダーでは --paths-file public-paths.json で明示した一覧を使えます。
 このスクリプト自体はビルド・通信・GitHubへの公開を行いません。
@@ -164,19 +164,20 @@ def make_zip(destination: Path, top: str, entries: list[tuple[str, Path]]) -> Pa
 def release_notes(tag: str) -> str:
     return f"""Star's RNG Alpha 0.1 / {tag}
 
-## 星・タイトル画像と周回ロケット
+## 全面ゲーム画面と左右のメニュー
 
-- 左上の星を、提供された金色の星と白い輪の画像へ変更しました。Star’s RNGの文字も、提供された手書き風の画像で表示します。
-- 提供されたロケット画像が輪に沿って周回し、機首が進む方向を向きます。星の奥と手前を回る重なりも表現します。
-- 3枚の透過PNGをdata/uiへ同梱し、透明な余白は読み込み時に取り除いて表示領域をそろえます。参考画像から別の絵を生成する処理ではありません。
-- 位置・大きさ・周回速度はsrc/tuning/branding.hppにまとめました。docs/branding-guide.mdで、値を変えると画面がどう変わるかを説明しています。
+- ステージ・アバター・オーラをウィンドウの内側全体へ表示します。旧Collection・Roll History・黒い外枠の常設パネルを外し、左上の画像ロゴと下中央のRoll / AutoRollを重ねます。Windowsのウィンドウモードは従来どおりです。
+- 左上の星を押すと0.65秒で1回転し、回り終わってから左メニューが開きます。オーラ → マルチプレイヤー → 設定 → クレジットの4項目は、すべてダミーボタンです。押しても画面遷移や設定変更は行いません。
+- 右下の三本線から、実際に動作するImGuiデバッグ、マルチプレイヤーIP設定、ゲーム終了を選べます。接続先画面ではURL/IPと名前を入力し、保存・接続・切断できます。保存だけでは自動接続しません。終了は確認なしで、通常の保存処理を通して閉じます。
+- 左右メニューは不透明度68%の四角いパネルです。幅・位置・不透明度・星の回転時間はsrc/tuning/shell.hppへまとめ、docs/screen-menu-guide.mdに「値を変えると画面がどう変わるか」を説明しています。
+- Mの惑星選択とF1のデバッグは継続して使えます。Escで開いたメニューや接続先画面を閉じ、何も開いていないときは右メニューを開きます。旧Collectionや履歴の常設表示を外しても、所持数・実装備・ログのデータとF1のオーラプレビューは引き継ぎます。
 
-オーラの演出・確率・所持品・音楽・マルチプレイの通信形式は変更していません。Red johnはv0.1.19で変更したMP4抽出音声をそのまま使います。
+オーラの演出・確率・所持品・8つの音源・3枚のブランドPNG・マルチプレイの通信形式は変更していません。左上のロケットは従来どおり5秒で輪を1周します。星を押したときの回転時間とは別の設定です。
 
 ## 検証と配布
 
 公開ジョブはWindowsのビルド・CTest・DirectX WARP描画試験と、Linuxのコア・サーバー試験が成功してから実行します。
-ヘッダーは画像の透明部分、ロケットの向きと周回、画面サイズ変更後の表示を確認します。
+画面全体の3D表示、星の1回転後のメニュー、左4項目のダミー動作、右メニューの実操作、接続先の保存、サイズ変更後の表示とクリック判定を確認します。
 提供されたブランド画像3枚はUI素材としてソースとWindows ZIPへ同梱します。私有VRM、オーラの参考動画・画像、個人セーブ・プロフィール写真・秘密鍵は同梱しません。
 ZIPのCRCと公開ファイルを検査し、SHA256SUMS.txtを添付します。
 
@@ -184,7 +185,7 @@ ZIPのCRCと公開ファイルを検査し、SHA256SUMS.txtを添付します。
 
 既存の専用サーバーと互換性があります（protocol=1）。VPSの更新や契約変更は不要です。
 展開した新しいStarRng.exeを起動してください。ゲーム内の保存先は従来どおりです。
-改造する場合はsource ZIPを使い、docs/branding-guide.mdを開いてください。
+改造する場合はsource ZIPを使い、docs/screen-menu-guide.mdを開いてください。初回のビルドはdocs/development-guide.mdで説明しています。
 """
 
 
@@ -192,7 +193,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--windows-folder", type=Path, required=True, help="CMake --installで作ったWindows配布フォルダー")
     parser.add_argument("--dest", type=Path, default=Path("dist"), help="ZIPとSHA256SUMS.txtの保存先（初期値: dist）")
-    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.20-alpha.1")
+    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.21-alpha.1")
     parser.add_argument("--paths-file", type=Path, help="Gitがない手元の作業用: 公開パスのJSON配列または1行1パスの一覧")
     args = parser.parse_args()
     version = version_from_cmake()

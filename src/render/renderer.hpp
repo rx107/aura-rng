@@ -1,5 +1,6 @@
 #pragma once
 #include "core/presentation.hpp"
+#include "core/shell.hpp"
 #include <windows.h>
 #include <d3d11.h>
 #include <d2d1.h>
@@ -44,15 +45,19 @@ struct Frame {
     const net::Snapshot* multiplayer{};
     bool multiplayerOpen{};
     std::span<const std::uint8_t> profilePhoto;
+    bool leftMenuOpen{},rightMenuOpen{};
+    float logoSpinProgress{-1};
+    bool serverSettingsOpen{};
 };
-enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory, Multiplayer };
+enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory, Multiplayer,
+    StarMenu, DeveloperMenu, DummyMenu, ShowDebug, ServerSettings, Quit, CloseShellMenus };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
 // 描く場所とクリック判定は同じ設計図を使います。座標は1440×900基準の論理ピクセル。
 // 惑星カード i は {x+20, y+112+i*64, width-40, 56}、閉じるは右上の30×30です。
 struct StageSelectLayout { float x,y,width,height; };
 inline StageSelectLayout stageSelectLayout(float w,float h) {
-    const float width=std::min(760.f,w-636.f),height=184.f+StageCount*64.f;
-    return {256+(w-596-width)*.5f,96+(h-280-height)*.5f,width,height};
+    const float width=std::min(760.f,w-64.f),height=184.f+StageCount*64.f;
+    return {(w-width)*.5f,(h-height)*.5f,width,height};
 }
 // Collectionはデータの並び順を変えず、選んだフォルダーに属する番号だけ表示します。
 // 表示とクリック判定でこの関数を共有し、「見えている行と装備番号」のずれを防ぎます。
@@ -130,6 +135,7 @@ private:
     void drawRedJohnCutscene(const Frame& frame);
     void redJohnCutsceneUi(const Frame& frame);
     void multiplayerUi(const Frame& frame);
+    void serverSettingsUi(const Frame& frame);
     void multiplayerLabels(const Frame& frame);
     void drawRemotePlayers(const Frame& frame,DirectX::FXMMATRIX viewProjection,DirectX::FXMVECTOR eye,Color fog);
     void blockAvatar(const Frame& frame,bool useVrm=false);
@@ -223,6 +229,11 @@ private:
     std::vector<PhotoTexture> photoTextures_;
     ID3D11ShaderResourceView* photoTexture(const std::string& key,std::span<const std::uint8_t> bytes);
     bool multiplayerPanelVisible_{};
+    bool serverSettingsPanelVisible_{};
+    DirectX::XMFLOAT4 serverSettingsBounds_{};
+    std::array<char,2049> serverEndpointDraft_{};
+    std::array<char,65> serverUsernameDraft_{};
+    std::string serverSettingsError_;
     DirectX::XMFLOAT4 multiplayerBounds_{};
     ComPtr<ID3D11Buffer> starVertices_,starIndices_,holeVertices_,holeIndices_;
     ComPtr<ID3D11BlendState> effectBlend_;

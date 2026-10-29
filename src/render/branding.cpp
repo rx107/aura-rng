@@ -80,8 +80,12 @@ void Renderer::loadBranding() {
 }
 
 void Renderer::drawBranding(const Frame& f) {
+    // 押したときだけ星の組を1周させる。smoothstepで回り始め・止まり際をなめらかにします。
+    // タイトルはこの回転の外へ描くので、文字まで回って読みにくくなりません。
+    const float spinProgress=std::clamp(std::isfinite(f.logoSpinProgress)?f.logoSpinProgress:0.f,0.f,1.f);
+    const float spin=360*spinProgress*spinProgress*(3-2*spinProgress);
     if(!brandingBitmaps_[0] || !brandingBitmaps_[1] || !brandingBitmaps_[2]) {
-        star(40,40,18,D2D1::ColorF(.55f,.96f,.82f),false);
+        star(40,40,18,D2D1::ColorF(.55f,.96f,.82f),false,spin);
         text(L"STAR'S RNG",70,22,225,38,27,D2D1::ColorF(.91f,.95f,.98f),true);
         return;
     }
@@ -105,6 +109,9 @@ void Renderer::drawBranding(const Frame& f) {
     const double dx=-cfg::RingMajorRadius*v*cosTilt-cfg::RingMinorRadius*u*sinTilt;
     const double dy=-cfg::RingMajorRadius*v*sinTilt+cfg::RingMinorRadius*u*cosTilt;
     const float angle=static_cast<float>(std::atan2(dy,dx)*180/Pi)+cfg::RocketAngleOffset;
+    D2D1_MATRIX_3X2_F original;d2d_->GetTransform(&original);
+    const D2D1_POINT_2F iconCenter{cfg::IconLeft+cfg::IconWidth*.5f,cfg::IconTop+iconHeight*.5f};
+    d2d_->SetTransform(D2D1::Matrix3x2F::Rotation(spin,iconCenter)*original);
     auto rocket=[&] {
         D2D1_MATRIX_3X2_F previous;d2d_->GetTransform(&previous);
         d2d_->SetTransform(D2D1::Matrix3x2F::Rotation(angle,{x,y})*previous);
@@ -118,6 +125,7 @@ void Renderer::drawBranding(const Frame& f) {
     d2d_->DrawBitmap(brandingBitmaps_[0].Get(),D2D1::RectF(cfg::IconLeft,cfg::IconTop,
         cfg::IconLeft+cfg::IconWidth,cfg::IconTop+iconHeight),1,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     if(v>=0)rocket();
+    d2d_->SetTransform(original);
     d2d_->DrawBitmap(brandingBitmaps_[1].Get(),D2D1::RectF(cfg::TitleLeft,cfg::TitleTop,
         cfg::TitleLeft+cfg::TitleWidth,cfg::TitleTop+titleHeight),1,D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 }

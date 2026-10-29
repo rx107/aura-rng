@@ -136,7 +136,8 @@ void Renderer::drawRemotePlayers(const Frame& source,FXMMATRIX vp,FXMVECTOR eye,
         ID3D11Buffer* cb=constants_.Get();context_->VSSetConstantBuffers(0,1,&cb);context_->PSSetConstantBuffers(0,1,&cb);
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depthState_.Get(),0);context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
         context_->DrawIndexedInstanced(36,static_cast<UINT>(instances_.size()),0,0,0);drawEffects(f);
-        D3D11_VIEWPORT viewport{256*scale_,96*scale_,(logicalW_-596)*scale_,(logicalH_-280)*scale_,0,1};
+        // 自分と相手の名前に同じ全画面の投影を使い、位置だけ旧UI枠へずれるのを防ぎます。
+        D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};
         XMFLOAT3 tag;XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(current.x,3.6f,current.z,1),viewport.TopLeftX,viewport.TopLeftY,
             viewport.Width,viewport.Height,0,1,vp,XMMatrixIdentity(),XMMatrixIdentity()));
         if(tag.z>0 && tag.z<1)playerTags_.push_back({tag.x/scale_,tag.y/scale_,p.username,p.userId,displayName(*found,display.settings.language)});
@@ -149,7 +150,7 @@ void Renderer::drawRemotePlayers(const Frame& source,FXMMATRIX vp,FXMVECTOR eye,
     nanallyVisible_=flags[4];illusionaryVisible_=flags[5];desertAuraVisible_=flags[6];frutigerVisible_=flags[7];
 }
 void Renderer::multiplayerLabels(const Frame&) {
-    d2d_->PushAxisAlignedClip(D2D1::RectF(256,96,logicalW_-340,logicalH_-184),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    d2d_->PushAxisAlignedClip(D2D1::RectF(0,0,logicalW_,logicalH_),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     for(const auto& tag:playerTags_) {
         rect(tag.x-105,tag.y-24,210,48,D2D1::ColorF(.025f,.055f,.075f,.88f),8);
         label(tag.name,tag.x-100,tag.y-22,200,20,13,D2D1::ColorF(1,1,1),true,true);

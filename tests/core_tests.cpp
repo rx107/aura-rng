@@ -3,6 +3,7 @@
 #include "core/animation.hpp"
 #include "core/audio_envelope.hpp"
 #include "core/equinox_animation.hpp"
+#include "core/shell.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -17,6 +18,19 @@ template<class F> void rejects(F f) { bool failed = false; try { f(); } catch (c
 int main(int argc, char** argv) {
     try {
         check(argc == 2, "Catalog path required");
+        {
+            aura::shell::State menu;
+            menu.tapStar();menu.update(aura::tuning::shell::LogoSpinSeconds*.4f);
+            const auto progress=menu.spinProgress();menu.tapStar();
+            check(menu.spinning() && !menu.leftOpen && menu.spinProgress()==progress,"Double tap restarted or prematurely opened star menu");
+            menu.update(aura::tuning::shell::LogoSpinSeconds*.61f);
+            check(menu.leftOpen && !menu.spinning() && !menu.rightOpen,"Menu must open after one full spin");
+            menu.tapStar();menu.update(3);
+            check(!menu.active(),"Closing left menu reopened it later");
+            menu.tapStar();menu.update(.1f);menu.toggleRight();menu.update(3);
+            check(menu.rightOpen && !menu.leftOpen && !menu.spinning(),"Right menu did not cancel pending left menu reveal");
+            menu.close();menu.update(3);check(!menu.active(),"Dismissed menus reopened");
+        }
         const auto defs = aura::loadCatalog(argv[1]);
         check(defs.size() == 23, "Expected 22 rollable auras and one administrator preview");
         const auto findAura=[&](const std::string& id) {

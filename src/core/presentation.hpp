@@ -81,6 +81,7 @@ struct DebugActions {
     std::optional<std::string> equinoxBgmPath;
     std::optional<float> equinoxBpm,equinoxBeatOffset,equinoxCutsceneBpm,equinoxCutsceneBeatOffset;
     bool connectMultiplayer{},disconnectMultiplayer{},clearProfilePhoto{},closeMultiplayer{};
+    bool closeServerSettings{};
     std::optional<std::string> serverEndpoint,profilePhotoPath;
 };
 // 他の処理から読む共通名。数値の編集場所は tuning/game.hpp に集約。

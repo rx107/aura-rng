@@ -14,6 +14,7 @@
 | カットシーンのカメラ・揺れ・Equinox終了フェード | [cutscene.hpp](cutscene.hpp) | `EndingFadeSeconds` を `.8f → 1.2f`。Equinoxの映像と音がゆっくりオーラへ切り替わる。BreakThroughは終了時に即切替。 |
 | BreakThroughの字幕 | [cutscene.hpp](cutscene.hpp) | `BreakthroughWordTimes` の各秒数。字幕の時差と単語の時刻はF1からも再ビルドなしで変更可能。 |
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
+| 左右メニュー・星クリックの1回転 | [shell.hpp](shell.hpp) | `PanelOpacity` を `.68f → .50f`でステージが透ける。`LogoSpinSeconds`を`.65f → 1.f`で星の回転をゆっくりにする。[幅・位置と操作のガイド](../../docs/screen-menu-guide.md)。 |
 | 左上の星・タイトル・周回ロケット | [branding.hpp](branding.hpp) | `OrbitSeconds`を`5.f → 8.f`。ロケットの1周を5秒から8秒へ。[画像と数値の見方](../../docs/branding-guide.md)。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |
 | Pixelationの機体・尾・キューブ | [pixelation.hpp](pixelation.hpp) | `PlayerBobAmplitude` を `.85 → .4`。PLAYERの上下移動が小さくなる。 |
