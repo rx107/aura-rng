@@ -12,6 +12,7 @@
 #include <span>
 #include <future>
 #include "render/vrm.hpp"
+#include "render/glb_model.hpp"
 #include "platform/multiplayer.hpp"
 
 struct ImGuiContext;
@@ -87,6 +88,12 @@ public:
     std::size_t illusionaryCount() const { return illusionaryVisible_?illusionaryInk_.size()+pixelationInstances_.size():0; }
     std::size_t desertAuraCount() const { return desertAuraVisible_?pixelationInstances_.size():0; }
     std::size_t frutigerCount() const { return frutigerVisible_?frutigerInstances_.size():0; }
+    bool butterflyReady() const { return butterfly_!=nullptr; }
+    std::size_t butterflyVertices() const { return butterfly_?butterfly_->vertexCount():0; }
+    std::size_t butterflyDrawCount() const { return butterfly_?butterfly_->drawCount():0; }
+    float butterflyAnimationDuration() const { return butterfly_?butterfly_->animationDuration():0; }
+    std::size_t butterflyAnimationTracks() const { return butterfly_?butterfly_->animationTrackCount():0; }
+    const std::string& butterflyStatus() const { return butterflyStatus_; }
     std::size_t redJohnCount() const { return redJohnInstances_; }
     std::size_t remotePlayerCount() const { return playerTags_.size(); }
     bool blackHoleVisible() const { return holeVisible_; }
@@ -134,6 +141,8 @@ private:
     void buildDesert(const Frame& frame);
     void createFrutiger();
     void buildFrutiger(const Frame& frame);
+    void loadButterfly();
+    void drawFrutigerButterflies(const Frame& frame,DirectX::FXMMATRIX viewProjection);
     void buildRedJohn(const Frame& frame);
     void createRedJohnCutscene();
     void drawRedJohnCutscene(const Frame& frame);
@@ -228,6 +237,9 @@ private:
     std::vector<Instance> illusionaryInk_; // 黒い帯は発光バッチから分け、黒色を保ちます。
     std::vector<Instance> frutigerInstances_;
     bool frutigerVisible_{};
+    std::unique_ptr<GlbModel> butterfly_;
+    bool butterflyAttempted_{};
+    std::string butterflyStatus_{"Not loaded"};
     std::size_t redJohnInstances_{};
     struct PlayerTag {float x{},y{};std::string name,id,aura;};
     std::vector<PlayerTag> playerTags_;

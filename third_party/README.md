@@ -31,3 +31,7 @@ bone mapping for GPU skinning and animation tests.
 ## stb_vorbis
 
 Ogg Vorbis decoder v1.22 from https://github.com/nothings/stb/blob/master/stb_vorbis.c. Upstream MIT / public-domain dual license is preserved in stb/LICENSE.txt and included in binary packages. Compiled into the game; no codec installation or runtime download is required.
+
+## Bundled butterfly model
+
+**blue butterfly** by [Erina eka syaharani](https://sketchfab.com/erinaekasyaharani), from [Sketchfab](https://sketchfab.com/3d-models/blue-butterfly-4fe9c2835522458a822b5b784a680de4), is used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The original GLB is preserved without file modifications. Runtime placement, scale and material rendering are adjusted for Frutiger Aero. Full attribution and change details accompany the asset in [data/models/README.md](../data/models/README.md).

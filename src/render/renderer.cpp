@@ -599,6 +599,8 @@ void Renderer::world(const Frame& f) {
     context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
     context_->DrawIndexedInstanced(36,static_cast<UINT>(instances_.size()),0,0,0);
     if(useVrm) vrm_->draw(context_.Get(),view*projection,base,pose);
+    // 蝶の実体を先に描いて深度を保存し、その上へ透明な泡・青空を重ねます。
+    if(frutiger)drawFrutigerButterflies(f,view*projection);
     drawEffects(f);
     drawRemotePlayers(f,view*projection,eye,fogColor);
 }

@@ -3,6 +3,7 @@
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <stdexcept>
 
 // 読む順番: buildFrutiger()の「草原→空→泡→蝶→きらめき」。
@@ -124,6 +125,18 @@ float random(unsigned index,unsigned salt) {
     const float value=std::sin(index*127.1f+salt*311.7f)*43758.5453f;
     return value-std::floor(value);
 }
+// 同じ飛行位置をGLBと、読み込み失敗時の従来表示の両方で使います。
+// カメラを回しても軌道は変えず、アバターのXZ位置へだけ追従させます。
+struct ButterflyFlight {float angle{},x{},y{},z{},size{},bank{};};
+ButterflyFlight butterflyFlight(const Frame& f,unsigned index) {
+    const float angle=index*2*Pi/settings::ButterflyCount+f.time*settings::ButterflyOrbitSpeed;
+    const float radius=settings::ButterflyRadius*(.62f+random(index,20)*.35f);
+    return {angle,f.avatarX+std::cos(angle)*radius,
+        .85f+random(index,21)*2.4f+.24f*std::sin(f.time*1.55f+index),
+        f.avatarZ+std::sin(angle)*radius,
+        settings::ButterflySize*(.72f+random(index,22)*.48f),
+        .22f*std::sin(f.time*.9f+index)};
+}
 }
 
 void Renderer::createFrutiger() {
@@ -136,7 +149,39 @@ void Renderer::createFrutiger() {
     frutigerInstances_.reserve(512);
 }
 
+void Renderer::loadButterfly() {
+    if(butterflyAttempted_)return;
+    butterflyAttempted_=true; // 失敗した時も、毎フレーム同じファイルを読み直しません。
+    try {
+        std::wstring executable(32768,L'\0');
+        const DWORD count=GetModuleFileNameW(nullptr,executable.data(),static_cast<DWORD>(executable.size()));
+        if(!count || count==executable.size())throw std::runtime_error("Cannot locate butterfly GLB");
+        executable.resize(count);
+        const auto path=std::filesystem::path(executable).parent_path()/L"data"/L"models"/L"blue-butterfly.glb";
+        butterfly_=GlbModel::load(device_.Get(),path);
+        butterflyStatus_="Ready / embedded butterfly GLB";
+    } catch(const std::exception& error) {
+        butterfly_.reset();butterflyStatus_=std::string("Fallback / ")+error.what();
+    }
+}
+
+void Renderer::drawFrutigerButterflies(const Frame& f,FXMMATRIX viewProjection) {
+    if(!butterfly_)return;
+    const float animationTime=std::max(0.f,f.time)*settings::ButterflyAnimationSpeed;
+    const float cycle=butterfly_->animationDuration();
+    for(unsigned i=0;i<settings::ButterflyCount;++i) {
+        const auto flight=butterflyFlight(f,i);
+        // +Zが蝶の正面。円の接線へ向けて、進行方向を見ながら飛ばします。
+        const auto model=XMMatrixScaling(flight.size,flight.size,flight.size)*
+            XMMatrixRotationX(settings::ButterflyModelPitch)*XMMatrixRotationZ(flight.bank)*
+            XMMatrixRotationY(-flight.angle+settings::ButterflyModelYaw)*XMMatrixTranslation(flight.x,flight.y,flight.z);
+        // 羽ばたきの開始位置を個体ごとにずらし、7匹が同時に羽を閉じるのを避けます。
+        butterfly_->draw(context_.Get(),viewProjection,model,animationTime+random(i,23)*cycle);
+    }
+}
+
 void Renderer::buildFrutiger(const Frame& f) {
+    loadButterfly(); // このオーラを初めて使う時だけモデルを準備。他のオーラの起動は重くしません。
     const float t=f.time,ox=f.avatarX,oz=f.avatarZ;
     // 専用の板を通常合成で描きます。既存オーラ用の発光バッチへは追加しません。
     auto material=[&](FXMMATRIX model,Color tint,unsigned style,float opacity=1.f) {
@@ -188,14 +233,12 @@ void Renderer::buildFrutiger(const Frame& f) {
             oz+std::sin(angle)*3.5f,2.15f,2.15f,{1,1,1},2,.97f);
     }
 
-    // 4. 青い蝶。羽の根元を中心に回転し、単なる平面画像の拡大縮小とは違う羽ばたきに。
-    for(unsigned i=0;i<settings::ButterflyCount;++i) {
-        const float angle=i*2*Pi/settings::ButterflyCount+t*settings::ButterflyOrbitSpeed;
-        const float radius=settings::ButterflyRadius*(.62f+random(i,20)*.35f);
-        const float y=.85f+random(i,21)*2.4f+.24f*std::sin(t*1.55f+i);
-        const float size=settings::ButterflySize*(.72f+random(i,22)*.48f);
-        const float bank=.22f*std::sin(t*.9f+i),flap=.28f+.90f*(.5f+.5f*std::sin(t*settings::ButterflyFlapSpeed+i*1.7f));
-        const auto origin=XMMatrixRotationZ(bank)*faceCamera*XMMatrixTranslation(ox+std::cos(angle)*radius,y,oz+std::sin(angle)*radius);
+    // 4. 青い蝶。通常は別の不透明バッチでGLBを描きます。
+    // 素材がない・壊れている場合だけ、従来の小さい羽と体をここへ追加します。
+    for(unsigned i=0;!butterfly_ && i<settings::ButterflyCount;++i) {
+        const auto flight=butterflyFlight(f,i);
+        const float size=flight.size*.5f,flap=.28f+.90f*(.5f+.5f*std::sin(t*settings::ButterflyFlapSpeed+i*1.7f));
+        const auto origin=XMMatrixRotationZ(flight.bank)*faceCamera*XMMatrixTranslation(flight.x,flight.y,flight.z);
         for(int side:{-1,1}) {
             const auto wing=XMMatrixScaling(size*.74f,size,1)*XMMatrixTranslation(side*size*.34f,0,0)*
                 XMMatrixRotationY(side*flap)*origin;

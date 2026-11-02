@@ -4,6 +4,8 @@
 
 左のクレジットボタンから、灰色の半透明パネルに文字と画像が順々に現れる画面を開けます。開くと「ポコッ」と鳴ります。v0.1.23では背景の不透明度を70%へ変更しました。[クレジットの改造ガイド](credits-guide.md)で、透明度・表示の間隔・音の高さなどを変えてみてください。
 
+v0.1.24では、Frutiger Aeroの蝶に提供されたGLBモデルと羽ばたきを使います。大きさ・周回・羽ばたきの倍率は`src/tuning/frutiger.hpp`で変更でき、素材と出典は`data/models`へまとめています。[蝶と景色の改造ガイド](frutiger-aero.md)
+
 3D画面はウィンドウの内側全体に表示し、左上の星と右下の三本線からメニューを開きます。左のオーラ・マルチプレイヤー・設定はダミー、クレジットと右のImGui・接続先設定・終了は実際に動作します。[全面画面とメニューのガイド](screen-menu-guide.md)では、透明度・幅・星が1回転する時間を変える手順を説明します。
 
 左上の星・タイトル画像と周回ロケットはv0.1.20の表示を引き継ぎます。[ヘッダー画像のガイド](branding-guide.md)では、画像の位置・大きさと、ロケットが輪を1周する速度の変更を説明します。星を押したときの1回転とは別の調整値です。
@@ -12,7 +14,7 @@ v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専�
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.23-alpha.1/StarRng-v0.1.23-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.24-alpha.1/StarRng-v0.1.24-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -91,7 +93,8 @@ inline constexpr float HeadWidth = 7.0f;
 | Pharaohの翼を横へ広げる | 同上 → `PharaohWingWidth` | `3.45f` → `4.f`。左右の長い羽と短い羽が一緒に広がる |
 | Frutiger Aeroの草原を広げる | `src/tuning/frutiger.hpp` → `MeadowRadius` | `4.7f` → `5.5f`。芝生と小川が一緒に広がる |
 | Frutiger Aeroの泡を減らす | 同上 → `BubbleCount` | `22` → `12`。周りを飛ぶ泡が減る。大きい目印の泡2つは残る |
-| Frutiger Aeroの蝶を大きくする | 同上 → `ButterflySize` | `.62f` → `.85f`。青い羽と模様が見やすくなる |
+| Frutiger Aeroの蝶を大きくする | 同上 → `ButterflySize` | `1.2f` → `1.6f`。GLBの青い蝶が大きくなる |
+| Frutiger Aeroの羽ばたきを遅くする | 同上 → `ButterflyAnimationSpeed` | `1.f` → `.5f`。モデル内の羽ばたきが半分の速さになる |
 | Frutiger Aeroの雲を遅くする | 同上 → `CloudSpeed` | `.025f` → `.0125f`。雲が半分の速さで流れる |
 | Red johnの顔を大きくする | `src/tuning/redjohn.hpp` → `FaceRadius` | `1.06f` → `1.25f`。壁の赤い顔だけが大きくなる |
 | Red johnのペンキを太くする | 同上 → `PaintWidth` | `.063f` → `.09f`。赤い輪・目・口の線が太くなる |

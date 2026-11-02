@@ -135,7 +135,9 @@ void Renderer::drawRemotePlayers(const Frame& source,FXMMATRIX vp,FXMVECTOR eye,
         context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cb=constants_.Get();context_->VSSetConstantBuffers(0,1,&cb);context_->PSSetConstantBuffers(0,1,&cb);
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depthState_.Get(),0);context_->OMSetBlendState(nullptr,nullptr,0xffffffff);
-        context_->DrawIndexedInstanced(36,static_cast<UINT>(instances_.size()),0,0,0);drawEffects(f);
+        context_->DrawIndexedInstanced(36,static_cast<UINT>(instances_.size()),0,0,0);
+        if(frutigerVisible_)drawFrutigerButterflies(f,vp);
+        drawEffects(f);
         // 自分と相手の名前に同じ全画面の投影を使い、位置だけ旧UI枠へずれるのを防ぎます。
         D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};
         XMFLOAT3 tag;XMStoreFloat3(&tag,XMVector3Project(XMVectorSet(current.x,3.6f,current.z,1),viewport.TopLeftX,viewport.TopLeftY,

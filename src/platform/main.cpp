@@ -1471,10 +1471,19 @@ private:
         time_=2;distance_=16;pitch_=.30f;yaw_=0;movement_=0;render(false);captureExtra(L"-frutiger");
         if(auto_ || renderer_->frutigerCount()<100 || renderer_->frutigerCount()>1000 || progress_.counts!=beforeFrutigerCounts || log_.size()!=beforeFrutigerLogs)
             throw std::runtime_error("Frutiger preview/budget/history isolation failed");
+        if(!renderer_->butterflyReady() || renderer_->butterflyVertices()!=29558 || renderer_->butterflyDrawCount()!=3 ||
+            renderer_->butterflyAnimationTracks()!=4 || std::abs(renderer_->butterflyAnimationDuration()-1.25f)>.001f)
+            throw std::runtime_error("Bundled butterfly GLB/animation failed: "+renderer_->butterflyStatus());
         if(!opts_.warp && !opts_.capture.empty())for(unsigned i=0;i<24;++i) {
             time_=i/12.f;render(false);const auto suffix=L"-frutiger-frame-"+std::to_wstring(i);captureExtra(suffix.c_str());
         }
         pitch_=.9f;render(false);captureExtra(L"-frutiger-floor");pitch_=.30f;
+        const float butterflyDistance=distance_,butterflyYaw=yaw_;
+        distance_=8.5f;yaw_=.8f;render(false);captureExtra(L"-frutiger-butterfly-close");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700));render(false);captureExtra(L"-frutiger-glb-small");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900));render(false);
+        if(!renderer_->butterflyReady())throw std::runtime_error("Resizing discarded the butterfly model");
+        distance_=butterflyDistance;yaw_=butterflyYaw;
         // 実接続の試験は別のmultiplayer_clientテスト。この描画試験は架空の2人だけを使います。
         aura::net::Snapshot peers;peers.state=aura::net::State::Connected;peers.userId="1234567890";peers.status="Connected / localhost test";
         peers.players.push_back({"1234567891","Blue Star","",{x_-4,z_,0,true,presentation_.settings.biome,"frutiger_aero",0,{.2f,.6f,1}}, {}});
@@ -1589,7 +1598,7 @@ private:
                <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
             out<<"Planets: PASS / garden, desert, ocean, forest, volcano, extra, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
             out<<"Screen shell: PASS / full viewport, star spin once, delayed left menu with three dummy items, hamburger, real ImGui/server settings, endpoint save without connect, Esc/F1 focus restore, removed sidebar hit targets, no progress mutation\nCredits: PASS / supplied four images, sequential reveal, restart, resize, Esc/X/F1, isolated input and click sound, no progress mutation\nExtra acquisition: PASS / 64 actual rolls, all six exclusive auras acquired, CutScene triggers, equipment preserved\n";
-            out<<"Frutiger Aero: PASS / grass, sky/clouds, glossy bubbles, animated blue butterflies, <=1000 boards, preview isolation\n"
+            out<<"Frutiger Aero: PASS / grass, sky/clouds, glossy bubbles, supplied GLB butterflies (29558 vertices shared / 3 meshes / 4 animation tracks / 1.25s), resize, remote players, <=1000 boards, preview isolation\n"
                <<"Multiplayer render: PASS / two same-planet block avatars with detailed auras, other-planet filtering, profile window input suppression; actual HTTP covered by separate client/server tests\n"
                <<"Multiplayer input/preview: PASS / success auto-return including skipped Connecting, movement, right-drag, reopen, Esc/Back preserves connection, F1, displayed aura/level payload, failure remains visible, inventory/history isolation\n";
             out<<"Profile: PASS / UTF-8 username and Discord settings save/restore; editable total 0 / 123456789 / original, AutoRoll stop, inventory/history/best unchanged\n"

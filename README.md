@@ -1,4 +1,4 @@
-# Star's RNG — Alpha 0.1 / v0.1.23
+# Star's RNG — Alpha 0.1 / v0.1.24
 
 C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームです。
 
@@ -6,11 +6,11 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 
 ## 今回の変更
 
-- **クレジット背景の不透明度を30%から70%へ変更しました。** 灰色のパネルが濃くなり、後ろのゲーム画面を少し透かしながら文字と画像を読みやすくします。調整値は`src/tuning/credits.hpp`の`PanelOpacity=.70f`です。
-- 左上の星 → **クレジット**からスタッフクレジットを開けます。白い輪郭の文字と提供画像を表示し、上の「credits」は開いた瞬間から同じ位置に表示します。
-- 内容は **左上から左下、そのあと右上**へ、左から滑りながら順々にフェードインします。Aura Reviewerの2名 → Illustrator → Special Thanksの順で、標準では約1.61秒で全項目が揃います。
-- 開くと短い**「ポコッ」**という効果音が1回鳴ります。×・Esc・パネル外のクリックで閉じられ、もう一度開くと最初から再生します。クレジット中はAutoRoll・ロール・移動を止め、後ろのワールドとBGMは続きます。
-- `src/tuning/credits.hpp`で透明度・幅・順番の間隔・移動距離、`src/tuning/credits_audio.hpp`で音量・音の高さ・余韻を調整できます。[クレジットの改造ガイド](docs/credits-guide.md)
+- **Frutiger Aeroの青い蝶を、提供されたGLBモデルへ置き換えました。** 元の青い模様と、GLBに入っている約1.25秒の羽ばたきを使い、プレイヤーの周りを飛ばします。草原・青空・雲・シャボン玉は引き続き表示します。
+- 1つのモデルとテクスチャを7匹で共有します。大きさ・数・周回・羽ばたきの再生倍率は`src/tuning/frutiger.hpp`で変更できます。モデルが見つからない場合は従来の数式の蝶へ戻します。[Frutiger Aeroの改造ガイド](docs/frutiger-aero.md)
+- 同梱モデルは**blue butterfly / Erina eka syaharani**、[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者・出典・変更内容は[モデルのクレジット](data/models/README.md)へ記載し、提供GLBは変更せず同梱しています。
+
+スタッフクレジットは左上の星から開けます。背景の不透明度70%、順番に現れる文字・画像、開くときの「ポコッ」は継続します。[クレジットの改造ガイド](docs/credits-guide.md)
 
 全面ゲーム画面、左上の画像ロゴ、Roll / AutoRoll、右下の三本線メニューは継続します。左の**オーラ・マルチプレイヤー・設定は引き続きダミー**です。右のImGui・IP設定・ゲーム終了は実際に動作します。[画面とメニューの操作](docs/screen-menu-guide.md)
 
@@ -71,7 +71,7 @@ Discordデスクトップ版を起動すると、ユーザー名とロール回�
 
 ## 初心者向けの改造入口
 
-[改造用ソースZIP v0.1.23](https://github.com/rx107/aura-rng/releases/download/v0.1.23-alpha.1/StarRng-v0.1.23-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
+[改造用ソースZIP v0.1.24](https://github.com/rx107/aura-rng/releases/download/v0.1.24-alpha.1/StarRng-v0.1.24-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
 
 1. `src/tuning` の数字を1つだけ変更して保存。
 2. ゲームを閉じて `Develop.cmd` を実行。

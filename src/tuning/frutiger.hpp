@@ -4,7 +4,7 @@
 // Frutiger Aeroの見た目を自由に変えるための入口です。
 // 保存 → Develop.cmdで再ビルド → F1のオーラからFrutiger Aeroを表示、で確認します。
 // 長さはゲーム内座標（ブロックアバターの身長は約3）、速さは1秒あたりです。
-// 画像ファイルは不要です。草原、空、反射、蝶の模様はGPU上の数式で描きます。
+// 草原・空・反射はGPU上の数式。青い蝶だけdata/models/blue-butterfly.glbを使います。
 namespace aura::tuning::frutiger {
 
 // 足元の丸い芝生。半径を大きくすると草原と小川が一緒に広がります。
@@ -33,12 +33,17 @@ inline constexpr float BubbleHeight=6.7f;
 inline constexpr float BubbleRiseSpeed=.12f; // 周期/秒。例:.06でゆっくり半分の速さ。
 inline constexpr float BubbleOpacity=.94f;
 
-// 青い蝶。一匹につき羽4枚（表裏）と体2枚を描く小さな立体です。
+// 青い蝶。GLBのメッシュ・テクスチャを一度だけ読み、同じ素材を7匹で共有します。
+// 羽ばたきはGLBに入っているアニメーション。飛ぶ位置と大きさは以下の数値で調整。
 inline constexpr unsigned ButterflyCount=7;
-inline constexpr float ButterflySize=.62f;
+inline constexpr float ButterflySize=1.2f; // 正規化したGLB全体の大きさ。1.6にすると蝶が大きくなる。
 inline constexpr float ButterflyRadius=3.2f;
 inline constexpr float ButterflyOrbitSpeed=.24f; // 周回の角度/秒。負なら逆回転。
-inline constexpr float ButterflyFlapSpeed=12.f; // 羽ばたきの角速度。0で羽が止まります。
+inline constexpr float ButterflyAnimationSpeed=1.f; // GLBの再生倍率。2で羽ばたきが2倍、0で静止。
+inline constexpr float ButterflyModelYaw=0.f; // モデルの正面方向を調整するラジアン。約3.14で前後反転。
+inline constexpr float ButterflyModelPitch=0.f; // 0で元の傾き。約1.57で90度起こす。
+// GLBが欠けた時だけ、従来の数式で描く蝶へ戻します。通常のGLBの色・速度には影響しません。
+inline constexpr float ButterflyFlapSpeed=12.f;
 inline constexpr Color ButterflyColor{.025f,.38f,1.f};
 
 // 水滴のような小さい輝き。数を増やすと華やかになりますが、光らせすぎない量が初期値です。
@@ -49,4 +54,5 @@ inline constexpr float SparkleSize=.16f;
 static_assert(MeadowRadius>0 && SkyWidth>0 && SkyHeight>0 && SkyDistance>0);
 static_assert(GrassBladeCount<=512 && BubbleCount<=128 && ButterflyCount<=24 && SparkleCount<=64);
 static_assert(BubbleMinSize>0 && BubbleMaxSize>=BubbleMinSize && BubbleRiseSpeed>=0);
+static_assert(ButterflySize>0 && ButterflyAnimationSpeed>=0);
 } // namespace aura::tuning::frutiger

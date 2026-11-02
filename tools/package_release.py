@@ -2,7 +2,7 @@
 """Create the three public ZIP files after the game and its tests have passed.
 
 例: python tools/package_release.py --windows-folder package --dest dist
-     --tag v0.1.23-alpha.1
+     --tag v0.1.24-alpha.1
 通常はGitに登録したファイルだけをソースZIPへ入れます。Gitのない作業用
 フォルダーでは --paths-file public-paths.json で明示した一覧を使えます。
 このスクリプト自体はビルド・通信・GitHubへの公開を行いません。
@@ -36,6 +36,11 @@ APPROVED_AUDIO = {
     "red_john_cutscene.m4a",  # 提供MP4のAACを再圧縮せず抽出。提供者の許可を得たCutScene音声
 }
 AUDIO_SUFFIXES = {".mp3", ".mpeg", ".ogg", ".m4a", ".wav", ".flac", ".aac", ".opus", ".wma", ".aif", ".aiff"}
+# 提供されたCC BY 4.0モデルだけを、作者表記と一緒に同梱します。
+# .glb全体を許可せず、パスと元ファイルのSHA256の両方を照合します。
+APPROVED_MODELS = {
+    "data/models/blue-butterfly.glb": "545528d619fa6ab3e2276fd47ccee9c49df8d2a42e9a3514c121d9aef8e01ad1",
+}
 PRIVATE_NAMES = {
     "multiplayer_identity.json", "identities.json", "profile.png",
     "progress.txt", "settings.txt", "rolls.csv", "id_rsa", "id_ed25519",
@@ -99,7 +104,8 @@ def audit_file(folder: Path, relative: str, *, runtime: bool = False) -> Path:
     name, suffix = lowered.name, lowered.suffix
     if name in PRIVATE_NAMES or any(part in PRIVATE_FOLDERS or part.startswith(".test-multiplayer-") for part in lowered.parts):
         raise ValueError(f"Private/runtime file cannot be published: {relative}")
-    if name.startswith(".env.") or suffix in FORBIDDEN_SUFFIXES or any(fragment in name for fragment in REFERENCE_NAMES):
+    approved_model = relative in APPROVED_MODELS
+    if name.startswith(".env.") or (suffix in FORBIDDEN_SUFFIXES and not approved_model) or any(fragment in name for fragment in REFERENCE_NAMES):
         raise ValueError(f"Private asset, key, archive or reference file cannot be published: {relative}")
     if suffix in AUDIO_SUFFIXES and (name not in APPROVED_AUDIO or lowered.parts[:2] != ("data", "audio") or len(lowered.parts) != 3):
         raise ValueError(f"Audio is not in the approved public music list: {relative}")
@@ -109,6 +115,8 @@ def audit_file(folder: Path, relative: str, *, runtime: bool = False) -> Path:
     # 秘密鍵・実運用ホスト・トークンを、拡張子を変えただけで混ぜないための検査。
     # 文書に書く接続先は rng.example.com のような例示用ドメインにします。
     contents = path.read_bytes()
+    if approved_model and hashlib.sha256(contents).hexdigest() != APPROVED_MODELS[relative]:
+        raise ValueError(f"Approved model bytes do not match: {relative}")
     if re.search(rb"-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----", contents):
         raise ValueError(f"Private key contents detected: {relative}")
     if re.search(rb"\bgh[pousr]_[A-Za-z0-9]{20,}\b", contents):
@@ -164,24 +172,26 @@ def make_zip(destination: Path, top: str, entries: list[tuple[str, Path]]) -> Pa
 def release_notes(tag: str) -> str:
     return f"""Star's RNG Alpha 0.1 / {tag}
 
-## クレジット背景を濃くする
+## Frutiger Aeroの青い蝶をGLBへ
 
-クレジットの灰色パネルの不透明度を30%から70%へ変更しました。後ろのゲーム画面を少し透かしながら、文字と画像を読みやすくします。設定はsrc/tuning/credits.hppのPanelOpacity=.70fです。
+Frutiger Aeroの青い蝶を、提供されたblue butterflyのGLBモデルへ置き換えました。元の青いテクスチャと約1.25秒の羽ばたきを使い、1つのモデル（3メッシュ）とテクスチャを7匹で共有して、プレイヤーの周りを飛ばします。草原・青空・雲・光沢のあるシャボン玉は引き続き表示します。
 
-表示順・フェード・固定見出し・画像・「ポコッ」の音・開閉方法は従来どおりです。左右のメニューの透明度や、オーラの演出・確率・所持品・BGMは変更していません。背景の調整例はdocs/credits-guide.mdにあります。
+大きさ・数・周回・羽ばたきの再生倍率はsrc/tuning/frutiger.hppに集約し、docs/frutiger-aero.mdに数字を変えた結果と処理の担当を記載しています。モデルが欠けた場合は従来の数式の蝶へ戻します。
+
+同梱モデルはblue butterfly / Erina eka syaharani、CC BY 4.0です。作者・出典・ライセンスへのリンク、ゲーム側での表示変更をdata/models/README.mdへ記載しました。GLBファイル自体は提供された元ファイルと同一です。
 
 ## 検証と配布
 
 公開ジョブはWindowsのビルド・CTest・DirectX WARP描画試験と、Linuxのコア・サーバー試験が成功してから実行します。
-クレジットの表示・開閉・リサイズ・入力と所持品の分離を確認する構成です。検証記録の詳細はdocs/validation.mdへまとめます。
-従来のUI画像と許可済み音源を同梱し、私有VRM・参考資料・個人セーブ・プロフィール写真・秘密鍵は同梱しません。
+GLBの読み込み・羽ばたき・周回、リサイズとプレビューの分離、既存オーラの回帰を検証する構成です。検証記録の詳細はdocs/validation.mdへまとめます。
+作者表記付きの青い蝶GLB、従来のUI画像と許可済み音源を同梱します。私有VRM・参考資料・個人セーブ・プロフィール写真・秘密鍵は同梱しません。
 ZIPのCRCと公開ファイルを検査し、SHA256SUMS.txtを添付します。
 
 ## 互換性・使い方
 
 既存の専用サーバーと互換性があります（protocol=1）。VPSの更新や契約変更は不要です。
 展開した新しいStarRng.exeを起動してください。ゲーム内の保存先は従来どおりです。
-改造する場合はsource ZIPを使い、docs/credits-guide.mdを開いてください。初回のビルドはdocs/development-guide.mdで説明しています。
+改造する場合はsource ZIPを使い、docs/frutiger-aero.mdを開いてください。初回のビルドはdocs/development-guide.mdで説明しています。クレジットの背景は不透明度70%を維持し、他のオーラ・確率・所持品・8曲のBGMは変更していません。
 """
 
 
@@ -189,7 +199,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--windows-folder", type=Path, required=True, help="CMake --installで作ったWindows配布フォルダー")
     parser.add_argument("--dest", type=Path, default=Path("dist"), help="ZIPとSHA256SUMS.txtの保存先（初期値: dist）")
-    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.23-alpha.1")
+    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.24-alpha.1")
     parser.add_argument("--paths-file", type=Path, help="Gitがない手元の作業用: 公開パスのJSON配列または1行1パスの一覧")
     args = parser.parse_args()
     version = version_from_cmake()
