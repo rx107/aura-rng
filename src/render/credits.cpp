@@ -133,7 +133,7 @@ void Renderer::creditsUi(const Frame& frame) {
     if(frame.creditsTime<0)return;
     const auto panel=credits::layout(logicalW_,logicalH_);
     const float scale=panel.width/cfg::ReferenceWidth;
-    // .30fは「30%だけ不透明」。画面全体を暗くする別の黒い背景は重ねません。
+    // .70fは「70%不透明」。画面全体を暗くする別の黒い背景は重ねません。
     rect(panel.x,panel.y,panel.width,panel.height,D2D1::ColorF(cfg::PanelGray,cfg::PanelGray,cfg::PanelGray,cfg::PanelOpacity));
     D2D1_MATRIX_3X2_F previous;d2d_->GetTransform(&previous);
     auto words=[&](std::size_t index,float x,float y,float alpha,float offset=0,bool centered=false) {

@@ -1,4 +1,4 @@
-# Star's RNG — Alpha 0.1 / v0.1.22
+# Star's RNG — Alpha 0.1 / v0.1.23
 
 C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームです。
 
@@ -6,7 +6,8 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 
 ## 今回の変更
 
-- 左上の星 → **クレジット**から、提供素材を使ったスタッフクレジットを開けます。不透明度30%の灰色パネルに、白い輪郭の文字と画像を表示します。上の「credits」は開いた瞬間から同じ位置に表示します。
+- **クレジット背景の不透明度を30%から70%へ変更しました。** 灰色のパネルが濃くなり、後ろのゲーム画面を少し透かしながら文字と画像を読みやすくします。調整値は`src/tuning/credits.hpp`の`PanelOpacity=.70f`です。
+- 左上の星 → **クレジット**からスタッフクレジットを開けます。白い輪郭の文字と提供画像を表示し、上の「credits」は開いた瞬間から同じ位置に表示します。
 - 内容は **左上から左下、そのあと右上**へ、左から滑りながら順々にフェードインします。Aura Reviewerの2名 → Illustrator → Special Thanksの順で、標準では約1.61秒で全項目が揃います。
 - 開くと短い**「ポコッ」**という効果音が1回鳴ります。×・Esc・パネル外のクリックで閉じられ、もう一度開くと最初から再生します。クレジット中はAutoRoll・ロール・移動を止め、後ろのワールドとBGMは続きます。
 - `src/tuning/credits.hpp`で透明度・幅・順番の間隔・移動距離、`src/tuning/credits_audio.hpp`で音量・音の高さ・余韻を調整できます。[クレジットの改造ガイド](docs/credits-guide.md)
@@ -70,7 +71,7 @@ Discordデスクトップ版を起動すると、ユーザー名とロール回�
 
 ## 初心者向けの改造入口
 
-[改造用ソースZIP v0.1.22](https://github.com/rx107/aura-rng/releases/download/v0.1.22-alpha.1/StarRng-v0.1.22-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
+[改造用ソースZIP v0.1.23](https://github.com/rx107/aura-rng/releases/download/v0.1.23-alpha.1/StarRng-v0.1.23-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
 
 1. `src/tuning` の数字を1つだけ変更して保存。
 2. ゲームを閉じて `Develop.cmd` を実行。

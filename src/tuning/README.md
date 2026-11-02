@@ -15,7 +15,7 @@
 | BreakThroughの字幕 | [cutscene.hpp](cutscene.hpp) | `BreakthroughWordTimes` の各秒数。字幕の時差と単語の時刻はF1からも再ビルドなしで変更可能。 |
 | UI の色 | [ui.hpp](ui.hpp) | `Accent` を `{1.f, .55f, .20f}`。ミント色がオレンジになる。 |
 | 左右メニュー・星クリックの1回転 | [shell.hpp](shell.hpp) | `PanelOpacity` を `.68f → .50f`でステージが透ける。`LogoSpinSeconds`を`.65f → 1.f`で星の回転をゆっくりにする。[幅・位置と操作のガイド](../../docs/screen-menu-guide.md)。 |
-| クレジットの背景・順番・フェード | [credits.hpp](credits.hpp) | `PanelOpacity`を`.30f → .50f`で灰色の背景が濃くなる。`RevealStaggerSeconds`を`.18f → .30f`で項目の間隔が長くなる。[改造ガイド](../../docs/credits-guide.md)。 |
+| クレジットの背景・順番・フェード | [credits.hpp](credits.hpp) | `PanelOpacity`を`.70f → .90f`で灰色の背景が濃くなる。`RevealStaggerSeconds`を`.18f → .30f`で項目の間隔が長くなる。[改造ガイド](../../docs/credits-guide.md)。 |
 | クレジットを開く「ポコッ」の音 | [credits_audio.hpp](credits_audio.hpp) | `Gain`を`.60f → .40f`で音を控えめにする。`EndFrequencyHz`を`180.f → 140.f`で低い音へ。[音の調整](../../docs/credits-guide.md#ポコッという音を変える)。 |
 | 左上の星・タイトル・周回ロケット | [branding.hpp](branding.hpp) | `OrbitSeconds`を`5.f → 8.f`。ロケットの1周を5秒から8秒へ。[画像と数値の見方](../../docs/branding-guide.md)。 |
 | ブロック / VRM 共通のポーズ | [avatar.hpp](avatar.hpp) | `singularity` 内の `Lift` を `.55f → .85f`。少し高く浮く。 |

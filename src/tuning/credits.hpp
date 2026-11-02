@@ -3,7 +3,7 @@
 // クレジットを自分で調整する入口です。長さは1440×900基準、時間は秒。
 // 数字を変更 → 保存 → Develop.cmdで再ビルド → 左メニューのクレジット、で見比べます。
 namespace aura::tuning::credits {
-inline constexpr float PanelOpacity=.30f; // .30=不透明度30%。.50にすると背景が濃くなる。
+inline constexpr float PanelOpacity=.70f; // .70=不透明度70%。.90にすると背景がさらに濃くなる。
 inline constexpr float PanelGray=.38f; // 0=黒、1=白。RGBを同じ値にして無彩色のグレーにする。
 inline constexpr float PanelMaxWidth=1120.f; // 幅を広げると中の文字・画像も一緒に大きくなる。
 inline constexpr float HorizontalMargin=48.f,VerticalMargin=70.f;

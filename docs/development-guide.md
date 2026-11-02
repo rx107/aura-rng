@@ -2,7 +2,7 @@
 
 まずは「数字を1つ変えて、画面が変わる」を体験しましょう。C++を全部理解してから始める必要はありません。
 
-v0.1.22では左のクレジットボタンから、灰色の半透明パネルに文字と画像が順々に現れる画面を開けます。開くと「ポコッ」と鳴ります。[クレジットの改造ガイド](credits-guide.md)で、透明度・表示の間隔・音の高さなどを変えてみてください。
+左のクレジットボタンから、灰色の半透明パネルに文字と画像が順々に現れる画面を開けます。開くと「ポコッ」と鳴ります。v0.1.23では背景の不透明度を70%へ変更しました。[クレジットの改造ガイド](credits-guide.md)で、透明度・表示の間隔・音の高さなどを変えてみてください。
 
 3D画面はウィンドウの内側全体に表示し、左上の星と右下の三本線からメニューを開きます。左のオーラ・マルチプレイヤー・設定はダミー、クレジットと右のImGui・接続先設定・終了は実際に動作します。[全面画面とメニューのガイド](screen-menu-guide.md)では、透明度・幅・星が1回転する時間を変える手順を説明します。
 
@@ -12,7 +12,7 @@ v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専�
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.22-alpha.1/StarRng-v0.1.22-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.23-alpha.1/StarRng-v0.1.23-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -61,7 +61,7 @@ inline constexpr float HeadWidth = 7.0f;
 | サックスと字幕を合わせる | F1 → オーラ → BreakThrough → 字幕タイミング / 秒 | 全体の時差 `-.10f` で0.1秒早く。再ビルド不要。[操作手順](stage-and-cutscene-guide.md) |
 | UIの色を変える | `src/tuning/ui.hpp` → `Accent` | `{1.f,.55f,.20f}` で共通のミント色をオレンジへ |
 | メニューからゲームをもっと透かす | `src/tuning/shell.hpp` → `PanelOpacity` | `.68f` → `.50f`。パネルの不透明度が下がり、後ろのステージが見えやすくなる。[幅・回転時間も調整](screen-menu-guide.md) |
-| クレジットの背景を濃くする | `src/tuning/credits.hpp` → `PanelOpacity` | `.30f` → `.50f`。クレジットの灰色だけが濃くなる。[最初の手順](credits-guide.md) |
+| クレジットの背景を濃くする | `src/tuning/credits.hpp` → `PanelOpacity` | `.70f` → `.90f`。クレジットの灰色だけが濃くなる。[最初の手順](credits-guide.md) |
 | クレジットの表示をゆっくりにする | 同上 → `RevealStaggerSeconds` | `.18f` → `.30f`。次の文字・画像が出始めるまでの間隔が長くなる |
 | クレジットの音を小さくする | `src/tuning/credits_audio.hpp` → `Gain` | `.60f` → `.40f`。開いたときの「ポコッ」が控えめになる |
 | 左上のロケットをゆっくり回す | `src/tuning/branding.hpp` → `OrbitSeconds` | `5.f` → `8.f`で1周が5秒から8秒へ。[位置や大きさの例](branding-guide.md) |
