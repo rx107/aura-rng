@@ -4,6 +4,7 @@
 #include "core/audio_envelope.hpp"
 #include "core/equinox_animation.hpp"
 #include "core/shell.hpp"
+#include "core/credits.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -30,6 +31,29 @@ int main(int argc, char** argv) {
             menu.tapStar();menu.update(.1f);menu.toggleRight();menu.update(3);
             check(menu.rightOpen && !menu.leftOpen && !menu.spinning(),"Right menu did not cancel pending left menu reveal");
             menu.close();menu.update(3);check(!menu.active(),"Dismissed menus reopened");
+        }
+        {
+            // 左列を読み終えてから右列へ。時間を戻した時も表示状態が残らない。
+            for(float time:{0.f,.3f,.8f,1.2f,2.f}) {
+                float previous=1;
+                for(std::size_t i=0;i<aura::credits::GroupCount;++i) {
+                    const auto item=aura::credits::appearance(time,i);
+                    check(item.alpha>=0 && item.alpha<=previous,"Credits items appeared out of reading order");
+                    check(item.offsetX<=0,"Credits content must enter from the left");previous=item.alpha;
+                }
+            }
+            for(std::size_t i=0;i<aura::credits::GroupCount;++i) {
+                check(aura::credits::appearance(0,i).alpha==0,"Credits reopen retained a previous reveal");
+                const auto done=aura::credits::appearance(aura::credits::RevealFinishedSeconds+.01f,i);
+                check(done.alpha==1 && done.offsetX==0,"Credits did not settle at final position");
+            }
+            for(const auto size:{std::pair{1440.f,900.f},std::pair{960.f,640.f},std::pair{900.f,1440.f}}) {
+                const auto panel=aura::credits::layout(size.first,size.second),close=aura::credits::closeLayout(size.first,size.second);
+                check(panel.x>=0 && panel.y>=0 && panel.x+panel.width<=size.first && panel.y+panel.height<=size.second,
+                    "Credits panel exceeded the client area");
+                check(panel.contains(close.x,close.y) && panel.contains(close.x+close.width-1,close.y+close.height-1),
+                    "Credits close button exceeded the panel");
+            }
         }
         const auto defs = aura::loadCatalog(argv[1]);
         check(defs.size() == 23, "Expected 22 rollable auras and one administrator preview");

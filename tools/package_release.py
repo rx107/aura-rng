@@ -2,7 +2,7 @@
 """Create the three public ZIP files after the game and its tests have passed.
 
 例: python tools/package_release.py --windows-folder package --dest dist
-     --tag v0.1.21-alpha.1
+     --tag v0.1.22-alpha.1
 通常はGitに登録したファイルだけをソースZIPへ入れます。Gitのない作業用
 フォルダーでは --paths-file public-paths.json で明示した一覧を使えます。
 このスクリプト自体はビルド・通信・GitHubへの公開を行いません。
@@ -164,28 +164,28 @@ def make_zip(destination: Path, top: str, entries: list[tuple[str, Path]]) -> Pa
 def release_notes(tag: str) -> str:
     return f"""Star's RNG Alpha 0.1 / {tag}
 
-## 全面ゲーム画面と左右のメニュー
+## スタッフクレジット
 
-- ステージ・アバター・オーラをウィンドウの内側全体へ表示します。旧Collection・Roll History・黒い外枠の常設パネルを外し、左上の画像ロゴと下中央のRoll / AutoRollを重ねます。Windowsのウィンドウモードは従来どおりです。
-- 左上の星を押すと0.65秒で1回転し、回り終わってから左メニューが開きます。オーラ → マルチプレイヤー → 設定 → クレジットの4項目は、すべてダミーボタンです。押しても画面遷移や設定変更は行いません。
-- 右下の三本線から、実際に動作するImGuiデバッグ、マルチプレイヤーIP設定、ゲーム終了を選べます。接続先画面ではURL/IPと名前を入力し、保存・接続・切断できます。保存だけでは自動接続しません。終了は確認なしで、通常の保存処理を通して閉じます。
-- 左右メニューは不透明度68%の四角いパネルです。幅・位置・不透明度・星の回転時間はsrc/tuning/shell.hppへまとめ、docs/screen-menu-guide.mdに「値を変えると画面がどう変わるか」を説明しています。
-- Mの惑星選択とF1のデバッグは継続して使えます。Escで開いたメニューや接続先画面を閉じ、何も開いていないときは右メニューを開きます。旧Collectionや履歴の常設表示を外しても、所持数・実装備・ログのデータとF1のオーラプレビューは引き継ぎます。
+- 左上の星 → クレジットから、実際のクレジット画面を開けます。不透明度30%の灰色パネルに白い輪郭の文字と提供画像を表示し、上の「credits」は最初から固定位置に表示します。
+- 内容は左上から左下、そのあと右上の順で、左から滑りながらフェードインします。Aura Reviewer → ぜろくんでんせつ → にょ～ん！ → Illustrator → にごり(Lv.1) → Special Thanks → 画像の7組。名前と対応画像は一緒に現れ、標準では約1.61秒で揃います。
+- 開いたときに短い「ポコッ」というオリジナルの合成効果音を1回鳴らします。ゲームの音量設定が適用され、再描画や画像の出現ごとには鳴りません。外部の効果音ファイルは追加していません。
+- ×・Esc・パネル外のクリックで閉じられ、開き直すと最初から再生します。クレジット中は移動・視点操作・Rollを止め、AutoRollも停止します。後ろのワールドとBGMは続きます。読みやすくするため、通常のオーラ名・Rollボタンなどは一時的に隠し、左上のロゴを残します。
+- 背景・大きさ・フェード・移動距離はsrc/tuning/credits.hpp、音量・高さ・余韻はsrc/tuning/credits_audio.hppへまとめました。docs/credits-guide.mdで、数字を変えた結果とソースの担当を説明しています。
 
-オーラの演出・確率・所持品・8つの音源・3枚のブランドPNG・マルチプレイの通信形式は変更していません。左上のロケットは従来どおり5秒で輪を1周します。星を押したときの回転時間とは別の設定です。
+左メニューのオーラ・マルチプレイヤー・設定は引き続きダミーです。右下のImGui・IP設定・終了、F1、惑星移動、既存の抽選・プレビューは継続します。オーラの演出・確率・所持品・8つのBGM・3枚のブランドPNG・マルチプレイの通信形式は変更していません。
 
 ## 検証と配布
 
 公開ジョブはWindowsのビルド・CTest・DirectX WARP描画試験と、Linuxのコア・サーバー試験が成功してから実行します。
-画面全体の3D表示、星の1回転後のメニュー、左4項目のダミー動作、右メニューの実操作、接続先の保存、サイズ変更後の表示とクリック判定を確認します。
-提供されたブランド画像3枚はUI素材としてソースとWindows ZIPへ同梱します。私有VRM、オーラの参考動画・画像、個人セーブ・プロフィール写真・秘密鍵は同梱しません。
+クレジットの表示順、固定見出し、開閉と再表示、リサイズ後の画像とクリック判定、入力と所持品の分離を検証する構成です。検証記録の詳細はdocs/validation.mdへまとめます。
+今回提供されたクレジット用画像4枚と従来のブランド画像3枚を、UI素材としてソースとWindows ZIPへ同梱します。WebPからPNGへ変換した3枚は復号RGBA画素を維持し、ブラックホールのPNGは元ファイルとバイト一致です。クレジット全体の参考配置画像、私有VRM、オーラの参考動画・画像、個人セーブ・プロフィール写真・秘密鍵は同梱しません。
 ZIPのCRCと公開ファイルを検査し、SHA256SUMS.txtを添付します。
 
 ## 互換性・使い方
 
 既存の専用サーバーと互換性があります（protocol=1）。VPSの更新や契約変更は不要です。
 展開した新しいStarRng.exeを起動してください。ゲーム内の保存先は従来どおりです。
-改造する場合はsource ZIPを使い、docs/screen-menu-guide.mdを開いてください。初回のビルドはdocs/development-guide.mdで説明しています。
+改造する場合はsource ZIPを使い、docs/credits-guide.mdを開いてください。初回のビルドはdocs/development-guide.mdで説明しています。
 """
 
 
@@ -193,7 +193,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--windows-folder", type=Path, required=True, help="CMake --installで作ったWindows配布フォルダー")
     parser.add_argument("--dest", type=Path, default=Path("dist"), help="ZIPとSHA256SUMS.txtの保存先（初期値: dist）")
-    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.21-alpha.1")
+    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.22-alpha.1")
     parser.add_argument("--paths-file", type=Path, help="Gitがない手元の作業用: 公開パスのJSON配列または1行1パスの一覧")
     args = parser.parse_args()
     version = version_from_cmake()

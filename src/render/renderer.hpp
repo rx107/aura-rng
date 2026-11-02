@@ -48,9 +48,10 @@ struct Frame {
     bool leftMenuOpen{},rightMenuOpen{};
     float logoSpinProgress{-1};
     bool serverSettingsOpen{};
+    float creditsTime{-1}; // 負なら閉じている。0から内容のフェードインを進める。
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory, Multiplayer,
-    StarMenu, DeveloperMenu, DummyMenu, ShowDebug, ServerSettings, Quit, CloseShellMenus };
+    StarMenu, DeveloperMenu, DummyMenu, ShowDebug, ServerSettings, Quit, CloseShellMenus, Credits, CloseCredits };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
 // 描く場所とクリック判定は同じ設計図を使います。座標は1440×900基準の論理ピクセル。
 // 惑星カード i は {x+20, y+112+i*64, width-40, 56}、閉じるは右上の30×30です。
@@ -94,6 +95,7 @@ public:
     bool handleMessage(HWND window, UINT message, WPARAM wp, LPARAM lp) noexcept;
     bool wantsKeyboard() const;
     bool brandingReady() const { return brandingBitmaps_[0].Get() && brandingBitmaps_[1].Get() && brandingBitmaps_[2].Get(); }
+    bool creditsReady() const { return std::all_of(creditsBitmaps_.begin(),creditsBitmaps_.end(),[](const auto& bitmap){return bitmap.Get()!=nullptr;}); }
     void releaseInputFocus();
     void toggleDebug() { debugOpen_ = !debugOpen_; }
     bool debugOpen() const { return debugOpen_; }
@@ -111,6 +113,8 @@ private:
     void createTargets();
     void loadBranding();
     void drawBranding(const Frame& frame);
+    void loadCredits();
+    void creditsUi(const Frame& frame);
     void createPipeline();
     void createEffects();
     void createPixelation();
@@ -205,6 +209,11 @@ private:
     // 0=星と輪、1=タイトル、2=ロケット。D2Dターゲットを作り直す際に再読み込みします。
     std::array<ComPtr<ID2D1Bitmap>,3> brandingBitmaps_;
     std::array<D2D1_RECT_F,3> brandingBounds_{};
+    // クレジット画像は reviewer2人、illustrator、special thanks の順。リサイズ時に作り直す。
+    std::array<ComPtr<ID2D1Bitmap>,4> creditsBitmaps_;
+    // 字形は読み込み時に作る。毎フレームのフォント解析・パス生成を避ける。
+    std::array<ComPtr<ID2D1Geometry>,7> creditsLettering_;
+    std::array<D2D1_RECT_F,7> creditsLetterBounds_{};
     ComPtr<ID2D1PathGeometry> starGeometry_;
     ComPtr<ID2D1StrokeStyle> roundStroke_;
     ComPtr<IDWriteFactory> write_;

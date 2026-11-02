@@ -1,6 +1,7 @@
 #include "core/aura.hpp"
 #include "core/animation.hpp"
 #include "core/equinox_animation.hpp"
+#include "core/credits.hpp"
 #include "render/renderer.hpp"
 #include "platform/audio.hpp"
 #include "platform/discord.hpp"
@@ -133,7 +134,7 @@ public:
             mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime(),
             stageSelectOpen_,stageTravel_.progress(),stageTravel_.target(),collectionCategory_,
             cutsceneBeat,pulse,music_.estimatedBpm(),equinoxBeat,&networkSnapshot_,multiplayerOpen_,profilePhoto_,
-            shell_.leftOpen,shell_.rightOpen,shell_.spinProgress(),serverSettingsOpen_};
+            shell_.leftOpen,shell_.rightOpen,shell_.spinProgress(),serverSettingsOpen_,creditsTime_};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -176,7 +177,8 @@ public:
     ~App() { renderer_.reset(); if(window_ && IsWindow(window_)) DestroyWindow(window_); }
 private:
     bool cutsceneActive() const { return cutsceneTime_>=0; }
-    bool worldInputBlocked() const { return cutsceneActive() || stageSelectOpen_ || stageTravel_.active() || multiplayerOpen_ || serverSettingsOpen_ || shell_.active(); }
+    bool creditsActive() const { return creditsTime_>=0; }
+    bool worldInputBlocked() const { return cutsceneActive() || creditsActive() || stageSelectOpen_ || stageTravel_.active() || multiplayerOpen_ || serverSettingsOpen_ || shell_.active(); }
     void savePlayerSettings() {
         try {aura::saveSettings(saves_/L"settings.txt",presentation_.settings);}
         catch(const std::exception&) {notice_="Settings could not be saved.";}
@@ -195,7 +197,12 @@ private:
         if(renderer_)renderer_->releaseInputFocus();
     }
     void closeShellMenus() {shell_.close();clearWorldInput();}
+    void closeCredits() {
+        creditsTime_=-1;clearWorldInput();
+        if(renderer_)renderer_->releaseInputFocus();
+    }
     void prepareShellMenu() {
+        if(creditsActive())closeCredits();
         if(multiplayerOpen_)closeMultiplayerPanel();
         if(serverSettingsOpen_)closeServerSettings();
         if(renderer_->debugOpen())renderer_->toggleDebug();
@@ -221,7 +228,7 @@ private:
             presentation_.level(progress_,roller_.catalog()),presentation_.settings.shirt};
     }
     void selectStages() {
-        if(cutsceneActive() || stageTravel_.active() || multiplayerOpen_ || serverSettingsOpen_) return;
+        if(cutsceneActive() || creditsActive() || stageTravel_.active() || multiplayerOpen_ || serverSettingsOpen_) return;
         shell_.close();
         stageSelectOpen_=!stageSelectOpen_; clearWorldInput();
     }
@@ -252,6 +259,7 @@ private:
     void startCutscene(aura::CutsceneKind kind=aura::CutsceneKind::Equinox) {
         // 実際の装備と所持数は維持し、演出の最後に対応オーラを一時表示します。
         // Esc/停止なら直前のプレビューに戻し、自然終了なら結果を見たままにします。
+        if(creditsActive())closeCredits();
         if(multiplayerOpen_) closeMultiplayerPanel();
         if(serverSettingsOpen_)closeServerSettings();
         shell_.close();
@@ -312,6 +320,8 @@ private:
     }
     void action(aura::Hit hit) {
         // 画面のボタン・キー入力をゲームの操作へ変換する場所。
+        if(creditsActive() && hit.action!=aura::Action::CloseCredits && hit.action!=aura::Action::Debug &&
+            hit.action!=aura::Action::StarMenu && hit.action!=aura::Action::DeveloperMenu && hit.action!=aura::Action::Quit) return;
         if(cutsceneActive() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Logs && hit.action!=aura::Action::Quit) return;
         if(stageTravel_.active() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Quit) return;
         if(stageSelectOpen_ && hit.action!=aura::Action::Stages && hit.action!=aura::Action::Travel &&
@@ -320,7 +330,13 @@ private:
         case aura::Action::StarMenu: prepareShellMenu();shell_.tapStar();break;
         case aura::Action::DeveloperMenu: prepareShellMenu();shell_.toggleRight();break;
         case aura::Action::CloseShellMenus: closeShellMenus();break;
-        case aura::Action::DummyMenu: break; // 左の4項目は画面や所持品を変更しない、見た目だけのボタン。
+        case aura::Action::DummyMenu: break; // 左のオーラ・マルチプレイヤー・設定は、引き続きダミーです。
+        case aura::Action::Credits:
+            // この画面を開いた瞬間だけ音を鳴らす。描画フレームごとには再生しません。
+            prepareShellMenu();shell_.close();creditsTime_=0;
+            if(!opts_.silent)sfx_.playUiPop(presentation_.settings.volume);
+            break;
+        case aura::Action::CloseCredits: closeCredits();break;
         case aura::Action::ShowDebug:
             closeShellMenus();if(serverSettingsOpen_)closeServerSettings();if(multiplayerOpen_)closeMultiplayerPanel();
             if(!renderer_->debugOpen())renderer_->toggleDebug();break;
@@ -358,7 +374,8 @@ private:
             break;
         case aura::Action::Debug: {
             // F1へ切り替えたのに、背後のプロフィールがプレビューを止めないようにします。
-            const bool fromProfile=multiplayerOpen_ || serverSettingsOpen_ || shell_.active();
+            const bool fromProfile=multiplayerOpen_ || serverSettingsOpen_ || creditsActive() || shell_.active();
+            if(creditsActive())closeCredits();
             shell_.close();
             if(serverSettingsOpen_)closeServerSettings();
             if(multiplayerOpen_) closeMultiplayerPanel();
@@ -479,6 +496,8 @@ private:
         if(pending_) { action(*pending_); pending_.reset(); }
         if(quitting_)return;
         shell_.update(dt);
+        // 0秒から始まる画面専用の時計。閉じて開き直すと、最初の項目から順に現れます。
+        if(creditsActive())creditsTime_=std::min(60.f,creditsTime_+dt);
         if(stopCutsceneRequested_) stopCutscene();
         if(cutsceneActive()) {
             // 実際に音声出力されたサンプル数を映像の時計にします。
@@ -645,7 +664,7 @@ private:
         for(int i=0;i<18;++i) { cooldown_=0; roll(); }
         action({aura::Action::Equip,progress_.best});
         const auto chosen=progress_.equipped;
-        // 左はダミー、右は実動。消した旧パネルの見えないクリック判定も残さない。
+        // 左の先頭3項目はダミー。クレジットと右メニューは実動で確認します。
         const auto categoryRolls=progress_.rolls,categoryLogs=log_.size();
         const auto categoryCounts=progress_.counts;
         const auto shellCapture=[&](const wchar_t* name) {if(!opts_.capture.empty())renderer_->capture(opts_.capture.parent_path()/name);};
@@ -661,13 +680,46 @@ private:
         clickShell(aura::shell::starMenuLayout(1440,900));
         update(aura::tuning::shell::LogoSpinSeconds*.51f);render(false);shellCapture(L"shell-left-menu.png");
         if(!shell_.leftOpen || shell_.spinning())throw std::runtime_error("Star menu reveal timing failed");
-        for(std::size_t row=0;row<4;++row) {
+        for(std::size_t row=0;row<3;++row) {
             const auto area=aura::shell::leftMenuRow(1440,900,row);
             const auto hit=renderer_->hit((area.x+4)*renderer_->scale(),(area.y+4)*renderer_->scale(),frame());
             if(hit.action!=aura::Action::DummyMenu || hit.index!=row)throw std::runtime_error("Left dummy menu hit mismatch");
             clickShell(area);
             if(multiplayerOpen_ || serverSettingsOpen_ || renderer_->debugOpen())throw std::runtime_error("A dummy button opened a real screen");
         }
+        const auto popBefore=sfx_.uiPopCount();
+        clickShell(aura::shell::leftMenuRow(1440,900,3));shellCapture(L"credits-00-heading.png");
+        if(!creditsActive() || creditsTime_!=0 || shell_.active() || !worldInputBlocked() || !renderer_->creditsReady())
+            throw std::runtime_error("Credits did not open with its own clock and four images");
+        const auto popOpened=sfx_.uiPopCount();
+        if((opts_.silent && popOpened!=popBefore) || (!opts_.silent && sfx_.available() && popOpened!=popBefore+1))
+            throw std::runtime_error("Credits open did not play exactly one isolated pop");
+        const auto creditsX=x_,creditsZ=z_,creditsYaw=yaw_;
+        keys_['W']=true;cooldown_=0;action({aura::Action::Roll,0});action({aura::Action::Auto,0});
+        SendMessageW(window_,WM_RBUTTONDOWN,MK_RBUTTON,MAKELPARAM(800,400));
+        SendMessageW(window_,WM_MOUSEMOVE,MK_RBUTTON,MAKELPARAM(950,450));
+        update(.3f);render(false);shellCapture(L"credits-01-reviewers.png");
+        update(.65f);render(false);shellCapture(L"credits-02-illustrator.png");
+        update(1.f);render(false);shellCapture(L"credits-03-complete.png");
+        if(x_!=creditsX || z_!=creditsZ || yaw_!=creditsYaw || auto_ || dragging_ || sfx_.uiPopCount()!=popOpened)
+            throw std::runtime_error("Credits allowed world input or replayed its click sound during drawing");
+        if(progress_.rolls!=categoryRolls || progress_.counts!=categoryCounts || log_.size()!=categoryLogs || progress_.equipped!=chosen)
+            throw std::runtime_error("Credits changed collection or history");
+        // リサイズしても画像を再準備し、アニメーションの時計・閉じる位置を維持します。
+        const float elapsed=creditsTime_;
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700));render(false);shellCapture(L"credits-small.png");
+        if(!renderer_->creditsReady() || creditsTime_!=elapsed)throw std::runtime_error("Credits resize lost assets or restarted animation");
+        SendMessageW(window_,WM_KEYDOWN,VK_ESCAPE,0);render(false);
+        if(creditsActive() || worldInputBlocked() || keys_['W'] || renderer_->wantsKeyboard())
+            throw std::runtime_error("Closing credits left gameplay input blocked");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900));render(false);
+        action({aura::Action::Credits,0});render(false);
+        if(creditsTime_!=0)throw std::runtime_error("Reopened credits did not restart from the heading");
+        clickShell(aura::credits::closeLayout(1440,900));
+        if(creditsActive() || worldInputBlocked())throw std::runtime_error("Credits close button is not functional");
+        action({aura::Action::Credits,0});render(false);SendMessageW(window_,WM_KEYDOWN,VK_F1,0);update(0);render(false);
+        if(creditsActive() || !renderer_->debugOpen())throw std::runtime_error("F1 failed to return from credits to Debug");
+        action({aura::Action::Debug,0});render(false);
         clickShell(aura::shell::hamburgerLayout(1440,900));shellCapture(L"shell-right-menu.png");
         if(!shell_.rightOpen || shell_.leftOpen)throw std::runtime_error("Hamburger did not switch to right menu");
         clickShell(aura::shell::rightMenuRow(1440,900,0));
@@ -1536,7 +1588,7 @@ private:
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: "
                <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
             out<<"Planets: PASS / garden, desert, ocean, forest, volcano, extra, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
-            out<<"Screen shell: PASS / full viewport, star spin once, delayed left dummy menu, hamburger, real ImGui/server settings, endpoint save without connect, Esc/F1 focus restore, removed sidebar hit targets, no progress mutation\nExtra acquisition: PASS / 64 actual rolls, all six exclusive auras acquired, CutScene triggers, equipment preserved\n";
+            out<<"Screen shell: PASS / full viewport, star spin once, delayed left menu with three dummy items, hamburger, real ImGui/server settings, endpoint save without connect, Esc/F1 focus restore, removed sidebar hit targets, no progress mutation\nCredits: PASS / supplied four images, sequential reveal, restart, resize, Esc/X/F1, isolated input and click sound, no progress mutation\nExtra acquisition: PASS / 64 actual rolls, all six exclusive auras acquired, CutScene triggers, equipment preserved\n";
             out<<"Frutiger Aero: PASS / grass, sky/clouds, glossy bubbles, animated blue butterflies, <=1000 boards, preview isolation\n"
                <<"Multiplayer render: PASS / two same-planet block avatars with detailed auras, other-planet filtering, profile window input suppression; actual HTTP covered by separate client/server tests\n"
                <<"Multiplayer input/preview: PASS / success auto-return including skipped Connecting, movement, right-drag, reopen, Esc/Back preserves connection, F1, displayed aura/level payload, failure remains visible, inventory/history isolation\n";
@@ -1596,6 +1648,7 @@ private:
         }
         if(!app) return DefWindowProcW(window,message,wp,lp);
         if(message==WM_KEYUP && wp<256) app->keys_[wp]=false;
+        if(message==WM_KEYDOWN && wp==VK_ESCAPE && app->creditsActive()) {app->closeCredits();return 0;}
         if(message==WM_KEYDOWN && wp==VK_ESCAPE && app->multiplayerOpen_) {app->closeMultiplayerPanel();return 0;}
         if(message==WM_KEYDOWN && wp==VK_ESCAPE && app->serverSettingsOpen_) {app->closeServerSettings();return 0;}
         if(message==WM_KEYDOWN && wp==VK_F1 && !(lp & (1LL<<30))) { app->pending_=aura::Hit{aura::Action::Debug,0}; return 0; }
@@ -1638,6 +1691,7 @@ private:
             switch(shellHit.action) {
             case aura::Action::StarMenu:case aura::Action::DeveloperMenu:case aura::Action::DummyMenu:
             case aura::Action::ShowDebug:case aura::Action::ServerSettings:case aura::Action::Quit:case aura::Action::CloseShellMenus:
+            case aura::Action::Credits:case aura::Action::CloseCredits:
                 app->pending_=shellHit;return 0;
             default:break;
             }
@@ -1710,6 +1764,7 @@ private:
     std::vector<std::uint8_t> profilePhoto_;
     bool multiplayerOpen_{},returnAfterConnect_{};
     bool serverSettingsOpen_{};
+    float creditsTime_{-1};
     aura::shell::State shell_;
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};
     std::optional<aura::Hit> pending_;

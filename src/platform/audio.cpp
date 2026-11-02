@@ -1,6 +1,7 @@
 #include "platform/audio.hpp"
 #include "render/renderer.hpp"
 #include "core/audio_envelope.hpp"
+#include "tuning/credits_audio.hpp"
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
@@ -153,6 +154,28 @@ void Music::update(const std::filesystem::path& path,bool active,float volume,fl
     status_=playing_?(active?(durationSeconds>0?"Playing / clip":"Playing / loop"):"Fading out"):"Stopped";
 }
 namespace {
+std::vector<std::int16_t> synthesizeUiPop() {
+    namespace cfg=tuning::credits_audio;
+    constexpr unsigned Rate=48000;
+    constexpr double Pi=3.14159265358979323846;
+    const double duration=cfg::DurationSeconds;
+    const std::size_t count=static_cast<std::size_t>(std::llround(duration*Rate));
+    std::vector<std::int16_t> samples(count);
+    double phase=0;
+    for(std::size_t i=0;i<count;++i) {
+        const double t=static_cast<double>(i)/Rate,u=static_cast<double>(i)/(count-1);
+        // 高い音から低い音へ落とすと、泡が弾けるような「ポコッ」になります。
+        const double frequency=cfg::EndFrequencyHz+(cfg::StartFrequencyHz-cfg::EndFrequencyHz)*std::exp(-t*cfg::PitchFallRate);
+        phase+=2*Pi*frequency/Rate;
+        const double attack=std::min(1.,t/cfg::AttackSeconds);
+        const double tail=1-u;
+        const double envelope=attack*attack*(3-2*attack)*std::exp(-t*cfg::DecayRate)*tail*tail;
+        const double tone=.78*std::sin(phase)+.12*std::sin(phase*1.97)*std::exp(-t*65);
+        // 最大振幅を1以下に収め、両端は必ず0。外部素材・乱数・ループはありません。
+        samples[i]=static_cast<std::int16_t>(std::clamp(tone*envelope,-1.,1.)*32767);
+    }
+    return samples;
+}
 std::vector<std::int16_t> synthesizeEffect(unsigned sound) {
     constexpr unsigned Rate=48000;
     constexpr double Pi=3.14159265358979323846;
@@ -192,7 +215,7 @@ SoundEffects::~SoundEffects() {
 }
 void SoundEffects::initialize() {
     attempted_=true;
-    pcm_[0]=synthesizeEffect(0); pcm_[1]=synthesizeEffect(1);
+    pcm_[0]=synthesizeEffect(0); pcm_[1]=synthesizeEffect(1); pcm_[2]=synthesizeUiPop();
     checked(XAudio2Create(&engine_,0,XAUDIO2_DEFAULT_PROCESSOR),"SFX XAudio2 startup");
     checked(engine_->CreateMasteringVoice(&master_),"SFX audio output device");
     WAVEFORMATEX format{}; format.wFormatTag=WAVE_FORMAT_PCM; format.nChannels=1;
@@ -205,15 +228,17 @@ void SoundEffects::initialize() {
 }
 void SoundEffects::play(unsigned sound,float volume) noexcept {
     try {
-        if(!std::isfinite(volume) || volume<=0) return;
+        if(sound>=pcm_.size() || !std::isfinite(volume) || volume<=0) return;
         if(!attempted_) initialize();
         if(!ready_) return;
         const auto now=std::chrono::steady_clock::now();
-        if(now-lastPlay_[sound]<std::chrono::milliseconds(sound?110:65)) return;
+        const unsigned cooldown=sound==2?tuning::credits_audio::CooldownMilliseconds:sound?110:65;
+        if(now-lastPlay_[sound]<std::chrono::milliseconds(cooldown)) return;
         for(unsigned i=sound*2;i<sound*2+2;++i) {
             auto* voice=voices_[i]; XAUDIO2_VOICE_STATE state{}; voice->GetState(&state,XAUDIO2_VOICE_NOSAMPLESPLAYED);
             if(state.BuffersQueued) continue;
-            checked(voice->SetVolume(std::clamp(volume,0.f,1.f)*(sound?.35f:.28f)),"SFX volume");
+            const float gain=sound==2?tuning::credits_audio::Gain:sound?.35f:.28f;
+            checked(voice->SetVolume(std::clamp(volume,0.f,1.f)*gain),"SFX volume");
             XAUDIO2_BUFFER buffer{}; buffer.Flags=XAUDIO2_END_OF_STREAM;
             buffer.AudioBytes=static_cast<UINT32>(pcm_[sound].size()*sizeof(std::int16_t));
             buffer.pAudioData=reinterpret_cast<const BYTE*>(pcm_[sound].data());
@@ -227,4 +252,5 @@ void SoundEffects::play(unsigned sound,float volume) noexcept {
 }
 void SoundEffects::playShot(float volume) noexcept {play(0,volume);}
 void SoundEffects::playImpact(float volume) noexcept {play(1,volume);}
+void SoundEffects::playUiPop(float volume) noexcept {play(2,volume);}
 }

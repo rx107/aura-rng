@@ -1,4 +1,4 @@
-# Star's RNG — Alpha 0.1 / v0.1.21
+# Star's RNG — Alpha 0.1 / v0.1.22
 
 C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームです。
 
@@ -6,10 +6,12 @@ C++20 / Win32 / DirectX 11で動くWindows向けのオーラ抽選ゲームで�
 
 ## 今回の変更
 
-- **ステージ・プレイヤー・オーラをウィンドウの内側全体へ表示します。** 旧コレクション・履歴・黒い外枠の常設パネルを外し、左上の画像ロゴと小さなRoll / AutoRollだけを重ねます。Windowsのウィンドウ操作は従来どおりです。
-- 左上の星を押すと0.65秒で1回転し、その後に **オーラ → マルチプレイヤー → 設定 → クレジット** のメニューが開きます。この4項目は画面整理用の**ダミーボタン**で、画面遷移や設定変更は行いません。
-- 右下の三本線から **ImGuiのデバッグ → マルチプレイヤーIP設定 → ゲーム終了** を開けます。こちらは実際に動作し、接続先を保存して接続・切断できます。終了は確認画面を出さず、通常の保存処理を通してアプリを閉じます。
-- 左右のメニューはゲームが少し透ける四角いパネルです。位置・幅・不透明度・星の回転時間は`src/tuning/shell.hpp`で調整できます。[全面ゲーム画面とメニューのガイド](docs/screen-menu-guide.md)
+- 左上の星 → **クレジット**から、提供素材を使ったスタッフクレジットを開けます。不透明度30%の灰色パネルに、白い輪郭の文字と画像を表示します。上の「credits」は開いた瞬間から同じ位置に表示します。
+- 内容は **左上から左下、そのあと右上**へ、左から滑りながら順々にフェードインします。Aura Reviewerの2名 → Illustrator → Special Thanksの順で、標準では約1.61秒で全項目が揃います。
+- 開くと短い**「ポコッ」**という効果音が1回鳴ります。×・Esc・パネル外のクリックで閉じられ、もう一度開くと最初から再生します。クレジット中はAutoRoll・ロール・移動を止め、後ろのワールドとBGMは続きます。
+- `src/tuning/credits.hpp`で透明度・幅・順番の間隔・移動距離、`src/tuning/credits_audio.hpp`で音量・音の高さ・余韻を調整できます。[クレジットの改造ガイド](docs/credits-guide.md)
+
+全面ゲーム画面、左上の画像ロゴ、Roll / AutoRoll、右下の三本線メニューは継続します。左の**オーラ・マルチプレイヤー・設定は引き続きダミー**です。右のImGui・IP設定・ゲーム終了は実際に動作します。[画面とメニューの操作](docs/screen-menu-guide.md)
 
 ## 遊び方と入手場所
 
@@ -62,13 +64,13 @@ Equinoxは同じ拍を玉・文字・トレイル・爆発で共有します。�
 
 提供者の許可を得た8つの音源をソースとWindows ZIPに同梱しています。Red johnの`Red_John_Cutscene.m4a`は、提供されたMP4からAAC音声を再圧縮せず抽出した約10.89秒のファイルです。`tools/generate_redjohn_audio.py`はv0.1.18の旧合成曲を試すための任意ツールとして残しており、現在の曲の再生成や通常のビルドには使いません。The WeirdosはOgg Vorbisを同梱デコーダーで再生するため、追加コーデックは不要です。Equinoxの通常表示用の曲とCutScene用のM4Aは別の音源です。Equinox / BreakThroughのCutScene音声は必要な範囲だけ切り出しており、元動画のCollection部分は再生しません。[音声の一覧](data/audio/README.md)
 
-**VRM・オーラの参考画像・参考動画は配布しません。** 左上のブランド画像3枚は、ゲームに表示する素材として`data/ui`へ同梱しています。 F1から自分のPCのVRMを選択してください。`Start-with-local-assets.cmd` はDownloadsのChocolat.vrmを指定する補助起動です。通常の立ち姿・歩行と、各オーラの固定ポーズをブロックとVRMで共有します。固定ポーズ中は移動しても歩行を混ぜません。VRM 0.x / 1.0の自己完結GLB、スキン、初期モーフ、ベースカラーに対応。Spring Bone・表情・MToon固有の影や輪郭は未対応です。
+**VRM・オーラの参考画像・参考動画は配布しません。** 左上のブランド画像3枚と、今回提供されたクレジット用画像4枚を、ゲームに表示する素材として`data/ui`へ同梱しています。クレジット全体の参考配置画像は同梱しません。F1から自分のPCのVRMを選択してください。`Start-with-local-assets.cmd` はDownloadsのChocolat.vrmを指定する補助起動です。通常の立ち姿・歩行と、各オーラの固定ポーズをブロックとVRMで共有します。固定ポーズ中は移動しても歩行を混ぜません。VRM 0.x / 1.0の自己完結GLB、スキン、初期モーフ、ベースカラーに対応。Spring Bone・表情・MToon固有の影や輪郭は未対応です。
 
 Discordデスクトップ版を起動すると、ユーザー名とロール回数をRich Presenceへ送ります。設定済みApplication IDを使用し、トークンは不要です。公開範囲はDiscord側のアクティビティ設定にも依存します。[Discord連携](docs/discord.md)
 
 ## 初心者向けの改造入口
 
-[改造用ソースZIP v0.1.21](https://github.com/rx107/aura-rng/releases/download/v0.1.21-alpha.1/StarRng-v0.1.21-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
+[改造用ソースZIP v0.1.22](https://github.com/rx107/aura-rng/releases/download/v0.1.22-alpha.1/StarRng-v0.1.22-source.zip)を展開し、まず[初心者向け改造ガイド](docs/development-guide.md)を開いてください。
 
 1. `src/tuning` の数字を1つだけ変更して保存。
 2. ゲームを閉じて `Develop.cmd` を実行。

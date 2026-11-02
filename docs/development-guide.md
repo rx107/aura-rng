@@ -2,7 +2,9 @@
 
 まずは「数字を1つ変えて、画面が変わる」を体験しましょう。C++を全部理解してから始める必要はありません。
 
-v0.1.21では3D画面をウィンドウの内側全体へ広げ、左上の星と右下の三本線から開くメニューへ整理しました。左の4項目はダミー、右のImGui・接続先設定・終了は実際に動作します。[全面画面とメニューのガイド](screen-menu-guide.md)では、透明度・幅・星が1回転する時間を変える手順を説明します。
+v0.1.22では左のクレジットボタンから、灰色の半透明パネルに文字と画像が順々に現れる画面を開けます。開くと「ポコッ」と鳴ります。[クレジットの改造ガイド](credits-guide.md)で、透明度・表示の間隔・音の高さなどを変えてみてください。
+
+3D画面はウィンドウの内側全体に表示し、左上の星と右下の三本線からメニューを開きます。左のオーラ・マルチプレイヤー・設定はダミー、クレジットと右のImGui・接続先設定・終了は実際に動作します。[全面画面とメニューのガイド](screen-menu-guide.md)では、透明度・幅・星が1回転する時間を変える手順を説明します。
 
 左上の星・タイトル画像と周回ロケットはv0.1.20の表示を引き継ぎます。[ヘッダー画像のガイド](branding-guide.md)では、画像の位置・大きさと、ロケットが輪を1周する速度の変更を説明します。星を押したときの1回転とは別の調整値です。
 
@@ -10,7 +12,7 @@ v0.1.18ではRed johnの部屋・ベッド・赤い顔・座りポーズ・専�
 
 ## 1. 改造用のソースを用意する
 
-[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.21-alpha.1/StarRng-v0.1.21-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
+[改造用ソースZIP](https://github.com/rx107/aura-rng/releases/download/v0.1.22-alpha.1/StarRng-v0.1.22-source.zip)をダウンロードし、右クリック → **すべて展開**します。ZIPの中から直接実行せず、展開先を開いてください。
 
 `CMakeLists.txt`、`Develop.cmd`、`src`、`data` が同じ階層に見える場所がプロジェクトの入口です。遊ぶためのWindows ZIPは完成したEXEだけなので、改造にはこのソースZIPを使います。
 
@@ -59,6 +61,9 @@ inline constexpr float HeadWidth = 7.0f;
 | サックスと字幕を合わせる | F1 → オーラ → BreakThrough → 字幕タイミング / 秒 | 全体の時差 `-.10f` で0.1秒早く。再ビルド不要。[操作手順](stage-and-cutscene-guide.md) |
 | UIの色を変える | `src/tuning/ui.hpp` → `Accent` | `{1.f,.55f,.20f}` で共通のミント色をオレンジへ |
 | メニューからゲームをもっと透かす | `src/tuning/shell.hpp` → `PanelOpacity` | `.68f` → `.50f`。パネルの不透明度が下がり、後ろのステージが見えやすくなる。[幅・回転時間も調整](screen-menu-guide.md) |
+| クレジットの背景を濃くする | `src/tuning/credits.hpp` → `PanelOpacity` | `.30f` → `.50f`。クレジットの灰色だけが濃くなる。[最初の手順](credits-guide.md) |
+| クレジットの表示をゆっくりにする | 同上 → `RevealStaggerSeconds` | `.18f` → `.30f`。次の文字・画像が出始めるまでの間隔が長くなる |
+| クレジットの音を小さくする | `src/tuning/credits_audio.hpp` → `Gain` | `.60f` → `.40f`。開いたときの「ポコッ」が控えめになる |
 | 左上のロケットをゆっくり回す | `src/tuning/branding.hpp` → `OrbitSeconds` | `5.f` → `8.f`で1周が5秒から8秒へ。[位置や大きさの例](branding-guide.md) |
 | 無重力ポーズを高くする | `src/tuning/avatar.hpp` → `singularity` の `Lift` | `.55f` → `.85f`。ブロックとVRMが少し高く浮く |
 | Pixelation Lv3の周囲だけ速くする | `src/tuning/pixelation.hpp` → `FinalMotionSpeed` | `3.f` → `4.f`。弾と浮遊の速さは変えない |
@@ -104,7 +109,7 @@ Equinoxは通常表示とCutSceneの音楽が異なるため、F1 → 音楽でB
 
 玉の強弱はBPMを変えずに`orbitSpeedVariation`で調整します。初期値`.22f`は平均速度の78〜122%で、止まったり逆走したりしません。許可範囲は0以上1未満です。尾と爆発位置も同じ動きを使うため、強弱を変更しても玉から離れません。床の`floorRotation`はラジアン/秒で、`1.10f`なら約5.7秒に1周です。粒子の回転もこの値へ連動します。
 
-Frutiger Aeroは保存データのExtra分類にあり、Extraステージ限定・基礎確率1 in 5,000,000です。v0.1.21の左「オーラ」はダミーなので、表示確認にはF1のオーラプレビューを使います。草・空・雲・泡の反射・青い蝶を作る処理と詳しい変更例は[Frutiger Aeroのガイド](frutiger-aero.md)を参照してください。
+Frutiger Aeroは保存データのExtra分類にあり、Extraステージ限定・基礎確率1 in 5,000,000です。現在の左「オーラ」はダミーなので、表示確認にはF1のオーラプレビューを使います。草・空・雲・泡の反射・青い蝶を作る処理と詳しい変更例は[Frutiger Aeroのガイド](frutiger-aero.md)を参照してください。
 
 v0.1.18のカタログは23種類で、Nanallyを除いた22種類を取得できます。追加したRed johnはExtraステージ限定・基礎確率1 in 6,000,000です。部屋の形は`src/render/redjohn.cpp`、座り方は共通のアニメーション、専用CutSceneは`src/render/redjohn_cutscene.cpp`で処理します。見た目と字幕の時刻は[Red johnのガイド](red-john-guide.md)へ。
 
@@ -191,7 +196,7 @@ Red johnを含む許可済みの8音源はソースZIPにも同梱していま�
 
 ## マルチプレイを手元で試す
 
-マルチプレイの基礎接続はv0.1.16で追加しました。[マルチプレイの手順](multiplayer.md)にPC内での試験とVPSへの配置方法があります。v0.1.21は**右下の三本線 → マルチプレイヤーIPを設定**から接続先とUserNameを入力し、「接続する」を押します。「接続先を保存」だけなら保存して接続しません。「ゲームに戻る」かEscで設定画面を閉じると、参加を続けながら操作へ戻れます。左メニューの「マルチプレイヤー」はダミーです。[画面の操作と調整](screen-menu-guide.md)
+マルチプレイの基礎接続はv0.1.16で追加しました。[マルチプレイの手順](multiplayer.md)にPC内での試験とVPSへの配置方法があります。現在は**右下の三本線 → マルチプレイヤーIPを設定**から接続先とUserNameを入力し、「接続する」を押します。「接続先を保存」だけなら保存して接続しません。「ゲームに戻る」かEscで設定画面を閉じると、参加を続けながら操作へ戻れます。左メニューの「マルチプレイヤー」はダミーです。[画面の操作と調整](screen-menu-guide.md)
 
 UserNameとUserIDは別です。たとえば名前を`Player A`から`星の旅人`へ変えても、最初に作った10桁のIDは変わりません。保存済みの写真は中央を160×160の正方形にしたデータで共有し、元の写真は送信しません。今回の接続先画面には写真選択欄は置いていません。相手はブロックアバターで表示します。同じ惑星へ移動するとワールドで会えます。
 
@@ -221,6 +226,8 @@ UserNameとUserIDは別です。たとえば名前を`Player A`から`星の旅�
 | `server/serve.py` / `stars-rng.service` / `Caddyfile.example` | 専用サーバー本体 / Linuxで常時起動 / HTTPSを受けてサーバーへ転送 |
 | `src/render/ui.cpp` の `debugUi()` | F1のImGuiパネル。命令を作り、main.cppに処理を依頼する |
 | `src/core/shell.hpp` / `src/tuning/shell.hpp` | 左右メニューの状態と共通のクリック範囲 / 幅・不透明度・星の回転時間 |
+| `src/render/credits.cpp` / `src/core/credits.hpp` / `src/tuning/credits.hpp` | クレジットの画像・文字 / 共通の範囲とフェード計算 / 背景・秒数・移動距離 |
+| `src/platform/audio.cpp` の `synthesizeUiPop()` / `src/tuning/credits_audio.hpp` | クレジットを開く短い音の生成 / 音量・音の高さ・余韻の調整 |
 | `src/render/branding.cpp` / `src/tuning/branding.hpp` | 左上の透過画像の読み込みと周回ロケット / 位置・大きさ・速さの調整値 |
 | `src/platform/audio.cpp` / `discord.cpp` | 音声の再生 / Discordとの通信 |
 | `third_party` | 同梱ライブラリの元コード。ゲーム独自の改造はsrcから始める |

@@ -490,6 +490,11 @@ void Renderer::ui(const Frame& f) {
     const auto line=D2D1::ColorF(.81f,.88f,.91f,.18f);
     const auto muted=D2D1::ColorF(.76f,.83f,.87f,.88f);
     drawBranding(f);
+    if(f.creditsTime>=0) {
+        // クレジットの文字と重ならないよう、通常の名前・Rollなどはこの画面だけ隠します。
+        // 3Dのステージと左上のロゴは、そのまま後ろへ描き続けます。
+        creditsUi(f);return;
+    }
 
     // 名前はアバターの頭上だけに置きます。旧コレクション横の大きな帯はありません。
     multiplayerLabels(f);
@@ -545,7 +550,7 @@ void Renderer::ui(const Frame& f) {
     if(f.leftMenuOpen) {
         panel(shell::leftMenuLayout(w,h));
         const std::array<std::string,4> names={t("Auras","オーラ"),t("Multiplayer","マルチプレイヤー"),t("Settings","設定"),t("Credits","クレジット")};
-        // この4行は見た目を確認するためのダミーです。実際の操作はAppにも登録しません。
+        // 先頭3行はダミー。最後のクレジットだけ、専用画面へつなぎます。
         for(unsigned i=0;i<names.size();++i)row(shell::leftMenuRow(w,h,i),names[i],i);
     }
     if(f.rightMenuOpen) {
@@ -567,7 +572,7 @@ void Renderer::ui(const Frame& f) {
     // ロール操作だけは小さく常設し、遊べる状態を保ちます。背景の大きいパネルは作りません。
     const auto roll=shell::rollLayout(w,h),automatic=shell::autoRollLayout(w,h);
     const bool cooling=f.cooldown>0;
-    const bool blocked=f.leftMenuOpen || f.rightMenuOpen || f.logoSpinProgress>=0 || f.serverSettingsOpen || f.multiplayerOpen || f.stageSelectOpen || f.stageTravelProgress>=0;
+    const bool blocked=f.leftMenuOpen || f.rightMenuOpen || f.logoSpinProgress>=0 || f.serverSettingsOpen || f.multiplayerOpen || f.creditsTime>=0 || f.stageSelectOpen || f.stageTravelProgress>=0;
     const bool ready=!cooling && !blocked;
     rect(roll.x,roll.y,roll.width,roll.height,ready?(hovered(roll)?D2D1::ColorF(.68f,1,.88f,.95f):D2D1::ColorF(.55f,.96f,.82f,.86f)):
         D2D1::ColorF(.08f,.16f,.17f,.64f));
