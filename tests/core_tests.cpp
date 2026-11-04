@@ -25,11 +25,14 @@ int main(int argc, char** argv) {
             const auto progress=menu.spinProgress();menu.tapStar();
             check(menu.spinning() && !menu.leftOpen && menu.spinProgress()==progress,"Double tap restarted or prematurely opened star menu");
             menu.update(aura::tuning::shell::LogoSpinSeconds*.61f);
-            check(menu.leftOpen && !menu.spinning() && !menu.rightOpen,"Menu must open after one full spin");
+            check(menu.leftOpen && !menu.spinning() && !menu.settingsOpen,"Menu must open after one full spin");
             menu.tapStar();menu.update(3);
             check(!menu.active(),"Closing left menu reopened it later");
-            menu.tapStar();menu.update(.1f);menu.toggleRight();menu.update(3);
-            check(menu.rightOpen && !menu.leftOpen && !menu.spinning(),"Right menu did not cancel pending left menu reveal");
+            menu.tapStar();menu.update(3);menu.openSettings();
+            check(menu.settingsOpen && !menu.leftOpen && !menu.spinning(),"Settings did not replace the star menu");
+            menu.backToLeftMenu();
+            check(menu.leftOpen && !menu.settingsOpen && !menu.spinning(),"Settings Back restarted the spin or did not return to the star menu");
+            menu.openSettings();
             menu.close();menu.update(3);check(!menu.active(),"Dismissed menus reopened");
         }
         {

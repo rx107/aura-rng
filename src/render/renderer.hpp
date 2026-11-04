@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <span>
 #include <future>
+#include <optional>
 #include "render/vrm.hpp"
 #include "render/glb_model.hpp"
 #include "platform/multiplayer.hpp"
@@ -46,13 +47,16 @@ struct Frame {
     const net::Snapshot* multiplayer{};
     bool multiplayerOpen{};
     std::span<const std::uint8_t> profilePhoto;
-    bool leftMenuOpen{},rightMenuOpen{};
+    bool leftMenuOpen{},settingsMenuOpen{};
     float logoSpinProgress{-1};
     bool serverSettingsOpen{};
     float creditsTime{-1}; // 負なら閉じている。0から内容のフェードインを進める。
+    bool auraSelectorOpen{};
+    std::optional<std::size_t> selectedAura;
 };
 enum class Action { None, Roll, Auto, Logs, Equip, Debug, Stages, Travel, CloseStages, CollectionCategory, Multiplayer,
-    StarMenu, DeveloperMenu, DummyMenu, ShowDebug, ServerSettings, Quit, CloseShellMenus, Credits, CloseCredits };
+    StarMenu, SettingsMenu, BackToStarMenu, DummyMenu, ShowDebug, ServerSettings, Quit, CloseShellMenus, Credits, CloseCredits,
+    AuraSelector, SelectAura, CloseAuraSelector, ScrollAuraSelector };
 struct Hit { Action action{Action::None}; std::size_t index{}; };
 // 描く場所とクリック判定は同じ設計図を使います。座標は1440×900基準の論理ピクセル。
 // 惑星カード i は {x+20, y+112+i*64, width-40, 56}、閉じるは右上の30×30です。
@@ -69,6 +73,12 @@ inline std::vector<std::size_t> collectionItems(const Frame& frame) {
         if(auraCategory(frame.roller.catalog()[i])==frame.collectionCategory) result.push_back(i);
     return result;
 }
+inline bool canEquipAura(const Frame& frame,std::size_t index) {
+    const auto& catalog=frame.roller.catalog();
+    return index<catalog.size() && index<frame.progress.counts.size() &&
+        !catalog[index].previewOnly && frame.progress.counts[index]>0 &&
+        (index!=frame.progress.equipped || frame.presentation.preview.has_value());
+}
 class Renderer {
 public:
     ~Renderer();
@@ -77,7 +87,7 @@ public:
     void draw(const Frame& frame, bool present = true);
     void capture(const std::filesystem::path& path);
     Hit hit(float pixelX, float pixelY, const Frame& frame) const;
-    int region(float pixelX, float pixelY) const; // 1=collection, 2=log, 0=world
+    int scrollAuraSelector(float pixelX,float pixelY,const Frame& frame,int delta) const;
     std::string adapterName() const { return adapterName_; }
     std::size_t instanceCount() const { return instances_.size()+starInstances_.size(); }
     std::size_t starCount() const { return starInstances_.size(); }
@@ -164,6 +174,8 @@ private:
     void world(const Frame& frame);
     void updateVrm(const Frame& frame);
     void ui(const Frame& frame);
+    void drawAuraSelector(const Frame& frame);
+    void drawAuraButton(const Frame& frame);
     void stageSelectUi(const Frame& frame);
     void stageTravelUi(const Frame& frame);
     void initializeDebug();
@@ -224,6 +236,7 @@ private:
     std::array<ComPtr<ID2D1Geometry>,7> creditsLettering_;
     std::array<D2D1_RECT_F,7> creditsLetterBounds_{};
     ComPtr<ID2D1PathGeometry> starGeometry_;
+    ComPtr<ID2D1PathGeometry> flameGeometry_;
     ComPtr<ID2D1StrokeStyle> roundStroke_;
     ComPtr<IDWriteFactory> write_;
     struct Font { float size; bool bold; ComPtr<IDWriteTextFormat> format; };

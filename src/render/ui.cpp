@@ -495,6 +495,12 @@ void Renderer::ui(const Frame& f) {
         // 3Dのステージと左上のロゴは、そのまま後ろへ描き続けます。
         creditsUi(f);return;
     }
+    if(f.auraSelectorOpen) {
+        // 選択中もゲームを背後に見せ、操作の表示はオーラ一覧と詳細に絞ります。
+        drawAuraSelector(f);
+        drawAuraButton(f);
+        return;
+    }
 
     // 名前はアバターの頭上だけに置きます。旧コレクション横の大きな帯はありません。
     multiplayerLabels(f);
@@ -518,8 +524,9 @@ void Renderer::ui(const Frame& f) {
         brush_->SetColor(color);
         auto drawLine=[&](float ax,float ay,float bx,float by){d2d_->DrawLine({x+ax,y+ay},{x+bx,y+by},brush_.Get(),1.6f,roundStroke_.Get());};
         auto circle=[&](float cx,float cy,float rx,float ry){d2d_->DrawEllipse(D2D1::Ellipse({x+cx,y+cy},rx,ry),brush_.Get(),1.5f);};
-        if(kind==0)star(x,y,9,color,false);
-        else if(kind==1) {
+        if(kind==0) {
+            drawLine(-8,0,7,0);drawLine(-8,0,-2,-6);drawLine(-8,0,-2,6);
+        }else if(kind==1) {
             circle(-4,-4,3.3f,3.3f);circle(5,-2,2.6f,2.6f);
             drawLine(-10,7,-9,3);drawLine(-9,3,-4,1);drawLine(-4,1,1,3);drawLine(1,3,2,7);
             drawLine(3,2,8,3);drawLine(8,3,10,7);
@@ -549,30 +556,22 @@ void Renderer::ui(const Frame& f) {
     };
     if(f.leftMenuOpen) {
         panel(shell::leftMenuLayout(w,h));
-        const std::array<std::string,4> names={t("Auras","オーラ"),t("Multiplayer","マルチプレイヤー"),t("Settings","設定"),t("Credits","クレジット")};
-        // 先頭3行はダミー。最後のクレジットだけ、専用画面へつなぎます。
-        for(unsigned i=0;i<names.size();++i)row(shell::leftMenuRow(w,h,i),names[i],i);
+        const std::array<std::string,3> names={t("Multiplayer","マルチプレイヤー"),t("Settings","設定"),t("Credits","クレジット")};
+        for(unsigned i=0;i<names.size();++i)row(shell::leftMenuRow(w,h,i),names[i],i+1);
     }
-    if(f.rightMenuOpen) {
-        panel(shell::rightMenuLayout(w,h));
+    if(f.settingsMenuOpen) {
+        panel(shell::settingsMenuLayout());
+        row(shell::settingsMenuRow(0),t("Settings","設定"),0);
         const std::array<std::string,3> names={t("Debug menu (ImGui)","デバッグメニューを表示"),
             t("Multiplayer server IP","マルチプレイヤーIPを設定"),t("Quit game","ゲーム終了")};
-        for(unsigned i=0;i<names.size();++i)row(shell::rightMenuRow(w,h,i),names[i],i+4);
+        for(unsigned i=0;i<names.size();++i)row(shell::settingsMenuRow(i+1),names[i],i+4);
     }
-    const auto hamburger=shell::hamburgerLayout(w,h);
-    rect(hamburger.x,hamburger.y,hamburger.width,hamburger.height,
-        D2D1::ColorF(.018f,.028f,.037f,hovered(hamburger)?.78f:.58f));
-    stroke(hamburger.x,hamburger.y,hamburger.width,hamburger.height,line);
-    brush_->SetColor(f.rightMenuOpen?Mint:White);
-    for(unsigned i=0;i<3;++i) {
-        const float y=hamburger.y+hamburger.height*.5f+(static_cast<int>(i)-1)*8.f;
-        d2d_->DrawLine({hamburger.x+15,y},{hamburger.x+hamburger.width-15,y},brush_.Get(),1.8f,roundStroke_.Get());
-    }
+    drawAuraButton(f);
 
     // ロール操作だけは小さく常設し、遊べる状態を保ちます。背景の大きいパネルは作りません。
     const auto roll=shell::rollLayout(w,h),automatic=shell::autoRollLayout(w,h);
     const bool cooling=f.cooldown>0;
-    const bool blocked=f.leftMenuOpen || f.rightMenuOpen || f.logoSpinProgress>=0 || f.serverSettingsOpen || f.multiplayerOpen || f.creditsTime>=0 || f.stageSelectOpen || f.stageTravelProgress>=0;
+    const bool blocked=f.leftMenuOpen || f.settingsMenuOpen || f.logoSpinProgress>=0 || f.serverSettingsOpen || f.multiplayerOpen || f.creditsTime>=0 || f.stageSelectOpen || f.stageTravelProgress>=0;
     const bool ready=!cooling && !blocked;
     rect(roll.x,roll.y,roll.width,roll.height,ready?(hovered(roll)?D2D1::ColorF(.68f,1,.88f,.95f):D2D1::ColorF(.55f,.96f,.82f,.86f)):
         D2D1::ColorF(.08f,.16f,.17f,.64f));
@@ -582,8 +581,8 @@ void Renderer::ui(const Frame& f) {
     stroke(automatic.x,automatic.y,automatic.width,automatic.height,f.autoRoll?D2D1::ColorF(.55f,.96f,.82f,.72f):line);
     label(t("AUTO ROLL","自動ロール"),automatic.x+7,automatic.y+9,automatic.width-14,22,12,f.autoRoll?Mint:White,true,true);
     label(f.autoRoll?t("ON / F","オン / F"):t("OFF / F","オフ / F"),automatic.x+7,automatic.y+31,automatic.width-14,17,10,muted,false,true);
-    label(t("SPACE / Roll   WASD / Move   Right drag / Orbit   M / Planets",
-        "SPACE / ロール  WASD / 移動  右ドラッグ / 視点  M / 惑星"),20,h-28,470,18,10,D2D1::ColorF(.82f,.88f,.91f,.72f));
+    label(t("SPACE / Roll   WASD / Move   Right drag / Orbit   M / Planets   ESC / Close menus",
+        "SPACE / ロール  WASD / 移動  右ドラッグ / 視点  M / 惑星  ESC / メニューを閉じる"),20,h-28,500,18,10,D2D1::ColorF(.82f,.88f,.91f,.72f));
 
     if(!f.notice.empty()) {
         const float width=std::min(520.f,w-360),x=(w-width)*.5f;

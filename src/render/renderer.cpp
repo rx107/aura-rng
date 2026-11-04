@@ -1,4 +1,5 @@
 #include "render/renderer.hpp"
+#include "core/aura_selector.hpp"
 #include "tuning/game.hpp"
 #include "tuning/world.hpp"
 #include "tuning/stages.hpp"
@@ -682,29 +683,71 @@ Hit Renderer::hit(float px,float py,const Frame& f) const {
         return {}; // 背景のRollやステージは、クレジットの上から操作しません。
     }
     if(shell::starMenuLayout(w,h).contains(x,y)) return {Action::StarMenu,0};
-    if(shell::hamburgerLayout(w,h).contains(x,y)) return {Action::DeveloperMenu,0};
+    if(shell::auraButtonLayout(w,h).contains(x,y)) return {Action::AuraSelector,0};
     if(f.multiplayerOpen || f.serverSettingsOpen) return {};
+    if(f.auraSelectorOpen) {
+        const auto layout=selector::layout(w,h);
+        if(layout.close.contains(x,y))return {Action::CloseAuraSelector,0};
+        for(std::size_t i=0;i<selector::CategoryCount;++i)
+            if(selector::tab(layout,i).contains(x,y))return {Action::CollectionCategory,i};
+        if(layout.equip.contains(x,y) && f.selectedAura && canEquipAura(f,*f.selectedAura))
+            return {Action::Equip,*f.selectedAura};
+        if(layout.list.contains(x,y)) {
+            const auto items=collectionItems(f);
+            const int maximum=selector::maxScroll(layout,items.size());
+            const int scroll=std::clamp(f.collectionScroll,0,maximum);
+            if(layout.scrollbar.contains(x,y) && maximum>0) {
+                const auto thumb=selector::thumb(layout,items.size(),scroll);
+                const float travel=layout.scrollbar.height-thumb.height;
+                if(!thumb.contains(x,y) && travel>0.f) {
+                    const float position=(y-layout.scrollbar.y-thumb.height*.5f)/travel;
+                    const auto target=static_cast<std::size_t>(std::lround(std::clamp(position,0.f,1.f)*static_cast<float>(maximum)));
+                    return {Action::ScrollAuraSelector,target};
+                }
+                return {};
+            }
+            for(int i=0;i<selector::visibleRows(layout);++i) {
+                const auto item=static_cast<std::size_t>(scroll+i);
+                if(item>=items.size())break;
+                if(selector::row(layout,static_cast<std::size_t>(i)).contains(x,y))return {Action::SelectAura,items[item]};
+            }
+        }
+        if(layout.panel.contains(x,y) || layout.details.contains(x,y))return {};
+        return {Action::CloseAuraSelector,0}; // 背景を押したら選択画面だけ閉じる。
+    }
     if(f.leftMenuOpen) {
-        for(std::size_t i=0;i<4;++i) if(shell::leftMenuRow(w,h,i).contains(x,y))return {i==3?Action::Credits:Action::DummyMenu,i};
+        constexpr Action actions[]={Action::DummyMenu,Action::SettingsMenu,Action::Credits};
+        for(std::size_t i=0;i<3;++i)if(shell::leftMenuRow(w,h,i).contains(x,y))return {actions[i],0};
         if(shell::leftMenuLayout(w,h).contains(x,y))return {};
     }
-    if(f.rightMenuOpen) {
-        constexpr Action actions[]={Action::ShowDebug,Action::ServerSettings,Action::Quit};
-        for(std::size_t i=0;i<3;++i)if(shell::rightMenuRow(w,h,i).contains(x,y))return {actions[i],0};
-        if(shell::rightMenuLayout(w,h).contains(x,y))return {};
+    if(f.settingsMenuOpen) {
+        constexpr Action actions[]={Action::BackToStarMenu,Action::ShowDebug,Action::ServerSettings,Action::Quit};
+        for(std::size_t i=0;i<4;++i)if(shell::settingsMenuRow(i).contains(x,y))return {actions[i],0};
+        if(shell::settingsMenuLayout().contains(x,y))return {};
     }
-    if(f.leftMenuOpen || f.rightMenuOpen || f.logoSpinProgress>=0)return {Action::CloseShellMenus,0};
+    if(f.leftMenuOpen || f.settingsMenuOpen || f.logoSpinProgress>=0)return {Action::CloseShellMenus,0};
     if(shell::rollLayout(w,h).contains(x,y))return {Action::Roll,0};
     if(shell::autoRollLayout(w,h).contains(x,y))return {Action::Auto,0};
     return {};
 }
-int Renderer::region(float,float) const {return 0;} // 常設のCollection/Historyを廃止。見えない領域に入力を残さない。
+int Renderer::scrollAuraSelector(float px,float py,const Frame& frame,int delta) const {
+    if(!frame.auraSelectorOpen)return frame.collectionScroll;
+    const auto layout=selector::layout(logicalW_,logicalH_);
+    const auto& catalog=frame.roller.catalog();
+    const auto count=std::count_if(catalog.begin(),catalog.end(),[&](const auto& definition) {
+        return auraCategory(definition)==frame.collectionCategory;
+    });
+    const int maximum=selector::maxScroll(layout,static_cast<std::size_t>(count));
+    const int scroll=std::clamp(frame.collectionScroll,0,maximum);
+    if(!layout.list.contains(px/scale_,py/scale_))return scroll;
+    return std::clamp(scroll-delta,0,maximum);
+}
 bool Renderer::canOrbit(float px,float py) const {
     if(multiplayerPanelVisible_ && inside(px,py,multiplayerBounds_.x,multiplayerBounds_.y,multiplayerBounds_.z,multiplayerBounds_.w)) return false;
     if(serverSettingsPanelVisible_ && inside(px,py,serverSettingsBounds_.x,serverSettingsBounds_.y,serverSettingsBounds_.z,serverSettingsBounds_.w)) return false;
     if(debugOpen_ && inside(px,py,debugBounds_.x,debugBounds_.y,debugBounds_.z,debugBounds_.w)) return false;
     const float x=px/scale_,y=py/scale_;
-    if(inside(x,y,0,0,280,84) || shell::hamburgerLayout(logicalW_,logicalH_).contains(x,y) ||
+    if(inside(x,y,0,0,280,84) || shell::auraButtonLayout(logicalW_,logicalH_).contains(x,y) ||
         shell::rollLayout(logicalW_,logicalH_).contains(x,y) || shell::autoRollLayout(logicalW_,logicalH_).contains(x,y))return false;
     return inside(x,y,0,0,logicalW_,logicalH_);
 }

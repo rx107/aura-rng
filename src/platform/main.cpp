@@ -2,6 +2,7 @@
 #include "core/animation.hpp"
 #include "core/equinox_animation.hpp"
 #include "core/credits.hpp"
+#include "core/aura_selector.hpp"
 #include "render/renderer.hpp"
 #include "platform/audio.hpp"
 #include "platform/discord.hpp"
@@ -134,7 +135,8 @@ public:
             mouseX_,mouseY_,fps_,auto_,collectionScroll_,logScroll_,notice,audioStatus,pitch_,movement_,effectTime(),cutsceneTime_,cutsceneKind_,discord_.status(),actionTime(),shotOrbitTime(),
             stageSelectOpen_,stageTravel_.progress(),stageTravel_.target(),collectionCategory_,
             cutsceneBeat,pulse,music_.estimatedBpm(),equinoxBeat,&networkSnapshot_,multiplayerOpen_,profilePhoto_,
-            shell_.leftOpen,shell_.rightOpen,shell_.spinProgress(),serverSettingsOpen_,creditsTime_};
+            shell_.leftOpen,shell_.settingsOpen,shell_.spinProgress(),serverSettingsOpen_,creditsTime_,
+            auraSelectorOpen_,selectedAura_};
     }
     void create(HINSTANCE instance) {
         WNDCLASSEXW wc{sizeof(wc)}; wc.style=CS_HREDRAW|CS_VREDRAW; wc.lpfnWndProc=proc;
@@ -178,7 +180,10 @@ public:
 private:
     bool cutsceneActive() const { return cutsceneTime_>=0; }
     bool creditsActive() const { return creditsTime_>=0; }
-    bool worldInputBlocked() const { return cutsceneActive() || creditsActive() || stageSelectOpen_ || stageTravel_.active() || multiplayerOpen_ || serverSettingsOpen_ || shell_.active(); }
+    bool worldInputBlocked() const {
+        return cutsceneActive() || creditsActive() || auraSelectorOpen_ || stageSelectOpen_ || stageTravel_.active() ||
+            multiplayerOpen_ || serverSettingsOpen_ || shell_.active();
+    }
     void savePlayerSettings() {
         try {aura::saveSettings(saves_/L"settings.txt",presentation_.settings);}
         catch(const std::exception&) {notice_="Settings could not be saved.";}
@@ -196,12 +201,17 @@ private:
         serverSettingsOpen_=false;returnAfterConnect_=false;clearWorldInput();
         if(renderer_)renderer_->releaseInputFocus();
     }
-    void closeShellMenus() {shell_.close();clearWorldInput();}
+    void closeShellMenus() {
+        shell_.close();
+        auraSelectorOpen_=false;
+        clearWorldInput();
+    }
     void closeCredits() {
         creditsTime_=-1;clearWorldInput();
         if(renderer_)renderer_->releaseInputFocus();
     }
     void prepareShellMenu() {
+        auraSelectorOpen_=false;
         if(creditsActive())closeCredits();
         if(multiplayerOpen_)closeMultiplayerPanel();
         if(serverSettingsOpen_)closeServerSettings();
@@ -228,7 +238,7 @@ private:
             presentation_.level(progress_,roller_.catalog()),presentation_.settings.shirt};
     }
     void selectStages() {
-        if(cutsceneActive() || creditsActive() || stageTravel_.active() || multiplayerOpen_ || serverSettingsOpen_) return;
+        if(cutsceneActive() || creditsActive() || auraSelectorOpen_ || stageTravel_.active() || multiplayerOpen_ || serverSettingsOpen_) return;
         shell_.close();
         stageSelectOpen_=!stageSelectOpen_; clearWorldInput();
     }
@@ -262,7 +272,7 @@ private:
         if(creditsActive())closeCredits();
         if(multiplayerOpen_) closeMultiplayerPanel();
         if(serverSettingsOpen_)closeServerSettings();
-        shell_.close();
+        closeShellMenus();
         stageSelectOpen_=false; stageTravel_.finish();
         if(!cutsceneActive()) {
             cutsceneDebugWasOpen_=renderer_->debugOpen();
@@ -321,16 +331,41 @@ private:
     void action(aura::Hit hit) {
         // 画面のボタン・キー入力をゲームの操作へ変換する場所。
         if(creditsActive() && hit.action!=aura::Action::CloseCredits && hit.action!=aura::Action::Debug &&
-            hit.action!=aura::Action::StarMenu && hit.action!=aura::Action::DeveloperMenu && hit.action!=aura::Action::Quit) return;
+            hit.action!=aura::Action::StarMenu && hit.action!=aura::Action::Quit) return;
         if(cutsceneActive() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Logs && hit.action!=aura::Action::Quit) return;
         if(stageTravel_.active() && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Quit) return;
         if(stageSelectOpen_ && hit.action!=aura::Action::Stages && hit.action!=aura::Action::Travel &&
             hit.action!=aura::Action::CloseStages && hit.action!=aura::Action::Debug && hit.action!=aura::Action::Quit) return;
         switch(hit.action) {
         case aura::Action::StarMenu: prepareShellMenu();shell_.tapStar();break;
-        case aura::Action::DeveloperMenu: prepareShellMenu();shell_.toggleRight();break;
+        case aura::Action::SettingsMenu: shell_.openSettings();break;
+        case aura::Action::BackToStarMenu: shell_.backToLeftMenu();break;
         case aura::Action::CloseShellMenus: closeShellMenus();break;
-        case aura::Action::DummyMenu: break; // 左のオーラ・マルチプレイヤー・設定は、引き続きダミーです。
+        case aura::Action::DummyMenu: break; // 左のマルチプレイヤーはダミーです。
+        case aura::Action::AuraSelector: {
+            if(auraSelectorOpen_) {
+                closeShellMenus();
+                break;
+            }
+            prepareShellMenu();
+            shell_.close();
+            auraSelectorOpen_=true;
+            // 開くと装備中のオーラを選択。装備は「装備」ボタンでだけ変更します。
+            selectedAura_=progress_.equipped;
+            collectionCategory_=aura::auraCategory(roller_.catalog()[progress_.equipped]);
+            const auto items=aura::collectionItems(frame());
+            collectionScroll_=static_cast<int>(std::find(items.begin(),items.end(),progress_.equipped)-items.begin());
+            break;
+        }
+        case aura::Action::CloseAuraSelector: closeShellMenus();break;
+        case aura::Action::SelectAura:
+            if(auraSelectorOpen_ && hit.index<roller_.catalog().size() &&
+                aura::auraCategory(roller_.catalog()[hit.index])==collectionCategory_)
+                selectedAura_=hit.index;
+            break;
+        case aura::Action::ScrollAuraSelector:
+            if(auraSelectorOpen_)collectionScroll_=static_cast<int>(hit.index);
+            break;
         case aura::Action::Credits:
             // この画面を開いた瞬間だけ音を鳴らす。描画フレームごとには再生しません。
             prepareShellMenu();shell_.close();creditsTime_=0;
@@ -346,7 +381,7 @@ private:
             renderer_->releaseInputFocus();serverSettingsOpen_=true;break;
         case aura::Action::Quit: quitting_=true;clearWorldInput();break;
         case aura::Action::Multiplayer:
-            shell_.close();if(serverSettingsOpen_)closeServerSettings();
+            closeShellMenus();if(serverSettingsOpen_)closeServerSettings();
             if(multiplayerOpen_) closeMultiplayerPanel();
             else {multiplayerOpen_=true; clearWorldInput();}
             break;
@@ -355,9 +390,17 @@ private:
         case aura::Action::Travel:
             if(hit.index<aura::StageCount) travelTo(static_cast<aura::Biome>(hit.index));
             break;
-        case aura::Action::CollectionCategory:
-            if(hit.index<4) {collectionCategory_=static_cast<aura::AuraCategory>(hit.index); collectionScroll_=0;}
+        case aura::Action::CollectionCategory: {
+            if(!auraSelectorOpen_ || hit.index>=4)break;
+            const auto category=static_cast<aura::AuraCategory>(hit.index);
+            if(collectionCategory_==category)break;
+            collectionCategory_=category;
+            collectionScroll_=0;
+            const auto items=aura::collectionItems(frame());
+            selectedAura_.reset();
+            if(!items.empty())selectedAura_=items.front();
             break;
+        }
         case aura::Action::Roll: roll(); break;
         case aura::Action::Auto: if(!worldInputBlocked())auto_=!auto_; break;
         case aura::Action::Logs: {
@@ -366,17 +409,17 @@ private:
             break;
         }
         case aura::Action::Equip:
-            if(hit.index<progress_.counts.size() && hit.index<roller_.catalog().size() &&
-                !roller_.catalog()[hit.index].previewOnly && progress_.counts[hit.index]) {
+            if((!auraSelectorOpen_ || selectedAura_==hit.index) && aura::canEquipAura(frame(),hit.index)) {
                 progress_.equipped=hit.index; presentation_.preview.reset(); presentation_.singularityLevel.reset(); presentation_.pixelationLevel.reset();
                 sfxBaseline_=false; persist();
             }
             break;
         case aura::Action::Debug: {
             // F1へ切り替えたのに、背後のプロフィールがプレビューを止めないようにします。
-            const bool fromProfile=multiplayerOpen_ || serverSettingsOpen_ || creditsActive() || shell_.active();
+            const bool fromProfile=multiplayerOpen_ || serverSettingsOpen_ || creditsActive() || auraSelectorOpen_ || shell_.active();
             if(creditsActive())closeCredits();
             shell_.close();
+            auraSelectorOpen_=false;
             if(serverSettingsOpen_)closeServerSettings();
             if(multiplayerOpen_) closeMultiplayerPanel();
             if(!fromProfile || !renderer_->debugOpen()) renderer_->toggleDebug();
@@ -664,7 +707,7 @@ private:
         for(int i=0;i<18;++i) { cooldown_=0; roll(); }
         action({aura::Action::Equip,progress_.best});
         const auto chosen=progress_.equipped;
-        // 左の先頭3項目はダミー。クレジットと右メニューは実動で確認します。
+        // 星のメニュー、設定、クレジットと右下のオーラ選択を実際の入力で確認します。
         const auto categoryRolls=progress_.rolls,categoryLogs=log_.size();
         const auto categoryCounts=progress_.counts;
         const auto shellCapture=[&](const wchar_t* name) {if(!opts_.capture.empty())renderer_->capture(opts_.capture.parent_path()/name);};
@@ -673,6 +716,16 @@ private:
             SendMessageW(window_,WM_LBUTTONUP,0,MAKELPARAM(static_cast<int>((area.x+area.width*.5f)*scale),static_cast<int>((area.y+area.height*.5f)*scale)));
             update(0);render(false);
         };
+        const auto pressEscape=[&] {
+            SendMessageW(window_,WM_KEYDOWN,VK_ESCAPE,0);
+            update(0);render(false);
+        };
+        const auto openSettings=[&] {
+            clickShell(aura::shell::starMenuLayout(1440,900));
+            update(aura::tuning::shell::LogoSpinSeconds);render(false);
+            clickShell(aura::shell::leftMenuRow(1440,900,1));
+            if(!shell_.settingsOpen || shell_.leftOpen)throw std::runtime_error("Star menu Settings did not open the settings submenu");
+        };
         auto_=true;keys_['W']=true;
         clickShell(aura::shell::starMenuLayout(1440,900));
         if(!shell_.spinning() || shell_.leftOpen || auto_ || keys_['W'])throw std::runtime_error("Star menu did not start one isolated spin");
@@ -680,15 +733,13 @@ private:
         clickShell(aura::shell::starMenuLayout(1440,900));
         update(aura::tuning::shell::LogoSpinSeconds*.51f);render(false);shellCapture(L"shell-left-menu.png");
         if(!shell_.leftOpen || shell_.spinning())throw std::runtime_error("Star menu reveal timing failed");
-        for(std::size_t row=0;row<3;++row) {
-            const auto area=aura::shell::leftMenuRow(1440,900,row);
-            const auto hit=renderer_->hit((area.x+4)*renderer_->scale(),(area.y+4)*renderer_->scale(),frame());
-            if(hit.action!=aura::Action::DummyMenu || hit.index!=row)throw std::runtime_error("Left dummy menu hit mismatch");
-            clickShell(area);
-            if(multiplayerOpen_ || serverSettingsOpen_ || renderer_->debugOpen())throw std::runtime_error("A dummy button opened a real screen");
-        }
+        const auto dummyRow=aura::shell::leftMenuRow(1440,900,0);
+        const auto dummyHit=renderer_->hit((dummyRow.x+4)*renderer_->scale(),(dummyRow.y+4)*renderer_->scale(),frame());
+        if(dummyHit.action!=aura::Action::DummyMenu)throw std::runtime_error("Left dummy menu hit mismatch");
+        clickShell(dummyRow);
+        if(multiplayerOpen_ || !shell_.leftOpen)throw std::runtime_error("Multiplayer placeholder opened a real screen");
         const auto popBefore=sfx_.uiPopCount();
-        clickShell(aura::shell::leftMenuRow(1440,900,3));shellCapture(L"credits-00-heading.png");
+        clickShell(aura::shell::leftMenuRow(1440,900,2));shellCapture(L"credits-00-heading.png");
         if(!creditsActive() || creditsTime_!=0 || shell_.active() || !worldInputBlocked() || !renderer_->creditsReady())
             throw std::runtime_error("Credits did not open with its own clock and four images");
         const auto popOpened=sfx_.uiPopCount();
@@ -720,13 +771,20 @@ private:
         action({aura::Action::Credits,0});render(false);SendMessageW(window_,WM_KEYDOWN,VK_F1,0);update(0);render(false);
         if(creditsActive() || !renderer_->debugOpen())throw std::runtime_error("F1 failed to return from credits to Debug");
         action({aura::Action::Debug,0});render(false);
-        clickShell(aura::shell::hamburgerLayout(1440,900));shellCapture(L"shell-right-menu.png");
-        if(!shell_.rightOpen || shell_.leftOpen)throw std::runtime_error("Hamburger did not switch to right menu");
-        clickShell(aura::shell::rightMenuRow(1440,900,0));
-        if(!renderer_->debugOpen() || shell_.active())throw std::runtime_error("Right Debug button is not functional");
-        clickShell(aura::shell::hamburgerLayout(1440,900));
-        if(renderer_->debugOpen() || !shell_.rightOpen)throw std::runtime_error("Right menu could not be reached from ImGui");
-        clickShell(aura::shell::rightMenuRow(1440,900,1));render(false);shellCapture(L"shell-server-settings.png");
+        pressEscape();
+        if(shell_.active() || renderer_->debugOpen())throw std::runtime_error("Escape still opens a menu from gameplay");
+        openSettings();shellCapture(L"shell-settings-menu.png");
+        clickShell(aura::shell::settingsMenuRow(0));
+        if(!shell_.leftOpen || shell_.settingsOpen)throw std::runtime_error("Settings Back did not return to the star menu");
+        clickShell(aura::shell::leftMenuRow(1440,900,1));
+        clickShell(aura::shell::settingsMenuRow(1));shellCapture(L"shell-settings-imgui.png");
+        if(!renderer_->debugOpen() || shell_.active())throw std::runtime_error("Settings Debug button is not functional");
+        pressEscape();
+        if(renderer_->debugOpen() || shell_.active())throw std::runtime_error("Escape did not close ImGui cleanly");
+        openSettings();pressEscape();
+        if(shell_.active())throw std::runtime_error("Escape did not close the settings submenu");
+        openSettings();
+        clickShell(aura::shell::settingsMenuRow(2));shellCapture(L"shell-server-settings.png");
         if(!serverSettingsOpen_ || shell_.active() || !worldInputBlocked())throw std::runtime_error("Server settings did not open as a real modal");
         const auto oldEndpoint=presentation_.settings.serverEndpoint;
         aura::DebugActions endpointSave;endpointSave.serverEndpoint="https://server.example";applyDebugActions(endpointSave);
@@ -739,10 +797,58 @@ private:
         if(serverSettingsOpen_ || !renderer_->debugOpen())throw std::runtime_error("F1 did not switch from server settings to ImGui");
         action({aura::Action::Debug,0});render(false);
         if(renderer_->hit(100*renderer_->scale(),330*renderer_->scale(),frame()).action!=aura::Action::None ||
-            renderer_->region(100*renderer_->scale(),330*renderer_->scale())!=0 || !renderer_->canOrbit(100*renderer_->scale(),330*renderer_->scale()))
+            !renderer_->canOrbit(100*renderer_->scale(),330*renderer_->scale()))
             throw std::runtime_error("Removed sidebar still intercepts world input");
         if(progress_.rolls!=categoryRolls || log_.size()!=categoryLogs || progress_.counts!=categoryCounts || progress_.equipped!=chosen)
             throw std::runtime_error("Shell navigation changed progress");
+        const auto selectorLayout=aura::selector::layout(1440,900);
+        const auto flame=aura::shell::auraButtonLayout(1440,900);
+        clickShell(flame);
+        if(!auraSelectorOpen_ || selectedAura_!=chosen || !worldInputBlocked() || shell_.active())
+            throw std::runtime_error("Flame did not open the aura selector on the equipped aura");
+        clickShell(aura::selector::tab(selectorLayout,0));
+        const auto wheelList=[&](int notches) {
+            const auto& list=selectorLayout.list;
+            const float scale=renderer_->scale();
+            POINT point{static_cast<LONG>((list.x+list.width*.5f)*scale),static_cast<LONG>((list.y+list.height*.5f)*scale)};
+            ClientToScreen(window_,&point);
+            SendMessageW(window_,WM_MOUSEWHEEL,MAKEWPARAM(0,static_cast<WORD>(notches*WHEEL_DELTA)),MAKELPARAM(point.x,point.y));
+        };
+        const float beforeListWheel=distance_;
+        wheelList(20);wheelList(-2);render(false);
+        if(collectionScroll_<=0 || distance_!=beforeListWheel)
+            throw std::runtime_error("Aura list did not scroll independently of the camera");
+        wheelList(20);
+        const auto normalItems=aura::collectionItems(frame());
+        const auto owned=std::find_if(normalItems.begin(),normalItems.end(),[&](std::size_t index) {
+            return index!=chosen && progress_.counts[index]>0;
+        });
+        if(owned==normalItems.end())throw std::runtime_error("Smoke fixture needs a second owned aura");
+        const auto ownedPosition=static_cast<int>(owned-normalItems.begin());
+        if(ownedPosition>=aura::selector::visibleRows(selectorLayout))wheelList(-ownedPosition);
+        const int offset=std::clamp(collectionScroll_,0,aura::selector::maxScroll(selectorLayout,normalItems.size()));
+        clickShell(aura::selector::row(selectorLayout,ownedPosition-offset));
+        if(selectedAura_!=*owned || progress_.equipped!=chosen)
+            throw std::runtime_error("Selecting a row changed equipment before Equip");
+        shellCapture(L"aura-selector-selected.png");
+        clickShell(selectorLayout.equip);
+        if(progress_.equipped!=*owned || aura::loadProgress(saves_/L"progress.txt",roller_.catalog()).equipped!=*owned)
+            throw std::runtime_error("The selected owned aura was not equipped and saved");
+        clickShell(aura::selector::tab(selectorLayout,2));
+        if(collectionCategory_!=aura::AuraCategory::Extra || collectionScroll_!=0 || !selectedAura_ ||
+            aura::auraCategory(roller_.catalog()[*selectedAura_])!=aura::AuraCategory::Extra)
+            throw std::runtime_error("Extra category did not refresh the list and details");
+        clickShell(selectorLayout.equip);shellCapture(L"aura-selector-extra.png");
+        if(progress_.equipped!=*owned || progress_.counts!=categoryCounts || progress_.rolls!=categoryRolls || log_.size()!=categoryLogs)
+            throw std::runtime_error("Browsing or pressing a locked Equip changed progress");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1000,700));render(false);shellCapture(L"aura-selector-small.png");
+        clickShell(aura::selector::layout(1000/renderer_->scale(),700/renderer_->scale()).close);
+        if(auraSelectorOpen_ || worldInputBlocked())throw std::runtime_error("Resized selector did not close correctly");
+        SendMessageW(window_,WM_SIZE,SIZE_RESTORED,MAKELPARAM(1440,900));render(false);
+        clickShell(flame);pressEscape();
+        if(auraSelectorOpen_ || worldInputBlocked())
+            throw std::runtime_error("Escape left the aura selector or another menu open");
+        action({aura::Action::Equip,chosen});
         for(std::size_t i=0;i<roller_.catalog().size();++i) {
             aura::DebugActions command; command.preview=i; applyDebugActions(command); render(false);
         }
@@ -1597,7 +1703,7 @@ private:
             out<<"Effects: PASS / levels 0..3, stars, black holes, no history mutation\nStage: "
                <<aura::StageHalfExtent*2<<" x "<<aura::StageHalfExtent*2<<" world units / configured in tuning/world.hpp\n";
             out<<"Planets: PASS / garden, desert, ocean, forest, volcano, extra, menu/card input, rocket phases, midpoint swap, saved arrival, Escape, gameplay/input isolation, scene budget <=4096\n";
-            out<<"Screen shell: PASS / full viewport, star spin once, delayed left menu with three dummy items, hamburger, real ImGui/server settings, endpoint save without connect, Esc/F1 focus restore, removed sidebar hit targets, no progress mutation\nCredits: PASS / supplied four images, sequential reveal, restart, resize, Esc/X/F1, isolated input and click sound, no progress mutation\nExtra acquisition: PASS / 64 actual rolls, all six exclusive auras acquired, CutScene triggers, equipment preserved\n";
+            out<<"Screen shell: PASS / full viewport, star spin once, flame selector, Settings opens ImGui/server settings, back to star menu, endpoint save without connect, Esc closes, F1 focus restore, removed sidebar hit targets, no progress mutation\nAura selector: PASS / flame, categories, wheel, details without equipping, owned Equip and save, locked Equip, resize and Escape\nCredits: PASS / supplied four images, sequential reveal, restart, resize, Esc/X/F1, isolated input and click sound, no progress mutation\nExtra acquisition: PASS / 64 actual rolls, all six exclusive auras acquired, CutScene triggers, equipment preserved\n";
             out<<"Frutiger Aero: PASS / grass, sky/clouds, glossy bubbles, supplied GLB butterflies (29558 vertices shared / 3 meshes / 4 animation tracks / 1.25s), resize, remote players, <=1000 boards, preview isolation\n"
                <<"Multiplayer render: PASS / two same-planet block avatars with detailed auras, other-planet filtering, profile window input suppression; actual HTTP covered by separate client/server tests\n"
                <<"Multiplayer input/preview: PASS / success auto-return including skipped Connecting, movement, right-drag, reopen, Esc/Back preserves connection, F1, displayed aura/level payload, failure remains visible, inventory/history isolation\n";
@@ -1644,8 +1750,9 @@ private:
             if(!opts_.bgm.empty()) out<<"BGM: PASS / "<<music_.decodedBytes()<<" decoded PCM bytes / supplied and bundled tracks, loop, stop and restart\n";
             if(!out) throw std::runtime_error("Cannot write smoke report");
         }
-        clickShell(aura::shell::hamburgerLayout(1440,900));
-        clickShell(aura::shell::rightMenuRow(1440,900,2));
+        if(renderer_->debugOpen())action({aura::Action::Debug,0});
+        openSettings();
+        clickShell(aura::shell::settingsMenuRow(3));
         if(!quitting_)throw std::runtime_error("Quit menu did not exit immediately");
         return 0;
     }
@@ -1666,10 +1773,10 @@ private:
             return 0;
         }
         if(message==WM_KEYDOWN && wp==VK_ESCAPE && !(lp & (1LL<<30)) && !app->stageSelectOpen_ && !app->stageTravel_.active()) {
-            if(app->shell_.active())app->closeShellMenus();
+            if(app->shell_.active() || app->auraSelectorOpen_)app->closeShellMenus();
             else if(app->renderer_ && app->renderer_->debugOpen()) {
                 app->renderer_->toggleDebug();app->renderer_->releaseInputFocus();app->clearWorldInput();
-            } else app->pending_=aura::Hit{aura::Action::DeveloperMenu,0};
+            }
             return 0;
         }
         // Once a drag starts on the stage it owns the mouse until release or
@@ -1698,9 +1805,11 @@ private:
             if(message==WM_LBUTTONUP) shellHit=app->renderer_->hit(static_cast<float>(GET_X_LPARAM(lp)),static_cast<float>(GET_Y_LPARAM(lp)),app->frame());
             const bool captured=app->renderer_->handleMessage(window,message,wp,lp);
             switch(shellHit.action) {
-            case aura::Action::StarMenu:case aura::Action::DeveloperMenu:case aura::Action::DummyMenu:
+            case aura::Action::StarMenu:case aura::Action::SettingsMenu:case aura::Action::BackToStarMenu:case aura::Action::DummyMenu:
             case aura::Action::ShowDebug:case aura::Action::ServerSettings:case aura::Action::Quit:case aura::Action::CloseShellMenus:
             case aura::Action::Credits:case aura::Action::CloseCredits:
+            case aura::Action::AuraSelector:case aura::Action::CloseAuraSelector:case aura::Action::SelectAura:
+            case aura::Action::ScrollAuraSelector:case aura::Action::CollectionCategory:case aura::Action::Equip:
                 app->pending_=shellHit;return 0;
             default:break;
             }
@@ -1751,13 +1860,15 @@ private:
             app->mouseX_=static_cast<float>(GET_X_LPARAM(lp)); app->mouseY_=static_cast<float>(GET_Y_LPARAM(lp));
             return 0;
         case WM_MOUSEWHEEL: {
-            if(app->worldInputBlocked())return 0;
             POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)}; ScreenToClient(window,&p);
             const int delta=GET_WHEEL_DELTA_WPARAM(wp)/WHEEL_DELTA;
-            const int region=app->renderer_?app->renderer_->region(static_cast<float>(p.x),static_cast<float>(p.y)):0;
-            if(region==1) app->collectionScroll_=std::clamp(app->collectionScroll_-delta,0,static_cast<int>(app->roller_.catalog().size())-1);
-            else if(region==2) app->logScroll_=std::clamp(app->logScroll_-delta,0,std::max(0,static_cast<int>(app->log_.size())-1));
-            else app->distance_=std::clamp(app->distance_-delta*aura::tuning::game::ZoomStep,
+            if(app->auraSelectorOpen_ && app->renderer_) {
+                app->collectionScroll_=app->renderer_->scrollAuraSelector(
+                    static_cast<float>(p.x),static_cast<float>(p.y),app->frame(),delta);
+                return 0;
+            }
+            if(app->worldInputBlocked())return 0;
+            app->distance_=std::clamp(app->distance_-delta*aura::tuning::game::ZoomStep,
                 aura::tuning::game::MinimumCameraDistance,aura::tuning::game::MaximumCameraDistance);
             return 0;
         }
@@ -1773,6 +1884,8 @@ private:
     std::vector<std::uint8_t> profilePhoto_;
     bool multiplayerOpen_{},returnAfterConnect_{};
     bool serverSettingsOpen_{};
+    bool auraSelectorOpen_{};
+    std::optional<std::size_t> selectedAura_;
     float creditsTime_{-1};
     aura::shell::State shell_;
     HWND window_{}; std::unique_ptr<aura::Renderer> renderer_; std::array<bool,256> keys_{};

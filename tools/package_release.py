@@ -2,7 +2,7 @@
 """Create the three public ZIP files after the game and its tests have passed.
 
 例: python tools/package_release.py --windows-folder package --dest dist
-     --tag v0.1.24-alpha.1
+     --tag v0.1.25-alpha.1
 通常はGitに登録したファイルだけをソースZIPへ入れます。Gitのない作業用
 フォルダーでは --paths-file public-paths.json で明示した一覧を使えます。
 このスクリプト自体はビルド・通信・GitHubへの公開を行いません。
@@ -172,26 +172,27 @@ def make_zip(destination: Path, top: str, entries: list[tuple[str, Path]]) -> Pa
 def release_notes(tag: str) -> str:
     return f"""Star's RNG Alpha 0.1 / {tag}
 
-## Frutiger Aeroの青い蝶をGLBへ
+## オーラ選択
 
-Frutiger Aeroの青い蝶を、提供されたblue butterflyのGLBモデルへ置き換えました。元の青いテクスチャと約1.25秒の羽ばたきを使い、1つのモデル（3メッシュ）とテクスチャを7匹で共有して、プレイヤーの周りを飛ばします。草原・青空・雲・光沢のあるシャボン玉は引き続き表示します。
+右下の白い炎を押すと、右側に不透明度70%の灰色のオーラ選択画面が開きます。下のNormal / Desert / Extra / Administratorでカテゴリを選び、上の一覧をホイールでスクロールできます。
 
-大きさ・数・周回・羽ばたきの再生倍率はsrc/tuning/frutiger.hppに集約し、docs/frutiger-aero.mdに数字を変えた結果と処理の担当を記載しています。モデルが欠けた場合は従来の数式の蝶へ戻します。
+行を選ぶと、左下にオーラ名と「1 in 〇〇」形式の確率が表示されます。所持しているオーラは「装備する」で装備を変更できます。未所持のオーラやAdministratorの項目も詳細を閲覧できます。
 
-同梱モデルはblue butterfly / Erina eka syaharani、CC BY 4.0です。作者・出典・ライセンスへのリンク、ゲーム側での表示変更をdata/models/README.mdへ記載しました。GLBファイル自体は提供された元ファイルと同一です。
+## 左上の星と設定
+
+左上の星にはマルチプレイヤー・設定・クレジットを並べました。設定を押すと、左側のサブメニューからデバッグメニューの表示・マルチプレイヤーIP設定・ゲーム終了を選べます。一番上の矢印で星のメニューへ戻れます。
+
+Escで開いているメニューを閉じ、F1でデバッグ画面の表示を切り替えます。
 
 ## 検証と配布
 
 公開ジョブはWindowsのビルド・CTest・DirectX WARP描画試験と、Linuxのコア・サーバー試験が成功してから実行します。
-GLBの読み込み・羽ばたき・周回、リサイズとプレビューの分離、既存オーラの回帰を検証する構成です。検証記録の詳細はdocs/validation.mdへまとめます。
-作者表記付きの青い蝶GLB、従来のUI画像と許可済み音源を同梱します。私有VRM・参考資料・個人セーブ・プロフィール写真・秘密鍵は同梱しません。
-ZIPのCRCと公開ファイルを検査し、SHA256SUMS.txtを添付します。
+画面の検証ではカテゴリ・スクロール・詳細表示・装備の保存・設定の開閉・リサイズを確認します。ZIPのCRCと公開ファイルを検査し、SHA256SUMS.txtを添付します。
 
 ## 互換性・使い方
 
-既存の専用サーバーと互換性があります（protocol=1）。VPSの更新や契約変更は不要です。
-展開した新しいStarRng.exeを起動してください。ゲーム内の保存先は従来どおりです。
-改造する場合はsource ZIPを使い、docs/frutiger-aero.mdを開いてください。初回のビルドはdocs/development-guide.mdで説明しています。クレジットの背景は不透明度70%を維持し、他のオーラ・確率・所持品・8曲のBGMは変更していません。
+Windows版ZIPを展開し、StarRng.exeを起動してください。既存のセーブと専用サーバー（protocol=1）を利用できます。
+オーラ選択とメニューの操作はdocs/screen-menu-guide.md、改造用ソースZIPで初めてビルドする場合はdocs/development-guide.mdをご覧ください。
 """
 
 
@@ -199,7 +200,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--windows-folder", type=Path, required=True, help="CMake --installで作ったWindows配布フォルダー")
     parser.add_argument("--dest", type=Path, default=Path("dist"), help="ZIPとSHA256SUMS.txtの保存先（初期値: dist）")
-    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.24-alpha.1")
+    parser.add_argument("--tag", required=True, help="CMakeのVERSIONと一致するタグ。例: v0.1.25-alpha.1")
     parser.add_argument("--paths-file", type=Path, help="Gitがない手元の作業用: 公開パスのJSON配列または1行1パスの一覧")
     args = parser.parse_args()
     version = version_from_cmake()

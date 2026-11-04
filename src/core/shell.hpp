@@ -13,24 +13,23 @@ struct UiRect {
 };
 inline UiRect leftMenuLayout(float,float) {
     namespace s=tuning::shell;
-    return {s::LeftMargin,s::MenuTop,s::LeftWidth,s::MenuPadding*2+s::LeftRowHeight*4};
+    return {s::LeftMargin,s::MenuTop,s::LeftWidth,s::MenuPadding*2+s::LeftRowHeight*3};
 }
-inline UiRect rightMenuLayout(float w,float h) {
+inline UiRect settingsMenuLayout() {
     namespace s=tuning::shell;
-    const float height=s::MenuPadding*2+s::RightRowHeight*3;
-    return {w-s::EdgeMargin-s::RightWidth,h-s::RightBottomGap-height,s::RightWidth,height};
+    return {s::LeftMargin,s::MenuTop,s::SettingsWidth,s::MenuPadding*2+s::SettingsRowHeight*4};
 }
 inline UiRect leftMenuRow(float w,float h,std::size_t row) {
     namespace s=tuning::shell;auto p=leftMenuLayout(w,h);
     return {p.x+s::MenuPadding,p.y+s::MenuPadding+row*s::LeftRowHeight,p.width-2*s::MenuPadding,s::LeftRowHeight-8};
 }
-inline UiRect rightMenuRow(float w,float h,std::size_t row) {
-    namespace s=tuning::shell;auto p=rightMenuLayout(w,h);
-    return {p.x+s::MenuPadding,p.y+s::MenuPadding+row*s::RightRowHeight,p.width-2*s::MenuPadding,s::RightRowHeight-8};
+inline UiRect settingsMenuRow(std::size_t row) {
+    namespace s=tuning::shell;auto p=settingsMenuLayout();
+    return {p.x+s::MenuPadding,p.y+s::MenuPadding+row*s::SettingsRowHeight,p.width-2*s::MenuPadding,s::SettingsRowHeight-8};
 }
-inline UiRect hamburgerLayout(float w,float h) {
+inline UiRect auraButtonLayout(float w,float h) {
     namespace s=tuning::shell;
-    return {w-s::EdgeMargin-s::HamburgerSize,h-s::EdgeMargin-s::HamburgerSize,s::HamburgerSize,s::HamburgerSize};
+    return {w-s::EdgeMargin-s::AuraButtonSize,h-s::EdgeMargin-s::AuraButtonSize,s::AuraButtonSize,s::AuraButtonSize};
 }
 inline UiRect rollLayout(float w,float h) {
     namespace s=tuning::shell;
@@ -45,18 +44,20 @@ inline UiRect starMenuLayout(float,float) {
     return {b::IconLeft-8,b::IconTop-8,b::IconWidth+16,b::IconWidth+16};
 }
 struct State {
-    bool leftOpen{},rightOpen{};
+    bool leftOpen{},settingsOpen{};
     float spinElapsed{-1};
     bool spinning() const {return spinElapsed>=0;}
-    bool active() const {return leftOpen || rightOpen || spinning();}
+    bool active() const {return leftOpen || settingsOpen || spinning();}
     float spinProgress() const {return spinning()?std::clamp(spinElapsed/tuning::shell::LogoSpinSeconds,0.f,1.f):-1.f;}
-    void close() {leftOpen=rightOpen=false;spinElapsed=-1;}
+    void close() {leftOpen=settingsOpen=false;spinElapsed=-1;}
     void tapStar() {
         if(spinning())return; // 連打をため込まず、必ず1回転だけにする。
-        const bool wasOpen=leftOpen;close();
+        const bool wasOpen=leftOpen || settingsOpen;close();
         if(!wasOpen)spinElapsed=0;
     }
-    void toggleRight() {const bool open=!rightOpen;close();rightOpen=open;}
+    // 設定は星のメニューの1階層下。戻る矢印で星のメニューへ戻ります。
+    void openSettings() {if(leftOpen) {leftOpen=false;settingsOpen=true;}}
+    void backToLeftMenu() {if(settingsOpen) {settingsOpen=false;leftOpen=true;}}
     void update(float seconds) {
         if(!spinning())return;
         if(std::isfinite(seconds))spinElapsed+=std::max(0.f,seconds);
